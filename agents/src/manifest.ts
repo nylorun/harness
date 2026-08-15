@@ -7,7 +7,7 @@ import { diagnostic, NyloBuildError } from "./diagnostics.js";
 import { isToolDefinition } from "./tool.js";
 import type { AgentConfig, CapabilityManifest, SkillDescriptor, ToolDescriptor } from "./types.js";
 
-export const SDK_VERSION = "0.1.0-rc.0";
+export const SDK_VERSION = "0.1.0-rc.1";
 
 export function digest(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");

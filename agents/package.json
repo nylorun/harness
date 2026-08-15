@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/agents",
-  "version": "0.1.0-rc.0",
+  "version": "0.1.0-rc.1",
   "description": "TypeScript authoring and deterministic build tooling for Nylo agents.",
   "type": "module",
   "license": "Apache-2.0",
@@ -13,6 +13,9 @@
   "bugs": "https://github.com/nylorun/agents/issues",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "nylo-run": "./dist/runtime/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

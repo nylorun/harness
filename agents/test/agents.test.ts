@@ -19,11 +19,19 @@ async function project(): Promise<string> {
 }
 
 describe("Agent", () => {
-  it("keeps the v0.1 runtime export barrel narrow", () => {
+  // The barrel is the review artifact: every name here is a semver commitment, so this list is
+  // meant to be edited deliberately rather than updated to make a build pass.
+  it("keeps the runtime export barrel reviewed", () => {
     expect(Object.keys(publicApi).sort()).toEqual([
+      // Authoring and build
       "Agent", "buildAgent", "createFilesystemReader", "defineTool",
-      "isModelIdentity", "isPortableName", "nyloAgent", "validateAgent"
-    ]);
+      "isModelIdentity", "isPortableName", "nyloAgent", "validateAgent",
+      // The session loop, shared with the Agent Runtime
+      "OPENROUTER_VARIABLE", "OpenAICompatibleProvider", "ProviderError",
+      "SESSION_EVENT_TYPES", "SKILL_TOOL_NAME", "createSession", "fold",
+      "initialState", "openAgent", "rehydrate",
+      "resolveCredential", "resolveModel"
+    ].sort());
   });
   it("normalizes optional collections", () => {
     expect(Agent({ name: "sample", model: "anthropic/example" })).toMatchObject({ secrets: [], mcp: [] });
