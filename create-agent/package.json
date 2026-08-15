@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/create-agent",
-  "version": "0.1.0-rc.0",
+  "version": "0.1.0-rc.1",
   "description": "Create a buildable Nylo agent project.",
   "type": "module",
   "license": "Apache-2.0",

@@ -46,16 +46,30 @@ jobs:
       - run: npm run build
         working-directory: create-agent
       - name: Pack SDK
-        run: npm pack --pack-destination "$RUNNER_TEMP"
+        shell: bash
+        # The filename carries the version, so resolve it rather than pinning it here.
+        run: |
+          tarball="$(npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          echo "NYLO_AGENTS_SPEC=file:$RUNNER_TEMP/$tarball" >> "$GITHUB_ENV"
         working-directory: agents
-      - name: Generate and build consumer
+      - name: Generate, build, and run consumer
         shell: bash
         run: |
-          node create-agent/dist/cli.js "$RUNNER_TEMP/sample-agent" --model anthropic/example --yes
+          node create-agent/dist/cli.js "$RUNNER_TEMP/sample-agent" --model openai/gpt-4o --yes
           npm run check --prefix "$RUNNER_TEMP/sample-agent"
           npm run build --prefix "$RUNNER_TEMP/sample-agent"
-        env:
-          NYLO_AGENTS_SPEC: file:${{ runner.temp }}/nylorun-agents-0.1.0-rc.0.tgz
+
+          # Exercise the full run path against a local stub: no key, no outbound network.
+          node .github/scripts/sse-stub.mjs > "$RUNNER_TEMP/stub.log" &
+          for _ in $(seq 1 50); do grep -q PORT= "$RUNNER_TEMP/stub.log" && break; sleep 0.1; done
+          port="$(sed -n 's/^PORT=//p' "$RUNNER_TEMP/stub.log")"
+          test -n "$port" || { echo "stub did not start"; exit 1; }
+
+          cd "$RUNNER_TEMP/sample-agent"
+          output="$(NYLO_PROVIDER_BASE_URL="http://127.0.0.1:$port/v1" \
+            OPENAI_API_KEY=stub npm run dev --silent -- "say hello")"
+          echo "$output"
+          grep -q "Hello, world." <<<"$output" || { echo "run produced no assistant text"; exit 1; }
 
   package-manager-smoke:
     runs-on: ubuntu-latest
@@ -80,13 +94,16 @@ jobs:
       - run: npm run build
         working-directory: create-agent
       - name: Pack SDK
-        run: npm pack --pack-destination "$RUNNER_TEMP"
+        shell: bash
+        # The filename carries the version, so resolve it rather than pinning it here.
+        run: |
+          tarball="$(npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          echo "NYLO_AGENTS_SPEC=file:$RUNNER_TEMP/$tarball" >> "$GITHUB_ENV"
         working-directory: agents
       - name: Generate through selected installer
         shell: bash
         run: node create-agent/dist/cli.js "$RUNNER_TEMP/${{ matrix.package-manager }}-agent" --model anthropic/example --yes
         env:
-          NYLO_AGENTS_SPEC: file:${{ runner.temp }}/nylorun-agents-0.1.0-rc.0.tgz
           npm_config_user_agent: ${{ matrix.package-manager }}/test
       - name: Build generated project
         shell: bash
