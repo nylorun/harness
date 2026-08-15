@@ -19,7 +19,15 @@ try {
     !/^dist\/.+\.(?:js|d\.ts)$/.test(path)
   );
   if (unexpected.length) throw new Error(`Unexpected tarball files: ${unexpected.join(", ")}`);
-  for (const required of ["package.json", "README.md", "LICENSE", "dist/index.js", "dist/index.d.ts"]) {
+  // dist/runtime/cli.js backs the `nylo-run` bin: a tarball without it installs a broken command.
+  for (const required of [
+    "package.json",
+    "README.md",
+    "LICENSE",
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/runtime/cli.js"
+  ]) {
     if (!files.includes(required)) throw new Error(`Missing tarball file: ${required}`);
   }
   console.log(`Tarball allowlist passed (${files.length} files).`);
