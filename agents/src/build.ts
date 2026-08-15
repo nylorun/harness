@@ -18,9 +18,30 @@ export async function buildAgent(projectRoot: string, options: BuildOptions = {}
   const checkErrors = checked.diagnostics.filter((item) => item.severity === "error");
   if (checkErrors.length) return Object.freeze({ ok: false, diagnostics: checked.diagnostics });
   try {
-    // Vite is loaded on demand rather than at module scope: the package's export barrel is
-    // imported by runtime callers — the Agent Runtime among them — that never build anything.
-    const { build, loadConfigFromFile } = await import("vite");
+    // Vite is loaded on demand rather than at module scope, and declared an *optional* peer: the
+    // export barrel is imported by runtime callers — the Agent Runtime among them — that never
+    // build anything, and forcing a bundler into their dependency tree would be a real cost.
+    // Building without it is a legible refusal rather than a module-resolution stack trace.
+    let vite: typeof import("vite");
+    try {
+      vite = await import("vite");
+    } catch {
+      return Object.freeze({
+        ok: false,
+        diagnostics: [
+          ...checked.diagnostics,
+          diagnostic(
+            "NYLO_BUILD_VITE_MISSING",
+            "build",
+            "error",
+            "package.json",
+            "Building an agent requires Vite, which is not installed.",
+            "Add vite to the project's devDependencies (the scaffold does this for you)."
+          )
+        ]
+      });
+    }
+    const { build, loadConfigFromFile } = vite;
     const configPath = join(root, "vite.config.ts");
     const loaded = await loadConfigFromFile({ command: "build", mode: "production" }, configPath, root);
     if (!loaded?.config.plugins || !loaded.config.plugins.some((plugin) => plugin && typeof plugin === "object" && "name" in plugin && plugin.name === "nylo:agent")) {

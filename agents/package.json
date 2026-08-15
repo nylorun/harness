@@ -52,7 +52,7 @@
   },
   "peerDependenciesMeta": {
     "vite": {
-      "optional": false
+      "optional": true
     }
   },
   "devDependencies": {
