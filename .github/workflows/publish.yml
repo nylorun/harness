@@ -1,0 +1,48 @@
+name: Stage approved npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to stage
+        required: true
+        type: choice
+        options: [agents, create-agent]
+      version:
+        description: Exact package version to stage
+        required: true
+        type: string
+      confirm:
+        description: Publication has explicit maintainer approval
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  stage:
+    if: inputs.confirm
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@^11.15.0
+      - run: npm ci
+        working-directory: ${{ inputs.package }}
+      - run: npm run check
+        working-directory: ${{ inputs.package }}
+      - name: Verify tag version
+        working-directory: ${{ inputs.package }}
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          test "$version" = "${{ inputs.version }}"
+      - run: npm stage publish --access public
+        working-directory: ${{ inputs.package }}

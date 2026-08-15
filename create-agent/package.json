@@ -1,0 +1,41 @@
+{
+  "name": "@nylorun/create-agent",
+  "version": "0.1.0-rc.0",
+  "description": "Create a buildable Nylo agent project.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nylorun/agents.git",
+    "directory": "create-agent"
+  },
+  "homepage": "https://github.com/nylorun/agents/tree/main/create-agent#readme",
+  "bugs": "https://github.com/nylorun/agents/issues",
+  "bin": {
+    "create-agent": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22.14 <23"
+  },
+  "scripts": {
+    "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check": "npm run build && npm test && node scripts/check-package.mjs",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

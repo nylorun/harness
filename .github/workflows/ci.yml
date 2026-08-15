@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        package: [agents, create-agent]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.14.0
+          cache: npm
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
+      - run: npm ci
+        working-directory: ${{ matrix.package }}
+      - run: npm run check
+        working-directory: ${{ matrix.package }}
+
+  packed-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.14.0
+          cache: npm
+          cache-dependency-path: |
+            agents/package-lock.json
+            create-agent/package-lock.json
+      - run: npm ci
+        working-directory: agents
+      - run: npm ci
+        working-directory: create-agent
+      - run: npm run build
+        working-directory: create-agent
+      - name: Pack SDK
+        run: npm pack --pack-destination "$RUNNER_TEMP"
+        working-directory: agents
+      - name: Generate and build consumer
+        shell: bash
+        run: |
+          node create-agent/dist/cli.js "$RUNNER_TEMP/sample-agent" --model anthropic/example --yes
+          npm run check --prefix "$RUNNER_TEMP/sample-agent"
+          npm run build --prefix "$RUNNER_TEMP/sample-agent"
+        env:
+          NYLO_AGENTS_SPEC: file:${{ runner.temp }}/nylorun-agents-0.1.0-rc.0.tgz
+
+  package-manager-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package-manager: [npm, pnpm, yarn, bun]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.14.0
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.package-manager == 'bun'
+      - name: Install alternate package managers
+        if: matrix.package-manager == 'pnpm' || matrix.package-manager == 'yarn'
+        run: npm install --global ${{ matrix.package-manager }}
+      - run: npm ci
+        working-directory: agents
+      - run: npm ci
+        working-directory: create-agent
+      - run: npm run build
+        working-directory: create-agent
+      - name: Pack SDK
+        run: npm pack --pack-destination "$RUNNER_TEMP"
+        working-directory: agents
+      - name: Generate through selected installer
+        shell: bash
+        run: node create-agent/dist/cli.js "$RUNNER_TEMP/${{ matrix.package-manager }}-agent" --model anthropic/example --yes
+        env:
+          NYLO_AGENTS_SPEC: file:${{ runner.temp }}/nylorun-agents-0.1.0-rc.0.tgz
+          npm_config_user_agent: ${{ matrix.package-manager }}/test
+      - name: Build generated project
+        shell: bash
+        run: ${{ matrix.package-manager }} run build
+        working-directory: ${{ runner.temp }}/${{ matrix.package-manager }}-agent
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.14.0
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: agents
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: create-agent
