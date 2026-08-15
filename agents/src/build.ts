@@ -1,6 +1,5 @@
 import { readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { build, loadConfigFromFile } from "vite";
 import { diagnostic, NyloBuildError } from "./diagnostics.js";
 import type { BuildOptions, BuildResult, CapabilityManifest, FolderDiagnostic } from "./types.js";
 import { validateAgent } from "./validate.js";
@@ -19,6 +18,9 @@ export async function buildAgent(projectRoot: string, options: BuildOptions = {}
   const checkErrors = checked.diagnostics.filter((item) => item.severity === "error");
   if (checkErrors.length) return Object.freeze({ ok: false, diagnostics: checked.diagnostics });
   try {
+    // Vite is loaded on demand rather than at module scope: the package's export barrel is
+    // imported by runtime callers — the Agent Runtime among them — that never build anything.
+    const { build, loadConfigFromFile } = await import("vite");
     const configPath = join(root, "vite.config.ts");
     const loaded = await loadConfigFromFile({ command: "build", mode: "production" }, configPath, root);
     if (!loaded?.config.plugins || !loaded.config.plugins.some((plugin) => plugin && typeof plugin === "object" && "name" in plugin && plugin.name === "nylo:agent")) {

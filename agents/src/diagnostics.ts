@@ -1,8 +1,8 @@
-import type { FolderDiagnostic } from "./types.js";
+import type { DiagnosticPhase, FolderDiagnostic } from "./types.js";
 
 export function diagnostic(
   code: string,
-  phase: "check" | "build",
+  phase: DiagnosticPhase,
   severity: "error" | "warning",
   file: string,
   message: string,
