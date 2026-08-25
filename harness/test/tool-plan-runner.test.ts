@@ -10,7 +10,9 @@ function plan(
   } = {},
 ): InternalToolPlan {
   return {
-    candidate: { toolCalls: [{ id: "call", name: "echo", args: { text: "hello" } }] },
+    candidate: {
+      output: [{ type: "tool-call", id: "call", name: "echo", args: { text: "hello" } }],
+    },
     order: [{ callId: "call", toolName: "echo" }],
     executable: [
       {
@@ -30,9 +32,9 @@ function plan(
   };
 }
 
-function context(adapter: Parameters<typeof createAdapterRegistry>[0]) {
+function context(adapters: Parameters<typeof createAdapterRegistry>[0]) {
   return {
-    adapters: createAdapterRegistry(adapter),
+    adapters: createAdapterRegistry(adapters),
     signal: new AbortController().signal,
     observe: vi.fn(),
     ids: { sessionId: "session", turnId: "turn", stepId: "step" },
@@ -45,7 +47,7 @@ describe("ToolPlanRunner", () => {
     const runner = new ToolPlanRunner(
       plan({ interaction: { id: "approval", kind: "approval", prompt: "Approve?" } }),
     );
-    const run = context({ local: { id: "local", validateRoute() {}, execute } });
+    const run = context([{ id: "local", validateRoute() {}, execute }]);
 
     await expect(runner.run(run)).resolves.toMatchObject({
       kind: "interaction-required",
@@ -74,7 +76,7 @@ describe("ToolPlanRunner", () => {
     );
     const execute = vi.fn(async () => ({ kind: "completed" as const, output: "ok" }));
     const runner = new ToolPlanRunner(plan({ preflight: "validation" }));
-    const run = context({ local: { id: "local", validateRoute() {}, preflight, execute } });
+    const run = context([{ id: "local", validateRoute() {}, preflight, execute }]);
 
     await expect(runner.run(run)).resolves.toMatchObject({
       kind: "interaction-required",

@@ -36,14 +36,13 @@ export class SessionScheduler {
   constructor(
     readonly id: string,
     private readonly agent: LoopAgent,
-    defaultModel: string,
     private readonly session: Readonly<{
       readonly userId?: string;
       readonly context?: import("../types/shared.js").JsonObject;
     }>,
   ) {
     this.snapshotValue = initialState(id);
-    this.turns = new TurnRunner(agent, defaultModel, id, session);
+    this.turns = new TurnRunner(agent, id, session);
   }
 
   get snapshot(): SessionSnapshot {
@@ -206,7 +205,7 @@ export class SessionScheduler {
     try {
       const context = {
         signal,
-        observe: this.emitObserve,
+        observe: (event: import("../types/shared.js").ObserveEvent) => this.emitObserve(event),
         assertCurrent: () => this.assertCurrent(generation, signal),
         onPlanActive: (plan: PendingTurn | undefined) => {
           this.inFlightPlan = plan;

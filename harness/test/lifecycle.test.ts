@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Agent, defineCapability, defineMiddleware } from "../src/index.js";
+import { Agent } from "../src/index.js";
 import { model, turn } from "./fixtures.js";
 
 describe("lifecycle", () => {
@@ -12,13 +12,13 @@ describe("lifecycle", () => {
     const modelGate = new Promise<void>((resolve) => {
       settleModel = resolve;
     });
-    const result = Agent.create({
-      model: model(async () => {
+    const result = Agent(
+      model(async () => {
         markStarted();
         await modelGate;
         return "late";
       }),
-    }).build();
+    ).build();
 
     const { session, handle } = turn(result, "go");
     await modelStarted;
@@ -37,25 +37,17 @@ describe("lifecycle", () => {
   });
 
   it("lets middleware stop a Session with an application-owned turn policy", async () => {
-    const result = Agent.create({ model: model(async () => "done") })
-      .with(
-        defineCapability({
-          id: "turn-policy",
-          middleware: [
-            defineMiddleware({
-              id: "max-one-turn",
-              beforeModel(ctx) {
-                if (ctx.input.turnNumber > 1)
-                  ctx.tripwire({
-                    code: "policy.max-turns",
-                    message: "Application turn limit reached",
-                    scope: "session",
-                  });
-              },
-            }),
-          ],
-        }),
-      )
+    const result = Agent(model(async () => "done"))
+      .use("max-one-turn", async (request, next) => {
+        if (request.turnNumber > 1) {
+          return request.tripwire({
+            code: "policy.max-turns",
+            message: "Application turn limit reached",
+            scope: "session",
+          });
+        }
+        return next();
+      })
       .build();
     const { session, handle } = turn(result, "one");
     await handle.completed;
@@ -69,24 +61,14 @@ describe("lifecycle", () => {
   });
 
   it("keeps a Session usable after a step-scoped middleware tripwire", async () => {
-    const result = Agent.create({ model: model(async () => "done") })
-      .with(
-        defineCapability({
-          id: "step-policy",
-          middleware: [
-            defineMiddleware({
-              id: "step-tripwire",
-              beforeModel(ctx) {
-                ctx.tripwire({
-                  code: "policy.step",
-                  message: `Step ${ctx.input.stepNumber} rejected`,
-                  scope: "step",
-                });
-              },
-            }),
-          ],
-        }),
-      )
+    const result = Agent(model(async () => "done"))
+      .use("step-tripwire", async (request, next) => {
+        return request.tripwire({
+          code: "policy.step",
+          message: `Step ${request.stepNumber} rejected`,
+          scope: "step",
+        });
+      })
       .build();
     const { session, handle: first } = turn(result, "one");
     await expect(first.completed).resolves.toMatchObject({

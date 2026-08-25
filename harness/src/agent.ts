@@ -1,52 +1,38 @@
-import type { CapabilityManifest } from "./types/capability.js";
-import type { StepMiddleware } from "./types/middleware.js";
+import type { AgentManifest } from "./types/manifest.js";
+import type { BoundMiddleware } from "./types/middleware.js";
+import type { ModelInvoker } from "./types/model.js";
 import type { Session, SessionOptions } from "./types/session.js";
-import type { BoundToolDefinition } from "./types/tool.js";
-import { AgentBuilder, type AgentCreateOptions } from "./builder.js";
 import type { AdapterRegistry } from "./build/adapters.js";
-import type { ModelRegistry } from "./build/models.js";
 import { LiveSession } from "./session/session.js";
 import type { LoopAgent } from "./step/run.js";
 import { createId } from "./utils/ids.js";
-import { createFixedMap } from "./utils/maps.js";
 
 let createBoundAgent: (
-  catalog: readonly BoundToolDefinition[],
-  instructions: readonly string[],
-  middleware: readonly StepMiddleware[],
-  models: ModelRegistry,
+  middleware: readonly BoundMiddleware[],
+  model: ModelInvoker,
   adapters: AdapterRegistry,
-  manifest: CapabilityManifest,
-) => Agent;
+  manifest: AgentManifest,
+) => BuiltAgent;
 
-export class Agent {
-  static create(options: AgentCreateOptions): AgentBuilder {
-    return new AgentBuilder(options);
-  }
-
+export class BuiltAgent {
   readonly #loopAgent: LoopAgent;
 
   private constructor(
-    readonly catalog: readonly BoundToolDefinition[],
-    readonly instructions: readonly string[],
-    readonly middleware: readonly StepMiddleware[],
-    models: ModelRegistry,
+    readonly middleware: readonly BoundMiddleware[],
+    model: ModelInvoker,
     adapters: AdapterRegistry,
-    readonly manifest: CapabilityManifest,
+    readonly manifest: AgentManifest,
   ) {
     this.#loopAgent = Object.freeze({
-      catalog,
-      catalogByName: createFixedMap(catalog.map((tool) => [tool.name, tool] as const)),
-      instructions,
       middleware,
-      models,
+      model,
       adapters,
     });
   }
 
   static {
-    createBoundAgent = (catalog, instructions, middleware, models, adapters, manifest) =>
-      new Agent(catalog, instructions, middleware, models, adapters, manifest);
+    createBoundAgent = (middleware, model, adapters, manifest) =>
+      new BuiltAgent(middleware, model, adapters, manifest);
   }
 
   run(options: SessionOptions = {}): Session {
@@ -56,12 +42,10 @@ export class Agent {
 }
 
 export function bindAgent(
-  catalog: readonly BoundToolDefinition[],
-  instructions: readonly string[],
-  middleware: readonly StepMiddleware[],
-  models: ModelRegistry,
+  middleware: readonly BoundMiddleware[],
+  model: ModelInvoker,
   adapters: AdapterRegistry,
-  manifest: CapabilityManifest,
-): Agent {
-  return createBoundAgent(catalog, instructions, middleware, models, adapters, manifest);
+  manifest: AgentManifest,
+): BuiltAgent {
+  return createBoundAgent(middleware, model, adapters, manifest);
 }

@@ -1,31 +1,46 @@
-import type { Agent } from "./agent.js";
-import type { Capability } from "./types/capability.js";
+import type { BuiltAgent } from "./agent.js";
+import type { BoundMiddleware, StepMiddleware } from "./types/middleware.js";
+import type { ModelInvoker } from "./types/model.js";
+import type { ToolAdapter } from "./types/tool.js";
 import { AgentBuildError, AgentLifecycleError } from "./errors.js";
-import { assembleAgent, type AgentCreateOptions } from "./build/assemble.js";
+import { assembleAgent } from "./build/assemble.js";
 
-export type { AgentCreateOptions };
+export function Agent(model: ModelInvoker): AgentBuilder {
+  return new AgentBuilder(model);
+}
 
 export class AgentBuilder {
-  private readonly capabilities: Capability[] = [];
+  private readonly middleware: BoundMiddleware[] = [];
+  private readonly adapters: ToolAdapter[] = [];
   private sealed = false;
-  private agent?: Agent;
+  private agent?: BuiltAgent;
   private error?: AgentBuildError;
 
-  constructor(private readonly options: AgentCreateOptions) {}
+  constructor(private readonly model: ModelInvoker) {}
 
-  with(capability: Capability): this {
+  with(adapter: ToolAdapter): this {
     if (this.sealed) throw new AgentLifecycleError("AgentBuilder cannot be changed after build()");
-    this.capabilities.push(capability);
+    this.adapters.push(adapter);
     return this;
   }
 
-  build(): Agent {
+  use(id: string, middleware: StepMiddleware): this {
+    return this.#push({ id, handle: middleware }, false);
+  }
+
+  /** Host injection. Inserts ahead of `.use` so the middleware is outermost. */
+  prepend(id: string, middleware: StepMiddleware): this {
+    return this.#push({ id, handle: middleware }, true);
+  }
+
+  build(): BuiltAgent {
     if (this.agent) return this.agent;
     if (this.error) throw this.error;
     this.sealed = true;
     const result = assembleAgent(
-      Object.freeze(this.capabilities.map(snapshotCapability)),
-      this.options,
+      Object.freeze(this.middleware.map((item) => Object.freeze({ ...item }))),
+      this.model,
+      Object.freeze(this.adapters.slice()),
     );
     if (!result.ok) {
       this.error = new AgentBuildError(result.diagnostics);
@@ -34,27 +49,11 @@ export class AgentBuilder {
     this.agent = result.agent;
     return this.agent;
   }
-}
 
-function snapshotCapability(capability: Capability): Capability {
-  const originalSetup = capability.setup;
-  const snapshot: Capability = {
-    id: capability.id,
-    ...(capability.version === undefined ? {} : { version: capability.version }),
-    ...(capability.middleware === undefined
-      ? {}
-      : {
-          middleware: Object.freeze(
-            capability.middleware.map((item) => Object.freeze({ ...item })),
-          ),
-        }),
-    ...(originalSetup === undefined
-      ? {}
-      : {
-          setup(context) {
-            return originalSetup.call(snapshot, context);
-          },
-        }),
-  };
-  return Object.freeze(snapshot);
+  #push(entry: BoundMiddleware, front: boolean): this {
+    if (this.sealed) throw new AgentLifecycleError("AgentBuilder cannot be changed after build()");
+    if (front) this.middleware.unshift(entry);
+    else this.middleware.push(entry);
+    return this;
+  }
 }

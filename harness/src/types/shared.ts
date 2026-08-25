@@ -37,14 +37,25 @@ export type ObserveEvent =
       readonly type: "model.started" | "model.completed";
       readonly turnId: string;
       readonly stepId: string;
-      readonly attributes: { readonly modelId: string };
+      readonly attributes?: { readonly requestedModelId?: string };
     }
   | {
-      readonly type:
-        "middleware.before" | "middleware.around.entered" | "middleware.around.completed";
+      readonly type: "step.catalog";
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly attributes: { readonly names: readonly string[]; readonly digest: string };
+    }
+  | {
+      readonly type: "middleware.entered" | "middleware.completed";
       readonly turnId: string;
       readonly stepId: string;
       readonly attributes: { readonly middlewareId: string };
+    }
+  | {
+      readonly type: "middleware.lease-violation";
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly attributes: { readonly middlewareId: string; readonly reason: string };
     }
   | {
       readonly type: "tool.sealed";

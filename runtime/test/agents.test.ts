@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as publicApi from "../src/index.js";
 import { Agent, AgentSpec, Run, buildAgent, validateAgent } from "../src/index.js";
-import { Harness } from "@nylorun/harness";
+import { Agent as KernelAgent } from "@nylorun/harness";
 
 async function project(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "nylo-agents-"));
@@ -16,7 +16,7 @@ async function project(): Promise<string> {
   await writeFile(join(root, "package.json"), '{"name":"@fixtures/sample","type":"module"}\n');
   await writeFile(join(root, "package-lock.json"), "{}\n");
   await writeFile(join(root, "vite.config.ts"), `import { nyloAgent } from "@nylorun/runtime";\nexport default {plugins:[nyloAgent()]};\n`);
-  await writeFile(join(root, "agent", "agent.ts"), `import { Run } from "@nylorun/runtime";\nimport { Harness } from "@nylorun/harness";\nexport default Run((options)=>new Harness(options),{model:"anthropic/example"});\n`);
+  await writeFile(join(root, "agent", "agent.ts"), `import { Run } from "@nylorun/runtime";\nimport { Agent } from "@nylorun/harness";\nexport default Run((model)=>Agent(model),{model:"anthropic/example"});\n`);
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n");
   return root;
 }
@@ -45,7 +45,7 @@ describe("Agent", () => {
   });
 
   it("requires a branded harness and keeps the two factories separate", () => {
-    expect(Run((options) => new Harness(options), { model: "anthropic/example" })).toMatchObject({
+    expect(Run((model) => KernelAgent(model), { model: "anthropic/example" })).toMatchObject({
       harness: expect.any(Function), secrets: [], mcp: []
     });
     expect(() => Run({} as never, { model: "anthropic/example" })).toThrow("Harness factory");

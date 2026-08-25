@@ -20,7 +20,7 @@ async function project(): Promise<string> {
   await symlink(join(packageRoot, "node_modules", "zod"), join(root, "node_modules", "zod"), "dir").catch(() => undefined);
   await writeFile(join(root, "package.json"), '{"type":"module"}\n'); await writeFile(join(root, "package-lock.json"), "{}\n");
   await writeFile(join(root, "vite.config.ts"), 'import { nyloAgent } from "@nylorun/runtime"; export default {plugins:[nyloAgent()]};\n');
-  await writeFile(join(root, "agent", "agent.ts"), 'import { Harness } from "@nylorun/harness"; import { Run } from "@nylorun/runtime/agent"; export default Run((options)=>new Harness(options),{name:"sample",model:"anthropic/example"});\n');
+  await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness"; import { Run } from "@nylorun/runtime/agent"; export default Run((model)=>Agent(model),{name:"sample",model:"anthropic/example"});\n');
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n"); expect((await buildAgent(root)).ok).toBe(true); return root;
 }
 async function built(root: string, host: RuntimeOptions): Promise<BuiltAgent> { const module = await import(`${pathToFileURL(join(root, "dist", "agent.mjs")).href}?t=${imported++}`) as { agent: BuiltAgent }; return module.agent.withHost(host); }

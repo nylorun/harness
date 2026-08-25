@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { Run, defineTool, type RuntimeOptions } from "../../src/index.js";
-import { Harness } from "@nylorun/harness";
+import { Agent } from "@nylorun/harness";
 
-Run((options) => new Harness(options), { name: "reviewer", model: "anthropic/example", secrets: ["GITHUB_TOKEN"] });
+Run((model) => Agent(model), { name: "reviewer", model: "anthropic/example", secrets: ["GITHUB_TOKEN"] });
 
 // @ts-expect-error Limits are application middleware policy.
-Run((options) => new Harness(options), { name: "reviewer", model: "anthropic/example", limits: { maxTurns: 3 } });
+Run((model) => Agent(model), { name: "reviewer", model: "anthropic/example", limits: { maxTurns: 3 } });
 
 const runtimeOptions: RuntimeOptions = {
   // @ts-expect-error Runtime hosts do not configure session limits.

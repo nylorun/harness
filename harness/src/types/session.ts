@@ -36,7 +36,6 @@ export interface InputHandle {
 export interface SessionOptions {
   readonly id?: string;
   readonly userId?: string;
-  readonly model?: string;
   readonly context?: JsonObject;
 }
 

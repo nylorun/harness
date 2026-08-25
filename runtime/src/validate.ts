@@ -72,7 +72,7 @@ export async function validateAgent(source: string | FolderReader, options: Vali
     diagnostics.push(diagnostic("NYLO_CHECK_AGENT_DIRECTORY_MISSING", "check", "error", "agent", "agent/ is required.", "Create agent/agent.ts."));
   } else {
     const names = new Set(agentEntries.map((entry) => entry.name));
-    if (!names.has("agent.ts")) diagnostics.push(diagnostic("NYLO_CHECK_DEFINITION_MISSING", "check", "error", "agent/agent.ts", "agent/agent.ts is required.", "Default-export Run((options) => new Harness(options), {...}) from agent/agent.ts."));
+    if (!names.has("agent.ts")) diagnostics.push(diagnostic("NYLO_CHECK_DEFINITION_MISSING", "check", "error", "agent/agent.ts", "agent/agent.ts is required.", "Default-export Run((model) => Agent(model), {...}) from agent/agent.ts."));
     for (const entry of agentEntries) {
       if (RESERVED_AGENT.has(entry.name)) {
         diagnostics.push(diagnostic("NYLO_CHECK_COMPONENT_RESERVED", "check", "error", `agent/${entry.name}`, `${entry.name}/ is recognized but is not supported in this release.`, `Remove agent/${entry.name}/ until its capability ships.`));

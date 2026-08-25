@@ -1,7 +1,7 @@
-import type { BoundModelId, ModelCandidate } from "./model.js";
-import type { InputEvent } from "./session.js";
-import type { ContextItem, Tripwire } from "./shared.js";
-import type { Interaction, ToolResult } from "./tool.js";
+import type { ModelCandidate, ModelDirective, ModelToolCall } from "./model.js";
+import type { InputEvent, TranscriptEntry } from "./session.js";
+import type { ContextItem, JsonObject, Tripwire } from "./shared.js";
+import type { Interaction, ToolDefinition, ToolResult } from "./tool.js";
 
 export interface StepInput {
   readonly sessionId: string;
@@ -13,33 +13,47 @@ export interface StepInput {
   readonly stepNumber: number;
   readonly session: Readonly<{
     readonly userId?: string;
-    readonly context?: import("./shared.js").JsonObject;
+    readonly context?: JsonObject;
   }>;
   readonly arrivals: readonly InputEvent[];
   readonly toolResults: readonly ToolResult[];
+  readonly transcript: readonly TranscriptEntry[];
 }
 
-export interface BeforeModelContext {
-  readonly input: Readonly<StepInput>;
-  addInstructions(...items: string[]): void;
-  addContext(...items: ContextItem[]): void;
-  hideTools(...toolNames: string[]): void;
-  selectModel(modelId: BoundModelId): void;
-  tripwire(error: Tripwire): void;
+export interface StepRequest {
+  readonly session: StepInput["session"];
+  readonly turnNumber: number;
+  readonly stepNumber: number;
+  readonly arrivals: readonly InputEvent[];
+  readonly toolResults: readonly ToolResult[];
+  readonly transcript: readonly TranscriptEntry[];
+  readonly instructions: { add(...items: string[]): void };
+  readonly context: { add(...items: ContextItem[]): void };
+  readonly tools: {
+    add(...tools: ToolDefinition[]): void;
+    hide(...toolNames: string[]): void;
+  };
+  readonly model: { select(directive: ModelDirective): void };
+  tripwire(error: Tripwire): StepResponse;
 }
 
-export interface AfterModelContext {
-  readonly input: Readonly<StepInput>;
+export interface StepResponse {
   candidate(): Readonly<ModelCandidate> | undefined;
-  denyTool(callId: string, reason: string): void;
+  toolCalls(): readonly ModelToolCall[];
+  replace(candidate: ModelCandidate): void;
+  deny(callId: string, reason: string): void;
   requireInteraction(callId: string, interaction: Interaction): void;
   requirePreflight(callId: string, kind: "sandbox" | "validation"): void;
   tripwire(error: Tripwire): void;
 }
 
-export interface StepMiddleware {
+export type StepMiddleware = (
+  request: StepRequest,
+  next: () => Promise<StepResponse>,
+) => Promise<StepResponse>;
+
+export interface BoundMiddleware {
   readonly id: string;
   readonly version?: string;
-  beforeModel?(ctx: BeforeModelContext): void | Promise<void>;
-  aroundModel?(ctx: AfterModelContext, next: () => Promise<void>): Promise<void>;
+  readonly handle: StepMiddleware;
 }

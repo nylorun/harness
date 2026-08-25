@@ -2,14 +2,17 @@ import { z } from "zod";
 import {
   AgentBuildError,
   defineAdapter,
-  defineCapability,
   defineModel,
   defineTool,
-  type Agent,
+  type BuiltAgent,
   type AgentRunInput,
   type InputOptions,
+  type JsonObject,
+  type ModelCandidate,
   type ModelInvoker,
   type SessionOptions,
+  type StepRequest,
+  type StepResponse,
   type ToolAdapter,
 } from "../src/index.js";
 
@@ -19,8 +22,11 @@ export function tool(name = "echo", executeWith = "local") {
   return defineTool({ name, input: objectSchema, executeWith, route: { operation: name } });
 }
 
-export function capability(...tools: ReturnType<typeof tool>[]) {
-  return defineCapability({ id: "test", setup: () => ({ tools }) });
+export function offer(...tools: ReturnType<typeof tool>[]) {
+  return async (request: StepRequest, next: () => Promise<StepResponse>) => {
+    for (const item of tools) request.tools.add(item);
+    return next();
+  };
 }
 
 export function adapter(execute?: ToolAdapter["execute"]) {
@@ -35,6 +41,19 @@ export function model(invoke: ModelInvoker["invoke"]) {
   return defineModel({ id: "test-model", invoke });
 }
 
+export function toolCalls(
+  ...calls: readonly { readonly id: string; readonly name: string; readonly args?: JsonObject }[]
+): ModelCandidate {
+  return {
+    output: calls.map((call) => ({
+      type: "tool-call" as const,
+      id: call.id,
+      name: call.name,
+      args: call.args ?? {},
+    })),
+  };
+}
+
 export function expectBuildError(build: () => unknown): AgentBuildError {
   try {
     build();
@@ -46,14 +65,13 @@ export function expectBuildError(build: () => unknown): AgentBuildError {
 }
 
 export function turn(
-  agent: Agent,
+  agent: BuiltAgent,
   input: AgentRunInput = "go",
   options: SessionOptions & InputOptions = {},
 ) {
   const session = agent.run({
     ...(options.id === undefined ? {} : { id: options.id }),
     ...(options.userId === undefined ? {} : { userId: options.userId }),
-    ...(options.model === undefined ? {} : { model: options.model }),
     ...(options.context === undefined ? {} : { context: options.context }),
   });
   const handle = session.input(

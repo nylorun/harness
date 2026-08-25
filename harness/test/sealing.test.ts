@@ -1,26 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 import { Agent } from "../src/index.js";
-import { adapter, capability, model, tool, turn } from "./fixtures.js";
+import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("sealing", () => {
   it("turns invalid calls into paired failures and dispatches only sealed calls", async () => {
     const execute = vi.fn(async (call) => ({ kind: "completed" as const, output: call.args }));
     let calls = 0;
-    const result = Agent.create({
-      model: model(async (request) => {
+    const result = Agent(
+      model(async (request) => {
         calls += 1;
         return calls === 1
-          ? {
-              toolCalls: [
-                { id: "unknown", name: "missing", args: {} },
-                { id: "valid", name: "echo", args: { value: 1 } },
-              ],
-            }
+          ? toolCalls(
+              { id: "unknown", name: "missing", args: {} },
+              { id: "valid", name: "echo", args: { value: 1 } },
+            )
           : `results:${request.toolResults.map((item) => item.kind).join(",")}`;
       }),
-      adapters: { local: adapter(execute) },
-    })
-      .with(capability(tool()))
+    )
+      .with(adapter(execute))
+      .use("test", offer(tool()))
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([{ type: "final", output: "results:failed,completed" }]);
@@ -32,21 +30,19 @@ describe("sealing", () => {
     const candidateArgs = { value: 1 };
     const adapterOutput = { nested: { value: 1 } };
     let step = 0;
-    const result = Agent.create({
-      model: model(async (request) => {
+    const result = Agent(
+      model(async (request) => {
         if (++step > 1) return "done";
-        return {
-          toolCalls: [
-            { id: "", name: "echo", args: candidateArgs },
-            { id: "duplicate", name: "echo", args: candidateArgs },
-            { id: "duplicate", name: "echo", args: candidateArgs },
-            { id: "valid", name: "echo", args: candidateArgs },
-          ],
-        };
+        return toolCalls(
+          { id: "", name: "echo", args: candidateArgs },
+          { id: "duplicate", name: "echo", args: candidateArgs },
+          { id: "duplicate", name: "echo", args: candidateArgs },
+          { id: "valid", name: "echo", args: candidateArgs },
+        );
       }),
-      adapters: { local: adapter(async () => ({ kind: "completed", output: adapterOutput })) },
-    })
-      .with(capability(tool()))
+    )
+      .with(adapter(async () => ({ kind: "completed", output: adapterOutput })))
+      .use("test", offer(tool()))
       .build();
     const { session, handle } = turn(result, "go");
     await handle.completed;
@@ -57,7 +53,9 @@ describe("sealing", () => {
     const results = session.state.transcript.find((entry) => entry.kind === "tool-results");
     if (!candidate || candidate.kind !== "candidate" || !results || results.kind !== "tool-results")
       throw new Error("missing transcript entries");
-    const candidateIds = candidate.candidate.toolCalls?.map((call) => call.id) ?? [];
+    const candidateIds = candidate.candidate.output
+      .filter((block) => block.type === "tool-call")
+      .map((block) => block.id);
     expect(new Set(candidateIds).size).toBe(4);
     expect(results.results.map((item) => item.callId)).toEqual(candidateIds);
     expect(results.results.map((item) => item.code)).toEqual([
@@ -66,30 +64,31 @@ describe("sealing", () => {
       "tool.duplicate-call-id",
       undefined,
     ]);
-    expect(candidate.candidate.toolCalls?.[3]?.args).toEqual({ value: 1 });
+    const validCall = candidate.candidate.output.find(
+      (block) => block.type === "tool-call" && block.id === "valid",
+    );
+    expect(validCall && validCall.type === "tool-call" ? validCall.args : undefined).toEqual({
+      value: 1,
+    });
     expect(results.results[3]?.output).toEqual({ nested: { value: 1 } });
     expect(Object.isFrozen((results.results[3]?.output as { nested: object }).nested)).toBe(true);
   });
 
   it("normalizes malformed JavaScript model and adapter scalar fields into failures", async () => {
-    const malformedModel = Agent.create({
-      model: model(async () => ({ content: { invalid: true } }) as never),
-    }).build();
+    const malformedModel = Agent(model(async () => ({ output: "invalid" }) as never)).build();
     const modelCompletion = await turn(malformedModel, "go").handle.completed;
     expect(modelCompletion.events).toMatchObject([
       { type: "tripwire", tripwire: { code: "model.failed" } },
     ]);
 
     let step = 0;
-    const malformedAdapter = Agent.create({
-      model: model(async () =>
-        ++step === 1 ? { toolCalls: [{ id: "call", name: "echo", args: {} }] } : "done",
+    const malformedAdapter = Agent(
+      model(async () =>
+        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
-      adapters: {
-        local: adapter(async () => ({ kind: "denied", reason: { mutable: true } }) as never),
-      },
-    })
-      .with(capability(tool()))
+    )
+      .with(adapter(async () => ({ kind: "denied", reason: { mutable: true } }) as never))
+      .use("test", offer(tool()))
       .build();
     const { session, handle } = turn(malformedAdapter, "go");
     await handle.completed;

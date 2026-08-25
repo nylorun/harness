@@ -74,7 +74,7 @@ export function nyloAgent(): Plugin {
         throw new NyloBuildError(diagnostic("NYLO_BUILD_MODULE_EVALUATION_FAILED", "build", "error", "agent/agent.ts", message, "Fix the definition or tool module that threw during build."));
       }
       if (!loaded.config || !Array.isArray(loaded.config.secrets) || !Array.isArray(loaded.config.mcp) || typeof loaded.config.harness !== "function") {
-        throw new NyloBuildError(diagnostic("NYLO_BUILD_DEFINITION_INVALID", "build", "error", "agent/agent.ts", "The default export is not a Harness-backed Run(...) definition.", "Default-export Run((options) => new Harness(options), {...})."));
+        throw new NyloBuildError(diagnostic("NYLO_BUILD_DEFINITION_INVALID", "build", "error", "agent/agent.ts", "The default export is not a Harness-backed Run(...) definition.", "Default-export Run((model) => Agent(model), {...})."));
       }
       const tools = describeTools(loaded.toolModules ?? []);
       const skills = await describeSkills(projectRoot);

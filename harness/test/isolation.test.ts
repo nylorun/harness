@@ -4,12 +4,12 @@ import { model, turn } from "./fixtures.js";
 
 describe("Session isolation", () => {
   it("keeps parallel transcripts, queues, IDs, and outputs isolated", async () => {
-    const result = Agent.create({
-      model: model(async (request) => {
+    const result = Agent(
+      model(async (request) => {
         await Promise.resolve();
         return `${request.sessionId}:${request.arrivals[0]?.kind === "user-message" ? request.arrivals[0].text : ""}`;
       }),
-    }).build();
+    ).build();
     const started = Array.from({ length: 40 }, (_, index) =>
       turn(result, `message-${index}`, { id: `session-${index}` }),
     );

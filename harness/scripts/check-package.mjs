@@ -54,7 +54,7 @@ try {
     "AgentLifecycleError",
     "AgentInvariantError",
     "Agent",
-    "defineCapability",
+    "BuiltAgent",
     "defineTool",
     "defineMiddleware",
     "defineAdapter",

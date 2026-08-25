@@ -1,4 +1,5 @@
 import type { ModelCandidate } from "../types/model.js";
+import { textFromOutput } from "../types/model.js";
 import type { Tripwire } from "../types/shared.js";
 import type {
   BoundToolDefinition,
@@ -8,6 +9,7 @@ import type {
 } from "../types/tool.js";
 import { createId } from "../utils/ids.js";
 import { assertJson, copyJson } from "../utils/immutable.js";
+import type { CanonicalCall } from "./canonicalize.js";
 import type { StepContext } from "./context.js";
 
 export interface ExecutablePlanEntry {
@@ -29,14 +31,6 @@ export type SealedStepOutput =
   | { readonly kind: "final"; readonly output: string }
   | { readonly kind: "tools"; readonly plan: InternalToolPlan };
 
-interface CanonicalCall {
-  readonly callId: string;
-  readonly toolName: string;
-  readonly args: unknown;
-  readonly missingId: boolean;
-  readonly duplicateId?: string;
-}
-
 interface SealedCall {
   readonly order: { readonly callId: string; readonly toolName: string };
   readonly canonical: { readonly id: string; readonly name: string; readonly args: unknown };
@@ -47,26 +41,21 @@ interface SealedCall {
 const failed = (callId: string, toolName: string, code: string, message: string): ToolResult =>
   Object.freeze({ kind: "failed", callId, toolName, code, message });
 
-/** Converts middleware-adjusted model output into either a final response or an executable tool plan. */
-export function sealStep(
-  context: StepContext,
-  catalog: ReadonlyMap<string, BoundToolDefinition>,
-): SealedStepOutput {
+/** Converts the reviewed canonical candidate into either a final response or an executable tool plan. */
+export function sealStep(context: StepContext): SealedStepOutput {
   if (context.currentTripwire)
     return Object.freeze({ kind: "tripwire", tripwire: context.currentTripwire });
-  const candidate: Readonly<ModelCandidate> =
-    context.currentCandidate ?? Object.freeze({ content: "" });
-  if (!candidate.toolCalls?.length)
-    return Object.freeze({ kind: "final", output: candidate.content ?? "" });
+  const calls = context.canonicalCalls();
+  if (!calls.length)
+    return Object.freeze({
+      kind: "final",
+      output: textFromOutput(context.currentCandidate?.output ?? []),
+    });
 
-  const sealed = canonicalizeCalls(candidate.toolCalls).map((call) =>
-    sealCall(context, catalog, call),
-  );
-  const canonicalCandidate = Object.freeze({
-    ...(candidate.content === undefined ? {} : { content: candidate.content }),
-    toolCalls: Object.freeze(sealed.map((item) => item.canonical)),
-    ...(candidate.metadata === undefined ? {} : { metadata: candidate.metadata }),
-  });
+  const catalog = context.catalogByName;
+  const sealed = calls.map((call) => sealCall(context, catalog, call));
+  const canonicalCandidate =
+    context.currentCandidate ?? Object.freeze({ output: Object.freeze([]) });
   return Object.freeze({
     kind: "tools",
     plan: Object.freeze({
@@ -82,36 +71,15 @@ export function sealStep(
   });
 }
 
-function canonicalizeCalls(
-  calls: readonly { readonly id?: string; readonly name?: string; readonly args: unknown }[],
-): readonly CanonicalCall[] {
-  const idCounts = new Map<string, number>();
-  for (const call of calls) {
-    if (typeof call.id === "string" && call.id)
-      idCounts.set(call.id, (idCounts.get(call.id) ?? 0) + 1);
-  }
-  return calls.map((call) => {
-    const hasId = typeof call.id === "string" && call.id.length > 0;
-    const duplicateId = hasId && (idCounts.get(call.id) ?? 0) > 1 ? call.id : undefined;
-    return Object.freeze({
-      callId: hasId && !duplicateId ? call.id : createId("call"),
-      toolName: typeof call.name === "string" ? call.name : "unknown",
-      args: call.args,
-      missingId: !hasId,
-      ...(duplicateId ? { duplicateId } : {}),
-    });
-  });
-}
-
 function sealCall(
   context: StepContext,
   catalog: ReadonlyMap<string, BoundToolDefinition>,
   candidate: CanonicalCall,
 ): SealedCall {
-  const order = Object.freeze({ callId: candidate.callId, toolName: candidate.toolName });
+  const order = Object.freeze({ callId: candidate.id, toolName: candidate.name });
   const canonical = Object.freeze({
-    id: candidate.callId,
-    name: candidate.toolName,
+    id: candidate.id,
+    name: candidate.name,
     args: candidate.args,
   });
   if (candidate.missingId)
@@ -119,8 +87,8 @@ function sealCall(
       order,
       canonical,
       immediate: failed(
-        candidate.callId,
-        candidate.toolName,
+        candidate.id,
+        candidate.name,
         "tool.invalid-call-id",
         "Tool call id must not be empty",
       ),
@@ -130,34 +98,34 @@ function sealCall(
       order,
       canonical,
       immediate: failed(
-        candidate.callId,
-        candidate.toolName,
+        candidate.id,
+        candidate.name,
         "tool.duplicate-call-id",
         `Duplicate Tool call id '${candidate.duplicateId}'`,
       ),
     };
 
-  const tool = catalog.get(candidate.toolName);
+  const tool = catalog.get(candidate.name);
   if (!tool)
     return {
       order,
       canonical,
       immediate: failed(
-        candidate.callId,
-        candidate.toolName,
+        candidate.id,
+        candidate.name,
         "tool.unknown",
-        `Unknown Tool '${candidate.toolName}'`,
+        `Unknown Tool '${candidate.name}'`,
       ),
     };
-  if (context.isToolHidden(candidate.toolName))
+  if (context.isToolHidden(candidate.name))
     return {
       order,
       canonical,
       immediate: failed(
-        candidate.callId,
-        candidate.toolName,
+        candidate.id,
+        candidate.name,
         "tool.hidden",
-        `Tool '${candidate.toolName}' is not visible in this Step`,
+        `Tool '${candidate.name}' is not visible in this Step`,
       ),
     };
 
@@ -166,38 +134,33 @@ function sealCall(
     return {
       order,
       canonical,
-      immediate: failed(
-        candidate.callId,
-        candidate.toolName,
-        "tool.invalid-arguments",
-        args.message,
-      ),
+      immediate: failed(candidate.id, candidate.name, "tool.invalid-arguments", args.message),
     };
-  const denial = context.denialFor(candidate.callId);
+  const denial = context.denialFor(candidate.id);
   if (denial)
     return {
       order,
       canonical,
       immediate: Object.freeze({
         kind: "denied",
-        callId: candidate.callId,
-        toolName: candidate.toolName,
+        callId: candidate.id,
+        toolName: candidate.name,
         reason: denial,
       }),
     };
 
-  const requested = context.interactionFor(candidate.callId);
+  const requested = context.interactionFor(candidate.id);
   const interaction = requested
     ? Object.freeze({ ...requested, id: requested.id ?? createId("interaction") })
     : undefined;
-  const preflight = context.preflightFor(candidate.callId);
+  const preflight = context.preflightFor(candidate.id);
   return {
     order,
     canonical,
     executable: Object.freeze({
       call: Object.freeze({
-        callId: candidate.callId,
-        toolName: candidate.toolName,
+        callId: candidate.id,
+        toolName: candidate.name,
         args,
         executeWith: tool.executeWith,
         route: tool.route,
@@ -216,7 +179,7 @@ function validatedArguments(
   const validation = tool.input.validate(candidate.args);
   if (!validation.ok) return new Error(validation.issues.join("; "));
   try {
-    assertJson(validation.value, `arguments for '${candidate.toolName}'`);
+    assertJson(validation.value, `arguments for '${candidate.name}'`);
     return copyJson(validation.value);
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error));

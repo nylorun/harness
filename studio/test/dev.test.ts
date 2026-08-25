@@ -22,7 +22,7 @@ async function project(): Promise<string> {
   await writeFile(join(root, "package-lock.json"), "{}\n");
   await writeFile(join(root, "vite.config.ts"), 'import { nyloAgent } from "@nylorun/runtime";\nexport default { plugins: [nyloAgent()] };\n');
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n");
-  await writeFile(join(root, "agent", "agent.ts"), 'import { Harness } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((options)=>new Harness(options),{name:"sample",model:"anthropic/example"});\n');
+  await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((model)=>Agent(model),{name:"sample",model:"anthropic/example"});\n');
   return root;
 }
 
@@ -62,7 +62,7 @@ describe("nylo dev options", () => {
       });
       expect(preflight.headers.get("access-control-allow-origin")).toBe(dev.studioAddress);
 
-      await writeFile(join(root, "agent", "agent.ts"), 'import { Harness } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((options)=>new Harness(options),{name:"rebuilt",model:"anthropic/example"});\n');
+      await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((model)=>Agent(model),{name:"rebuilt",model:"anthropic/example"});\n');
       await expect.poll(async () => {
         const response = await fetch(`${dev!.agentServerUrl}/v1/sessions`, {
           method: "POST",

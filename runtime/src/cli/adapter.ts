@@ -10,6 +10,6 @@ export async function runAdapterProbe(args: Args): Promise<number> {
   const ready = await (await importAgent(args)).ready();
   const data = { state: "matches", harness: ready.harness, model: ready.model, diagnostics: ready.diagnostics };
   if (args.json) process.stdout.write(envelope("adapter probe", true, data));
-  else process.stdout.write(`adapter @nylorun/harness: matches (${ready.harness.capabilities.length} capabilities)\n`);
+    else process.stdout.write(`adapter @nylorun/harness: matches (${ready.harness.middleware.length} middleware)\n`);
   return 0;
 }

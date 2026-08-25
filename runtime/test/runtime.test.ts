@@ -60,7 +60,7 @@ async function project(
   await writeFile(
     join(root, "agent", "agent.ts"),
     agentSource ??
-      `import { Harness } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((options)=>new Harness(options),{name:"sample",model:"anthropic/example"});\n`
+      `import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((model)=>Agent(model),{name:"sample",model:"anthropic/example"});\n`
   );
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n");
   for (const [path, contents] of Object.entries(files)) {
@@ -83,7 +83,7 @@ describe("the built agent", () => {
       expect((await watcher.initial).ok).toBe(true);
       await new Promise<void>((done) => setTimeout(done, 100));
       const before = rebuilds.length;
-      await writeFile(join(root, "agent", "agent.ts"), `import { Harness } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((options)=>new Harness(options),{name:"rebuilt",model:"anthropic/example"});\n`);
+      await writeFile(join(root, "agent", "agent.ts"), `import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((model)=>Agent(model),{name:"rebuilt",model:"anthropic/example"});\n`);
       await expect.poll(() => rebuilds.length, { timeout: 10_000 }).toBeGreaterThan(before);
       expect(rebuilds.at(-1)).toBe(true);
     } finally {
@@ -179,7 +179,7 @@ describe("the built agent", () => {
     try {
       expect((await buildAgent(root)).ok).toBe(true);
       const agent = await built(root, { modelGatewayAdapter: scripted([{ type: "text", text: "unused" }, done("stop")]) });
-      expect((await agent.ready()).harness).toMatchObject({ capabilities: [{ id: "nylorun-folder" }] });
+      expect((await agent.ready()).harness).toMatchObject({ middleware: [{ id: "nylorun-folder" }] });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

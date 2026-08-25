@@ -1,4 +1,12 @@
-import type { JsonValue, ModelCandidate, ModelInvoker, ModelRequest, ModelToolCall, TranscriptEntry } from "@nylorun/harness";
+import type {
+  JsonObject,
+  JsonValue,
+  ModelCandidate,
+  ModelInvoker,
+  ModelRequest,
+  ModelToolCall,
+  TranscriptEntry,
+} from "@nylorun/harness";
 import type { ChatMessage, ModelGatewayAdapter, ModelGatewayCallEvidence, ModelGatewayUsage } from "./contracts.js";
 
 export class GatewayModelInvoker implements ModelInvoker {
@@ -33,7 +41,19 @@ export class GatewayModelInvoker implements ModelInvoker {
     const toolCalls = Object.freeze([...calls.entries()].sort(([left], [right]) => left - right).map(([index, call]) => ({ id: call.id ?? `call-${index}`, name: call.name ?? "unknown_tool", args: parseArguments(call.arguments) })));
     const text = content.join("");
     this.onCall?.({ sessionId: request.sessionId, usage, ...(evidence === undefined ? {} : { evidence }), content: text, toolCalls });
-    return Object.freeze({ ...(text === "" ? {} : { content: text }), ...(toolCalls.length === 0 ? {} : { toolCalls }), metadata: metadata(usage, evidence) });
+    return Object.freeze({
+      output: [
+        ...(text === "" ? [] : [{ type: "text" as const, text }]),
+        ...toolCalls.map((call) => ({ type: "tool-call" as const, id: call.id, name: call.name, args: call.args }))
+      ],
+      finishReason: toolCalls.length > 0 ? "tool-calls" as const : "stop" as const,
+      usage: {
+        inputTokens: usage.tokensIn,
+        outputTokens: usage.tokensOut,
+        ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd })
+      },
+      ...(evidence === undefined ? {} : { evidence: evidence as ModelCandidate["evidence"] })
+    });
   }
 }
 
@@ -48,14 +68,21 @@ function appendTranscript(output: ChatMessage[], entry: TranscriptEntry): void {
   if (entry.kind === "input") {
     if (entry.event.kind === "user-message" || entry.event.kind === "interrupt") output.push({ role: "user", content: entry.event.text });
   } else if (entry.kind === "candidate") {
-    output.push({ role: "assistant", content: entry.candidate.content ?? "", ...(entry.candidate.toolCalls === undefined ? {} : { toolCalls: entry.candidate.toolCalls.map((call) => ({ id: call.id, name: call.name, arguments: JSON.stringify(call.args) })) }) });
+    const text = entry.candidate.output.filter((block) => block.type === "text").map((block) => block.text).join("");
+    const toolCalls = entry.candidate.output.flatMap((block) =>
+      block.type === "tool-call" ? [{ id: block.id, name: block.name, arguments: JSON.stringify(block.args) }] : []
+    );
+    output.push({ role: "assistant", content: text, ...(toolCalls.length === 0 ? {} : { toolCalls }) });
   } else if (entry.kind === "tool-results") {
     for (const result of entry.results) output.push({ role: "tool", toolCallId: result.callId, content: JSON.stringify(result.kind === "completed" ? result.output ?? null : { kind: result.kind, reason: result.reason ?? result.message ?? result.code ?? "failed" }) });
   }
   // A final entry mirrors its immediately preceding candidate and is deliberately not duplicated.
 }
 
-function parseArguments(value: string): JsonValue { try { return JSON.parse(value) as JsonValue; } catch { return {}; } }
-function metadata(usage: ModelGatewayUsage, evidence: ModelGatewayCallEvidence | undefined): Record<string, JsonValue> {
-  return { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut, ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd }), ...(evidence === undefined ? {} : { evidence: evidence as unknown as JsonValue }) };
+function parseArguments(value: string): JsonObject {
+  try {
+    const parsed = JSON.parse(value) as JsonValue;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as JsonObject;
+  } catch { /* empty object is a valid parse failure stand-in for adapter args */ }
+  return {};
 }

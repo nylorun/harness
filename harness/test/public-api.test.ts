@@ -11,7 +11,7 @@ describe("public API", () => {
         "AgentBuildError",
         "AgentLifecycleError",
         "AgentInvariantError",
-        "defineCapability",
+        "BuiltAgent",
         "defineTool",
         "defineMiddleware",
         "defineAdapter",

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { Agent, defineCapability, defineMiddleware } from "../src/index.js";
-import { adapter, model, tool, turn } from "./fixtures.js";
+import { Agent } from "../src/index.js";
+import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("interaction resume", () => {
   it("retains the plan, resumes the same invocation, and runs preflights before calls", async () => {
@@ -29,31 +29,23 @@ describe("interaction resume", () => {
             };
       },
     };
-    const middleware = defineMiddleware({
-      id: "preflight",
-      async aroundModel(ctx, next) {
-        positions.push({
-          turnNumber: ctx.input.turnNumber,
-          stepNumber: ctx.input.stepNumber,
-        });
-        await next();
-        ctx.requirePreflight("call", "validation");
-      },
-    });
     let step = 0;
-    const result = Agent.create({
-      model: model(async () =>
-        ++step === 1 ? { toolCalls: [{ id: "call", name: "echo", args: {} }] } : "done",
+    const result = Agent(
+      model(async () =>
+        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
-      adapters: { local },
-    })
-      .with(
-        defineCapability({
-          id: "test",
-          middleware: [middleware],
-          setup: () => ({ tools: [tool()] }),
-        }),
-      )
+    )
+      .with(local)
+      .use("preflight", async (request, next) => {
+        positions.push({
+          turnNumber: request.turnNumber,
+          stepNumber: request.stepNumber,
+        });
+        const response = await next();
+        response.requirePreflight("call", "validation");
+        return response;
+      })
+      .use("test", offer(tool()))
       .build();
     const { session, handle: streamed } = turn(result, "go");
     const first = await streamed.completed;
@@ -77,7 +69,7 @@ describe("interaction resume", () => {
 
   it("rejects stale correlation without exposing it to the Model", async () => {
     const invoke = vi.fn(async () => "done");
-    const result = Agent.create({ model: model(invoke) }).build();
+    const result = Agent(model(invoke)).build();
     const completion = await turn(result, {
       kind: "approve",
       interactionId: "stale",
@@ -89,33 +81,23 @@ describe("interaction resume", () => {
 
   it("pairs every unresolved call when cancelling an interaction wait, then preserves FIFO", async () => {
     let modelStep = 0;
-    const middleware = defineMiddleware({
-      id: "approval",
-      async aroundModel(ctx, next) {
-        await next();
-        ctx.requireInteraction("first-call", { kind: "approval", prompt: "approve" });
-      },
-    });
-    const result = Agent.create({
-      model: model(async () =>
+    const result = Agent(
+      model(async () =>
         ++modelStep === 1
-          ? {
-              toolCalls: [
-                { id: "first-call", name: "first", args: {} },
-                { id: "second-call", name: "second", args: {} },
-              ],
-            }
+          ? toolCalls(
+              { id: "first-call", name: "first", args: {} },
+              { id: "second-call", name: "second", args: {} },
+            )
           : "after-cancel",
       ),
-      adapters: { local: adapter() },
-    })
-      .with(
-        defineCapability({
-          id: "tools",
-          middleware: [middleware],
-          setup: () => ({ tools: [tool("first"), tool("second")] }),
-        }),
-      )
+    )
+      .with(adapter())
+      .use("approval", async (_request, next) => {
+        const response = await next();
+        response.requireInteraction("first-call", { kind: "approval", prompt: "approve" });
+        return response;
+      })
+      .use("test", offer(tool("first"), tool("second")))
       .build();
     const firstController = new AbortController();
     const firstRemove = vi.spyOn(firstController.signal, "removeEventListener");
@@ -148,31 +130,23 @@ describe("interaction resume", () => {
   });
 
   it("resumes an interaction after a delay without a harness deadline", async () => {
-    const middleware = defineMiddleware({
-      id: "approval",
-      async aroundModel(ctx, next) {
-        await next();
-        ctx.requireInteraction("call", { kind: "approval", prompt: "approve" });
-      },
-    });
     let modelStep = 0;
     const local = adapter(async () => {
       await new Promise((resolve) => setTimeout(resolve, 35));
       return { kind: "completed", output: "too late" };
     });
-    const result = Agent.create({
-      model: model(async () =>
-        ++modelStep === 1 ? { toolCalls: [{ id: "call", name: "echo", args: {} }] } : "done",
+    const result = Agent(
+      model(async () =>
+        ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
-      adapters: { local },
-    })
-      .with(
-        defineCapability({
-          id: "tools",
-          middleware: [middleware],
-          setup: () => ({ tools: [tool()] }),
-        }),
-      )
+    )
+      .with(local)
+      .use("approval", async (_request, next) => {
+        const response = await next();
+        response.requireInteraction("call", { kind: "approval", prompt: "approve" });
+        return response;
+      })
+      .use("test", offer(tool()))
       .build();
     const { session, handle: streamed } = turn(result, "go");
     const first = await streamed.completed;

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { Agent, defineCapability } from "../src/index.js";
-import { adapter, model, tool, turn } from "./fixtures.js";
+import { Agent } from "../src/index.js";
+import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("Session loop", () => {
   it("submits eagerly and processes overlapping inputs FIFO", async () => {
     const seen: string[] = [];
-    const result = Agent.create({
-      model: model(async (request) => {
+    const result = Agent(
+      model(async (request) => {
         const arrival = request.arrivals[0];
         const text =
           arrival?.kind === "user-message" || arrival?.kind === "interrupt" ? arrival.text : "";
@@ -14,7 +14,7 @@ describe("Session loop", () => {
         seen.push(text);
         return text;
       }),
-    }).build();
+    ).build();
     const { session, handle: one } = turn(result, "one");
     const two = session.input({ kind: "user-message", text: "two" });
     const three = session.input({ kind: "interrupt", text: "three" });
@@ -32,15 +32,15 @@ describe("Session loop", () => {
 
   it("does not impose a native model-step ceiling", async () => {
     let modelCalls = 0;
-    const result = Agent.create({
-      model: model(async () =>
+    const result = Agent(
+      model(async () =>
         ++modelCalls <= 33
-          ? { toolCalls: [{ id: `call-${modelCalls}`, name: "echo", args: {} }] }
+          ? toolCalls({ id: `call-${modelCalls}`, name: "echo", args: {} })
           : "done",
       ),
-      adapters: { local: adapter(async () => ({ kind: "completed", output: "ok" })) },
-    })
-      .with(defineCapability({ id: "tools", setup: () => ({ tools: [tool()] }) }))
+    )
+      .with(adapter(async () => ({ kind: "completed", output: "ok" })))
+      .use("test", offer(tool()))
       .build();
 
     const completion = await turn(result, "go").handle.completed;
@@ -53,12 +53,12 @@ describe("Session loop", () => {
   });
 
   it("quarantines a late model result after stop", async () => {
-    const result = Agent.create({
-      model: model(async () => {
+    const result = Agent(
+      model(async () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return "late";
       }),
-    }).build();
+    ).build();
     const { session, handle } = turn(result, "go");
     await session.stop();
     const completion = await handle.completed;
@@ -81,13 +81,13 @@ describe("Session loop", () => {
       await adapterGate;
       return { kind: "completed", output: "late" };
     });
-    const result = Agent.create({
-      model: model(async () =>
-        ++modelStep === 1 ? { toolCalls: [{ id: "call", name: "echo", args: {} }] } : "next",
+    const result = Agent(
+      model(async () =>
+        ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "next",
       ),
-      adapters: { local },
-    })
-      .with(defineCapability({ id: "tools", setup: () => ({ tools: [tool()] }) }))
+    )
+      .with(local)
+      .use("test", offer(tool()))
       .build();
     const controller = new AbortController();
     const { session, handle: active } = turn(result, "first", { signal: controller.signal });
@@ -118,7 +118,7 @@ describe("Session loop", () => {
   });
 
   it("replays the Session conversation log from the start and is not input()", async () => {
-    const result = Agent.create({ model: model(async () => "hello") }).build();
+    const result = Agent(model(async () => "hello")).build();
     const session = result.run();
     const handle = session.input("go");
     expect(Symbol.asyncIterator in handle).toBe(false);

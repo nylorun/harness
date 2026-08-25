@@ -2,9 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AgentBuildError, defineCapability } from "@nylorun/harness";
-import type { Agent } from "@nylorun/harness";
-import type { CapabilityManifest as HarnessManifest, InputEvent, InputHandle, ObserveEvent, Session, SessionEvent } from "@nylorun/harness";
+import type { AgentManifest as HarnessManifest, BuiltAgent as HarnessAgent, InputEvent, InputHandle, ObserveEvent, Session, SessionEvent } from "@nylorun/harness";
 import { diagnostic, NyloBuildError } from "../diagnostics.js";
 import { stableJson } from "../manifest.js";
 import type { AgentConfig, CapabilityManifest, FolderDiagnostic } from "../types.js";
@@ -128,20 +126,20 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
         const invoker = new GatewayModelInvoker(input.config.model, gateway, (call) => {
           append(call.sessionId, "model.call", { content: call.content, tool_calls: call.toolCalls.map((item) => ({ id: item.id, name: item.name, arguments: JSON.stringify(item.args) })), tokens_in: call.usage.tokensIn, tokens_out: call.usage.tokensOut, ...(call.evidence ?? {}) });
         });
-        const harness = input.config.harness({
-          model: invoker,
-          adapters: { "runtime-local": bridged.adapter }
-        });
+        const builder = input.config.harness(invoker);
+        builder.with(bridged.adapter);
         const instructions = [input.config.instructions ?? "", ...loaded.skills.map((skill) => `Skill: ${skill.name}\n${skill.body}`)].filter(Boolean);
-        harness.add(defineCapability({ id: "nylorun-folder", setup: () => ({ tools: bridged.tools, instructions }) }));
-        const built = harness.build();
-        if (!built.ok) throw new AgentBuildError(built.diagnostics);
-        boundAgent = built.agent;
-        return Object.freeze({ manifest, diagnostics: Object.freeze(diagnostics), ...(model === undefined ? {} : { model }), harness: built.manifest });
+        builder.prepend("nylorun-folder", async (request, next) => {
+          for (const item of bridged.tools) request.tools.add(item);
+          for (const text of instructions) request.instructions.add(text);
+          return next();
+        });
+        boundAgent = builder.build();
+        return Object.freeze({ manifest, diagnostics: Object.freeze(diagnostics), ...(model === undefined ? {} : { model }), harness: boundAgent.manifest });
       })();
       return readiness;
     };
-    let boundAgent: Agent;
+    let boundAgent: HarnessAgent;
 
     const startInput = (id: string, event: InputEvent, options: StartOptions = {}): AgentRun => {
       if (closed) throw new Error("Agent runtime is closed.");

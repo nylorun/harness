@@ -1,33 +1,27 @@
-export { AgentBuilder, type AgentCreateOptions } from "./builder.js";
-export { Agent } from "./agent.js";
+export { Agent, AgentBuilder } from "./builder.js";
+export { BuiltAgent } from "./agent.js";
 export { AgentBuildError, AgentInvariantError, AgentLifecycleError } from "./errors.js";
-export {
-  defineAdapter,
-  defineCapability,
-  defineMiddleware,
-  defineModel,
-  defineTool,
-} from "./definitions.js";
+export { defineAdapter, defineMiddleware, defineModel, defineTool } from "./definitions.js";
 
+export type { AgentManifest } from "./types/manifest.js";
 export type {
-  Capability,
-  CapabilitySetupContext,
-  CapabilityContribution,
-  CapabilityManifest,
-} from "./types/capability.js";
-export type {
-  BoundModelId,
   ModelCandidate,
+  ModelControls,
+  ModelDirective,
+  ModelEvidence,
+  ModelFinishReason,
   ModelInvoker,
-  ModelRegistryInput,
+  ModelOutputBlock,
   ModelRequest,
   ModelToolCall,
+  ModelUsage,
 } from "./types/model.js";
 export type {
-  AfterModelContext,
-  BeforeModelContext,
+  BoundMiddleware,
   StepInput,
   StepMiddleware,
+  StepRequest,
+  StepResponse,
 } from "./types/middleware.js";
 export type {
   BuildDiagnostic,

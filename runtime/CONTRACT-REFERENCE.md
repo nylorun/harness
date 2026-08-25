@@ -1,7 +1,7 @@
 <!-- Generated from src/contract-reference.ts; do not edit. -->
 # Nylo authoring contract
 
-Use `Run((options) => new Harness(options), { model, … })`.
+Use `Run((model) => Agent(model), { model, … })`.
 
 ## Run options
 

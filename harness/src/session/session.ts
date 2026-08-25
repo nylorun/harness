@@ -25,13 +25,7 @@ export class LiveSession implements Session {
       ...(options.userId ? { userId: options.userId } : {}),
       ...(options.context ? { context: copyJsonObject(options.context, "session context") } : {}),
     });
-    this.scheduler = new SessionScheduler(
-      id,
-      agent,
-      options.model ?? agent.models.defaultModel,
-      session,
-    );
-    agent.models.require(options.model ?? agent.models.defaultModel);
+    this.scheduler = new SessionScheduler(id, agent, session);
     this.scheduler.observeKernel({ type: "session.created" });
   }
 

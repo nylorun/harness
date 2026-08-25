@@ -47,7 +47,6 @@ export interface TurnRunContext {
 export class TurnRunner {
   constructor(
     private readonly agent: LoopAgent,
-    private readonly defaultModel: string,
     private readonly sessionId: string,
     private readonly session: Readonly<{ readonly userId?: string; readonly context?: JsonObject }>,
   ) {}
@@ -108,7 +107,6 @@ export class TurnRunner {
         stepNumber,
         arrivals: stepArrivals,
         toolResults,
-        defaultModel: this.defaultModel,
         signal: context.signal,
         session: this.session,
       });
