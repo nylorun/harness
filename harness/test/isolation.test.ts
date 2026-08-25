@@ -1,18 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { Harness } from "../src/index.js";
+import { Agent } from "../src/index.js";
 import { model, turn } from "./fixtures.js";
 
 describe("Session isolation", () => {
   it("keeps parallel transcripts, queues, IDs, and outputs isolated", async () => {
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async (request) => {
         await Promise.resolve();
         return `${request.sessionId}:${request.arrivals[0]?.kind === "user-message" ? request.arrivals[0].text : ""}`;
       }),
     }).build();
-    if (!result.ok) throw new Error("build failed");
     const started = Array.from({ length: 40 }, (_, index) =>
-      turn(result.agent, `message-${index}`, { id: `session-${index}` }),
+      turn(result, `message-${index}`, { id: `session-${index}` }),
     );
     const sessions = started.map((item) => item.session);
     const completions = await Promise.all(started.map((item) => item.handle.completed));

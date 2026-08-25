@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
-import { Harness, defineCapability, defineTool } from "../src/index.js";
-import { adapter, model, turn } from "./fixtures.js";
+import { Agent, defineCapability, defineTool } from "../src/index.js";
+import { adapter, expectBuildError, model, turn } from "./fixtures.js";
 
 describe("Zod schemas", () => {
   it("executes a tool with Zod's parsed object output", async () => {
     let call = 0;
     let executed: unknown;
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () => {
         call += 1;
         return call === 1
@@ -21,7 +21,7 @@ describe("Zod schemas", () => {
         }),
       },
     })
-      .add(
+      .with(
         defineCapability({
           id: "parsed",
           setup: () => ({
@@ -37,19 +37,18 @@ describe("Zod schemas", () => {
         }),
       )
       .build();
-    if (!result.ok) throw new Error("build failed");
 
-    await turn(result.agent, "go").handle.completed;
+    await turn(result, "go").handle.completed;
     expect(executed).toEqual({ count: 2 });
   });
 
   it("binds a Zod object and publishes its JSON Schema", async () => {
     const input = z.object({ text: z.string() });
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () => "done"),
       adapters: { local: adapter() },
     })
-      .add(
+      .with(
         defineCapability({
           id: "zod",
           setup: () => ({
@@ -59,91 +58,88 @@ describe("Zod schemas", () => {
       )
       .build();
 
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.manifest.tools[0]?.jsonSchema).toMatchObject({
-        type: "object",
-        properties: { text: { type: "string" } },
-      });
-    }
+    expect(result.manifest.tools[0]?.jsonSchema).toMatchObject({
+      type: "object",
+      properties: { text: { type: "string" } },
+    });
   });
 
-  it("rejects a non-object Zod root at build", async () => {
-    const result = await new Harness({
-      model: model(async () => "done"),
-      adapters: { local: adapter() },
-    })
-      .add(
-        defineCapability({
-          id: "bad",
-          setup: () => ({
-            tools: [
-              defineTool({
-                name: "bad",
-                input: z.string() as never,
-                executeWith: "local",
-                route: {},
-              }),
-            ],
+  it("rejects a non-object Zod root at build", () => {
+    const error = expectBuildError(() =>
+      Agent.create({
+        model: model(async () => "done"),
+        adapters: { local: adapter() },
+      })
+        .with(
+          defineCapability({
+            id: "bad",
+            setup: () => ({
+              tools: [
+                defineTool({
+                  name: "bad",
+                  input: z.string() as never,
+                  executeWith: "local",
+                  route: {},
+                }),
+              ],
+            }),
           }),
-        }),
-      )
-      .build();
-
-    expect(result.ok).toBe(false);
-    expect(!result.ok && result.diagnostics[0]?.code).toBe("tool.invalid");
+        )
+        .build(),
+    );
+    expect(error.diagnostics[0]?.code).toBe("tool.invalid");
   });
 
-  it("rejects declared asynchronous Zod checks at build", async () => {
+  it("rejects declared asynchronous Zod checks at build", () => {
     const input = z.object({ text: z.string() }).refine(async () => true);
-    const result = await new Harness({
-      model: model(async () => "done"),
-      adapters: { local: adapter() },
-    })
-      .add(
-        defineCapability({
-          id: "async",
-          setup: () => ({
-            tools: [defineTool({ name: "async", input, executeWith: "local", route: {} })],
+    const error = expectBuildError(() =>
+      Agent.create({
+        model: model(async () => "done"),
+        adapters: { local: adapter() },
+      })
+        .with(
+          defineCapability({
+            id: "async",
+            setup: () => ({
+              tools: [defineTool({ name: "async", input, executeWith: "local", route: {} })],
+            }),
           }),
-        }),
-      )
-      .build();
-
-    expect(result.ok).toBe(false);
-    expect(!result.ok && result.diagnostics[0]?.message).toContain("validate synchronously");
+        )
+        .build(),
+    );
+    expect(error.diagnostics[0]?.message).toContain("validate synchronously");
   });
 
-  it("rejects a Zod object that cannot convert to JSON Schema", async () => {
-    const result = await new Harness({
-      model: model(async () => "done"),
-      adapters: { local: adapter() },
-    })
-      .add(
-        defineCapability({
-          id: "unconvertible",
-          setup: () => ({
-            tools: [
-              defineTool({
-                name: "bigint",
-                input: z.object({ value: z.bigint() }),
-                executeWith: "local",
-                route: {},
-              }),
-            ],
+  it("rejects a Zod object that cannot convert to JSON Schema", () => {
+    const error = expectBuildError(() =>
+      Agent.create({
+        model: model(async () => "done"),
+        adapters: { local: adapter() },
+      })
+        .with(
+          defineCapability({
+            id: "unconvertible",
+            setup: () => ({
+              tools: [
+                defineTool({
+                  name: "bigint",
+                  input: z.object({ value: z.bigint() }),
+                  executeWith: "local",
+                  route: {},
+                }),
+              ],
+            }),
           }),
-        }),
-      )
-      .build();
-
-    expect(result.ok).toBe(false);
-    expect(!result.ok && result.diagnostics[0]?.code).toBe("tool.invalid");
-    expect(!result.ok && result.diagnostics[0]?.message).toContain("convert to JSON Schema");
+        )
+        .build(),
+    );
+    expect(error.diagnostics[0]?.code).toBe("tool.invalid");
+    expect(error.diagnostics[0]?.message).toContain("convert to JSON Schema");
   });
 
   it("seals invalid Zod arguments as tool.invalid-arguments", async () => {
     let call = 0;
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () => {
         call += 1;
         return call === 1
@@ -152,7 +148,7 @@ describe("Zod schemas", () => {
       }),
       adapters: { local: adapter() },
     })
-      .add(
+      .with(
         defineCapability({
           id: "typed",
           setup: () => ({
@@ -168,9 +164,8 @@ describe("Zod schemas", () => {
         }),
       )
       .build();
-    if (!result.ok) throw new Error("build failed");
 
-    const { session, handle } = turn(result.agent, "go");
+    const { session, handle } = turn(result, "go");
     await handle.completed;
     const entry = session.state.transcript.find((item) => item.kind === "tool-results");
     expect(entry?.kind).toBe("tool-results");

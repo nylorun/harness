@@ -16,7 +16,7 @@ export interface Capability {
   readonly id: string;
   readonly version?: string;
   readonly middleware?: readonly StepMiddleware[];
-  setup?(context: CapabilitySetupContext): CapabilityContribution | Promise<CapabilityContribution>;
+  setup?(context: CapabilitySetupContext): CapabilityContribution;
 }
 
 export interface CapabilityManifestTool {

@@ -1,6 +1,6 @@
-export { Harness, type HarnessOptions } from "./harness.js";
+export { AgentBuilder, type AgentCreateOptions } from "./builder.js";
 export { Agent } from "./agent.js";
-export { AgentBuildError, HarnessInvariantError, HarnessLifecycleError } from "./errors.js";
+export { AgentBuildError, AgentInvariantError, AgentLifecycleError } from "./errors.js";
 export {
   defineAdapter,
   defineCapability,
@@ -10,7 +10,6 @@ export {
 } from "./definitions.js";
 
 export type {
-  BuildResult,
   Capability,
   CapabilitySetupContext,
   CapabilityContribution,

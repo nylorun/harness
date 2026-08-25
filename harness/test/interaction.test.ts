@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Harness, defineCapability, defineMiddleware } from "../src/index.js";
+import { Agent, defineCapability, defineMiddleware } from "../src/index.js";
 import { adapter, model, tool, turn } from "./fixtures.js";
 
 describe("interaction resume", () => {
@@ -41,13 +41,13 @@ describe("interaction resume", () => {
       },
     });
     let step = 0;
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () =>
         ++step === 1 ? { toolCalls: [{ id: "call", name: "echo", args: {} }] } : "done",
       ),
       adapters: { local },
     })
-      .add(
+      .with(
         defineCapability({
           id: "test",
           middleware: [middleware],
@@ -55,8 +55,7 @@ describe("interaction resume", () => {
         }),
       )
       .build();
-    if (!result.ok) throw new Error("build failed");
-    const { session, handle: streamed } = turn(result.agent, "go");
+    const { session, handle: streamed } = turn(result, "go");
     const first = await streamed.completed;
     expect(first.status).toBe("waiting");
     const required = first.events.find((event) => event.type === "interaction.required");
@@ -78,9 +77,8 @@ describe("interaction resume", () => {
 
   it("rejects stale correlation without exposing it to the Model", async () => {
     const invoke = vi.fn(async () => "done");
-    const result = await new Harness({ model: model(invoke) }).build();
-    if (!result.ok) throw new Error("build failed");
-    const completion = await turn(result.agent, {
+    const result = Agent.create({ model: model(invoke) }).build();
+    const completion = await turn(result, {
       kind: "approve",
       interactionId: "stale",
       approved: true,
@@ -98,7 +96,7 @@ describe("interaction resume", () => {
         ctx.requireInteraction("first-call", { kind: "approval", prompt: "approve" });
       },
     });
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () =>
         ++modelStep === 1
           ? {
@@ -111,7 +109,7 @@ describe("interaction resume", () => {
       ),
       adapters: { local: adapter() },
     })
-      .add(
+      .with(
         defineCapability({
           id: "tools",
           middleware: [middleware],
@@ -119,10 +117,9 @@ describe("interaction resume", () => {
         }),
       )
       .build();
-    if (!result.ok) throw new Error("build failed");
     const firstController = new AbortController();
     const firstRemove = vi.spyOn(firstController.signal, "removeEventListener");
-    const { session, handle: streamed } = turn(result.agent, "wait", {
+    const { session, handle: streamed } = turn(result, "wait", {
       signal: firstController.signal,
     });
     const first = await streamed.completed;
@@ -163,13 +160,13 @@ describe("interaction resume", () => {
       await new Promise((resolve) => setTimeout(resolve, 35));
       return { kind: "completed", output: "too late" };
     });
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () =>
         ++modelStep === 1 ? { toolCalls: [{ id: "call", name: "echo", args: {} }] } : "done",
       ),
       adapters: { local },
     })
-      .add(
+      .with(
         defineCapability({
           id: "tools",
           middleware: [middleware],
@@ -177,8 +174,7 @@ describe("interaction resume", () => {
         }),
       )
       .build();
-    if (!result.ok) throw new Error("build failed");
-    const { session, handle: streamed } = turn(result.agent, "go");
+    const { session, handle: streamed } = turn(result, "go");
     const first = await streamed.completed;
     const required = first.events.find((event) => event.type === "interaction.required");
     if (!required || required.type !== "interaction.required")

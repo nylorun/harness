@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Harness, defineCapability, defineMiddleware } from "../src/index.js";
+import { Agent, defineCapability, defineMiddleware } from "../src/index.js";
 import { model, turn } from "./fixtures.js";
 
 describe("lifecycle", () => {
@@ -12,16 +12,15 @@ describe("lifecycle", () => {
     const modelGate = new Promise<void>((resolve) => {
       settleModel = resolve;
     });
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () => {
         markStarted();
         await modelGate;
         return "late";
       }),
     }).build();
-    if (!result.ok) throw new Error("build failed");
 
-    const { session, handle } = turn(result.agent, "go");
+    const { session, handle } = turn(result, "go");
     await modelStarted;
     const stopped = session.stop();
     let ended = false;
@@ -38,8 +37,8 @@ describe("lifecycle", () => {
   });
 
   it("lets middleware stop a Session with an application-owned turn policy", async () => {
-    const result = await new Harness({ model: model(async () => "done") })
-      .add(
+    const result = Agent.create({ model: model(async () => "done") })
+      .with(
         defineCapability({
           id: "turn-policy",
           middleware: [
@@ -58,8 +57,7 @@ describe("lifecycle", () => {
         }),
       )
       .build();
-    if (!result.ok) throw new Error("build failed");
-    const { session, handle } = turn(result.agent, "one");
+    const { session, handle } = turn(result, "one");
     await handle.completed;
     await expect(
       session.input({ kind: "user-message", text: "two" }).completed,
@@ -71,8 +69,8 @@ describe("lifecycle", () => {
   });
 
   it("keeps a Session usable after a step-scoped middleware tripwire", async () => {
-    const result = await new Harness({ model: model(async () => "done") })
-      .add(
+    const result = Agent.create({ model: model(async () => "done") })
+      .with(
         defineCapability({
           id: "step-policy",
           middleware: [
@@ -90,8 +88,7 @@ describe("lifecycle", () => {
         }),
       )
       .build();
-    if (!result.ok) throw new Error("build failed");
-    const { session, handle: first } = turn(result.agent, "one");
+    const { session, handle: first } = turn(result, "one");
     await expect(first.completed).resolves.toMatchObject({
       status: "completed",
       events: [

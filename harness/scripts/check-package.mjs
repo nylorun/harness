@@ -49,8 +49,10 @@ try {
   }
   const entry = await import(new URL("../dist/index.js", import.meta.url));
   for (const name of [
-    "Harness",
+    "AgentBuilder",
     "AgentBuildError",
+    "AgentLifecycleError",
+    "AgentInvariantError",
     "Agent",
     "defineCapability",
     "defineTool",

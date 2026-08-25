@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { Harness } from "../src/index.js";
+import { Agent } from "../src/index.js";
 import { model } from "./fixtures.js";
 
 describe("observation", () => {
   it("is causal within a run and fail-open for sync and async observer failures", async () => {
     const types: string[] = [];
     let count = 0;
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () => "done"),
     }).build();
-    if (!result.ok) throw new Error("build failed");
-    const session = result.agent.run();
+    const session = result.run();
     session.observe((event) => {
       types.push(event.type);
       count += 1;

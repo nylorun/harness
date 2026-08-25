@@ -1,29 +1,38 @@
-import type { BuildResult, Capability } from "./types/capability.js";
 import type { Agent } from "./agent.js";
-import { HarnessLifecycleError } from "./errors.js";
-import { assembleAgent, type HarnessOptions } from "./build/assemble.js";
+import type { Capability } from "./types/capability.js";
+import { AgentBuildError, AgentLifecycleError } from "./errors.js";
+import { assembleAgent, type AgentCreateOptions } from "./build/assemble.js";
 
-export type { HarnessOptions };
+export type { AgentCreateOptions };
 
-export class Harness {
+export class AgentBuilder {
   private readonly capabilities: Capability[] = [];
-  private buildPromise?: Promise<BuildResult<Agent>>;
+  private sealed = false;
+  private agent?: Agent;
+  private error?: AgentBuildError;
 
-  constructor(private readonly options: HarnessOptions) {}
+  constructor(private readonly options: AgentCreateOptions) {}
 
-  add(capability: Capability): this {
-    if (this.buildPromise)
-      throw new HarnessLifecycleError("Harness cannot be changed after build() starts");
+  with(capability: Capability): this {
+    if (this.sealed) throw new AgentLifecycleError("AgentBuilder cannot be changed after build()");
     this.capabilities.push(capability);
     return this;
   }
 
-  build(): Promise<BuildResult<Agent>> {
-    this.buildPromise ??= assembleAgent(
+  build(): Agent {
+    if (this.agent) return this.agent;
+    if (this.error) throw this.error;
+    this.sealed = true;
+    const result = assembleAgent(
       Object.freeze(this.capabilities.map(snapshotCapability)),
       this.options,
     );
-    return this.buildPromise;
+    if (!result.ok) {
+      this.error = new AgentBuildError(result.diagnostics);
+      throw this.error;
+    }
+    this.agent = result.agent;
+    return this.agent;
   }
 }
 

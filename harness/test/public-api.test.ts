@@ -6,9 +6,11 @@ describe("public API", () => {
   it("exports the documented construction helpers and only the root subpath", () => {
     expect(Object.keys(api)).toEqual(
       expect.arrayContaining([
-        "Harness",
         "Agent",
+        "AgentBuilder",
         "AgentBuildError",
+        "AgentLifecycleError",
+        "AgentInvariantError",
         "defineCapability",
         "defineTool",
         "defineMiddleware",
@@ -16,6 +18,7 @@ describe("public API", () => {
         "defineModel",
       ]),
     );
+    expect(api).not.toHaveProperty("bindAgent");
     expect(manifest.exports).toHaveProperty(".");
     expect(Object.keys(manifest.exports)).toEqual(["."]);
     expect(manifest).not.toHaveProperty("dependencies");

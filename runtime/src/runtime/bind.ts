@@ -134,7 +134,7 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
         });
         const instructions = [input.config.instructions ?? "", ...loaded.skills.map((skill) => `Skill: ${skill.name}\n${skill.body}`)].filter(Boolean);
         harness.add(defineCapability({ id: "nylorun-folder", setup: () => ({ tools: bridged.tools, instructions }) }));
-        const built = await harness.build();
+        const built = harness.build();
         if (!built.ok) throw new AgentBuildError(built.diagnostics);
         boundAgent = built.agent;
         return Object.freeze({ manifest, diagnostics: Object.freeze(diagnostics), ...(model === undefined ? {} : { model }), harness: built.manifest });

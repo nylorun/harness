@@ -7,16 +7,16 @@ export class AgentBuildError extends Error {
   }
 }
 
-export class HarnessLifecycleError extends Error {
+export class AgentLifecycleError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "HarnessLifecycleError";
+    this.name = "AgentLifecycleError";
   }
 }
 
-export class HarnessInvariantError extends Error {
+export class AgentInvariantError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "HarnessInvariantError";
+    this.name = "AgentInvariantError";
   }
 }

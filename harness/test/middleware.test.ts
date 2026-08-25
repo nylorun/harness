@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Harness, defineCapability, defineMiddleware } from "../src/index.js";
+import { Agent, defineCapability, defineMiddleware } from "../src/index.js";
 import { adapter, model, tool, turn } from "./fixtures.js";
 
 describe("middleware", () => {
@@ -28,17 +28,16 @@ describe("middleware", () => {
         order.push("exit-two");
       },
     });
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async (request) => {
         order.push(`model:${request.instructions.at(-1)}`);
         return "done";
       }),
       adapters: { local: adapter() },
     })
-      .add(defineCapability({ id: "mw", middleware: [one], setup: () => ({ middleware: [two] }) }))
+      .with(defineCapability({ id: "mw", middleware: [one], setup: () => ({ middleware: [two] }) }))
       .build();
-    if (!result.ok) throw new Error("build failed");
-    await turn(result.agent, "go").handle.completed;
+    await turn(result, "go").handle.completed;
     expect(order).toEqual([
       "before-one",
       "before-two",
@@ -58,15 +57,14 @@ describe("middleware", () => {
           ctx.selectModel(modelId);
         },
       });
-    const result = await new Harness({
+    const result = Agent.create({
       models: { a: model(async () => "a"), b: model(async () => "b") },
       defaultModel: "a",
       adapters: {},
     })
-      .add(defineCapability({ id: "mw", middleware: [select("a", "a"), select("b", "b")] }))
+      .with(defineCapability({ id: "mw", middleware: [select("a", "a"), select("b", "b")] }))
       .build();
-    if (!result.ok) throw new Error("build failed");
-    const output = (await turn(result.agent, "go").handle.completed).events;
+    const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
       { type: "tripwire", tripwire: { code: "model.selection-conflict" } },
     ]);
@@ -82,18 +80,17 @@ describe("middleware", () => {
         order.push("middleware-returned");
       },
     });
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         order.push("model-completed");
         return "done";
       }),
     })
-      .add(defineCapability({ id: "mw", middleware: [middleware] }))
+      .with(defineCapability({ id: "mw", middleware: [middleware] }))
       .build();
-    if (!result.ok) throw new Error("build failed");
 
-    const output = (await turn(result.agent, "go").handle.completed).events;
+    const output = (await turn(result, "go").handle.completed).events;
 
     expect(order).toEqual(["middleware-entered", "middleware-returned", "model-completed"]);
     expect(output).toMatchObject([{ type: "final", output: "done" }]);
@@ -144,7 +141,7 @@ describe("middleware", () => {
       },
     });
     let step = 0;
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async (request) => {
         if (++step > 1) return "done";
         expect(request.tools.map((item) => item.name)).toEqual(["echo"]);
@@ -157,7 +154,7 @@ describe("middleware", () => {
       }),
       adapters: { local: adapter(execute) },
     })
-      .add(
+      .with(
         defineCapability({
           id: "mw",
           middleware: [attacker, restrictions],
@@ -165,9 +162,8 @@ describe("middleware", () => {
         }),
       )
       .build();
-    if (!result.ok) throw new Error("build failed");
 
-    const { session, handle: streamed } = turn(result.agent, "go");
+    const { session, handle: streamed } = turn(result, "go");
     const output = (await streamed.completed).events;
     const toolEntry = session.state.transcript.find((entry) => entry.kind === "tool-results");
 
@@ -214,11 +210,10 @@ describe("middleware", () => {
       }),
     ];
     for (const middleware of cases) {
-      const result = await new Harness({ model: model(invoke) })
-        .add(defineCapability({ id: middleware.id, middleware: [middleware] }))
+      const result = Agent.create({ model: model(invoke) })
+        .with(defineCapability({ id: middleware.id, middleware: [middleware] }))
         .build();
-      if (!result.ok) throw new Error("build failed");
-      const output = (await turn(result.agent, "go").handle.completed).events;
+      const output = (await turn(result, "go").handle.completed).events;
       expect(output).toMatchObject([
         { type: "tripwire", tripwire: { code: "middleware.around-failed" } },
       ]);
@@ -239,7 +234,7 @@ describe("middleware", () => {
         });
       },
     });
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async (request) => {
         expect(request.context).toEqual([{ type: "fixture", value: { nested: { value: 1 } } }]);
         expect(Object.isFrozen((request.context[0]?.value as { nested: object }).nested)).toBe(
@@ -248,9 +243,8 @@ describe("middleware", () => {
         return "done";
       }),
     })
-      .add(defineCapability({ id: "context", middleware: [middleware] }))
+      .with(defineCapability({ id: "context", middleware: [middleware] }))
       .build();
-    if (!result.ok) throw new Error("build failed");
-    await turn(result.agent, "go").handle.completed;
+    await turn(result, "go").handle.completed;
   });
 });

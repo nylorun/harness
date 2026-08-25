@@ -1,8 +1,8 @@
-import type { BuildResult, Capability } from "../types/capability.js";
+import type { BuildResult, Capability, CapabilityContribution } from "../types/capability.js";
 import type { StepMiddleware } from "../types/middleware.js";
 import type { BuildDiagnostic } from "../types/shared.js";
 import type { BoundToolDefinition, ToolDefinition } from "../types/tool.js";
-import { Agent } from "../agent.js";
+import { bindAgent, type Agent } from "../agent.js";
 import { copyJson, copyJsonObject } from "../utils/immutable.js";
 import { normalizeSchema } from "./schema.js";
 import { createModelRegistry, type ModelRegistry } from "./models.js";
@@ -10,7 +10,7 @@ import { createAdapterRegistry, type AdapterInput, type AdapterRegistry } from "
 import { createManifest } from "./manifest.js";
 import type { ModelInvoker, ModelRegistryInput } from "../types/model.js";
 
-export interface HarnessOptions {
+export interface AgentCreateOptions {
   readonly adapters?: AdapterInput;
   readonly model?: ModelInvoker;
   readonly models?: ModelRegistryInput;
@@ -23,10 +23,10 @@ const diagnostic = (
   extra: Partial<BuildDiagnostic> = {},
 ): BuildDiagnostic => Object.freeze({ code, message, ...extra });
 
-export async function assembleAgent(
+export function assembleAgent(
   capabilities: readonly Capability[],
-  options: HarnessOptions,
-): Promise<BuildResult<Agent>> {
+  options: AgentCreateOptions,
+): BuildResult<Agent> {
   const diagnostics: BuildDiagnostic[] = [];
   let adapters: AdapterRegistry;
   let models: ModelRegistry;
@@ -72,18 +72,12 @@ export async function assembleAgent(
     capabilityIds.add(capability.id);
   }
 
-  const settled = await Promise.allSettled(
-    capabilities.map(async (capability) => {
-      const adapterAccess = Object.freeze({ require: adapters.require });
-      return (await capability.setup?.({ adapters: adapterAccess })) ?? {};
-    }),
-  );
-
   const tools: BoundToolDefinition[] = [];
   const middleware: StepMiddleware[] = [];
   const instructions: string[] = [];
   const toolNames = new Set<string>();
   const middlewareIds = new Set<string>();
+  const adapterAccess = Object.freeze({ require: adapters.require });
 
   const addMiddleware = (item: StepMiddleware, capabilityId: string): void => {
     if (!item.id)
@@ -157,26 +151,28 @@ export async function assembleAgent(
     }
   };
 
-  for (let index = 0; index < capabilities.length; index += 1) {
-    const capability = capabilities[index]!;
-    const result = settled[index]!;
+  for (const capability of capabilities) {
     for (const item of capability.middleware ?? []) addMiddleware(item, capability.id);
-    if (result.status === "rejected") {
+    let contribution: CapabilityContribution;
+    try {
+      contribution = capability.setup?.({ adapters: adapterAccess }) ?? {};
+    } catch (cause) {
       diagnostics.push(
         diagnostic(
           "capability.setup-failed",
-          `Capability '${capability.id}' failed to setup: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
-          { capabilityId: capability.id, cause: result.reason },
+          `Capability '${capability.id}' failed to setup: ${cause instanceof Error ? cause.message : String(cause)}`,
+          { capabilityId: capability.id, cause },
         ),
       );
       continue;
     }
-    const contribution = result.value;
-    if (!contribution || typeof contribution !== "object") {
+    if (!contribution || typeof contribution !== "object" || isThenable(contribution)) {
       diagnostics.push(
         diagnostic(
           "capability.invalid-contribution",
-          `Capability '${capability.id}' returned an invalid contribution`,
+          isThenable(contribution)
+            ? `Capability '${capability.id}' setup must return a contribution synchronously`
+            : `Capability '${capability.id}' returned an invalid contribution`,
           { capabilityId: capability.id },
         ),
       );
@@ -210,7 +206,7 @@ export async function assembleAgent(
     models,
     adapters,
   });
-  const agent = new Agent(
+  const agent = bindAgent(
     frozenTools,
     frozenInstructions,
     frozenMiddleware,
@@ -219,4 +215,13 @@ export async function assembleAgent(
     manifest,
   );
   return Object.freeze({ ok: true, agent, manifest });
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "then" in value &&
+    typeof value.then === "function"
+  );
 }

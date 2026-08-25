@@ -1,64 +1,101 @@
 import { describe, expect, it } from "vitest";
-import { Harness, defineCapability } from "../src/index.js";
+import { Agent, defineCapability } from "../src/index.js";
 import { createAdapterRegistry } from "../src/build/adapters.js";
 import { createModelRegistry } from "../src/build/models.js";
-import { adapter, model, tool, turn } from "./fixtures.js";
+import { adapter, expectBuildError, model, tool, turn } from "./fixtures.js";
 
 describe("build", () => {
-  it("settles setup concurrently and merges in registration order", async () => {
+  it("invokes setup in registration order and returns a frozen agent", () => {
     const order: string[] = [];
     const first = defineCapability({
       id: "first",
-      async setup() {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        order.push("first-finished");
+      setup() {
+        order.push("first");
         return { tools: [tool("first")], instructions: ["first"] };
       },
     });
     const second = defineCapability({
       id: "second",
-      async setup() {
-        order.push("second-finished");
+      setup() {
+        order.push("second");
         return { tools: [tool("second")], instructions: ["second"] };
       },
     });
-    const harness = new Harness({
+    const builder = Agent.create({
       model: model(async () => "done"),
       adapters: { local: adapter() },
     })
-      .add(first)
-      .add(second);
-    const promise = harness.build();
-    expect(harness.build()).toBe(promise);
-    expect(() => harness.add(first)).toThrow(/after build/);
-    const result = await promise;
-    expect(order).toEqual(["second-finished", "first-finished"]);
-    expect(result.ok && result.agent.catalog.map((item) => item.name)).toEqual(["first", "second"]);
-    expect(result.ok && result.manifest.instructions).toEqual(["first", "second"]);
-    expect(result.ok && Object.isFrozen(result.manifest)).toBe(true);
+      .with(first)
+      .with(second);
+    const agent = builder.build();
+    expect(builder.build()).toBe(agent);
+    expect(() => builder.with(first)).toThrow(/after build/);
+    expect(order).toEqual(["first", "second"]);
+    expect(agent.catalog.map((item) => item.name)).toEqual(["first", "second"]);
+    expect(agent.manifest.instructions).toEqual(["first", "second"]);
+    expect(Object.isFrozen(agent.manifest)).toBe(true);
   });
 
-  it("returns diagnostics when contributions are invalid", async () => {
-    const harness = new Harness({
-      model: model(async () => "done"),
-      adapters: { local: adapter() },
-    })
-      .add(defineCapability({ id: "one", setup: () => ({}) }))
-      .add(defineCapability({ id: "two", setup: () => ({ tools: [tool("same")] }) }))
-      .add(defineCapability({ id: "three", setup: () => ({ tools: [tool("same")] }) }));
-    const result = await harness.build();
-    expect(result.ok).toBe(false);
-    expect(
-      !result.ok && result.diagnostics.some((item) => item.code === "tool.duplicate-name"),
-    ).toBe(true);
+  it("throws AgentBuildError when contributions are invalid", () => {
+    const error = expectBuildError(() =>
+      Agent.create({
+        model: model(async () => "done"),
+        adapters: { local: adapter() },
+      })
+        .with(defineCapability({ id: "one", setup: () => ({}) }))
+        .with(defineCapability({ id: "two", setup: () => ({ tools: [tool("same")] }) }))
+        .with(defineCapability({ id: "three", setup: () => ({ tools: [tool("same")] }) }))
+        .build(),
+    );
+    expect(error.diagnostics.some((item) => item.code === "tool.duplicate-name")).toBe(true);
   });
 
-  it("exposes fixed registry views and a require-only capability setup context", async () => {
+  it("records a setup exception as a diagnostic", () => {
+    const error = expectBuildError(() =>
+      Agent.create({ model: model(async () => "done") })
+        .with(
+          defineCapability({
+            id: "broken",
+            setup() {
+              throw new Error("boom");
+            },
+          }),
+        )
+        .build(),
+    );
+    expect(error.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "capability.setup-failed",
+        message: "Capability 'broken' failed to setup: boom",
+        capabilityId: "broken",
+      }),
+    ]);
+  });
+
+  it("rejects a thenable setup contribution", () => {
+    const error = expectBuildError(() =>
+      Agent.create({ model: model(async () => "done") })
+        .with({
+          id: "async",
+          setup: () => Promise.resolve({}) as never,
+        })
+        .build(),
+    );
+    expect(error.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "capability.invalid-contribution",
+        message: "Capability 'async' setup must return a contribution synchronously",
+        capabilityId: "async",
+      }),
+    ]);
+  });
+
+  it("exposes fixed registry views and a require-only capability setup context", () => {
     let bindAdapters: unknown;
     const local = adapter();
     const invoker = model(async () => "done");
-    const result = await new Harness({ model: invoker, adapters: { local } })
-      .add(
+    const agent = Agent.create({ model: invoker, adapters: { local } })
+      .with(
         defineCapability({
           id: "inspect",
           setup({ adapters }) {
@@ -68,7 +105,6 @@ describe("build", () => {
         }),
       )
       .build();
-    if (!result.ok) throw new Error("build failed");
 
     expect(Object.isFrozen(bindAdapters)).toBe(true);
     expect(Object.keys(bindAdapters as object)).toEqual(["require"]);
@@ -90,42 +126,35 @@ describe("build", () => {
     expect([...createAdapterRegistry({ local }).entries.keys()]).toEqual(["local"]);
     expect([...createModelRegistry({ model: invoker }).entries.keys()]).toEqual(["default"]);
 
-    const rawAgent = result.agent as unknown as Record<string, unknown>;
+    const rawAgent = agent as unknown as Record<string, unknown>;
     expect(rawAgent.models).toBeUndefined();
     expect(rawAgent.adapters).toBeUndefined();
     expect(rawAgent.catalogByName).toBeUndefined();
   });
 
-  it("snapshots capability descriptors at add()", async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+  it("snapshots capability descriptors when build() starts", () => {
     const capability = {
       id: "original",
       version: "1",
-      async setup() {
-        await gate;
+      setup() {
+        capability.id = "mutated";
+        capability.version = "2";
         return {};
       },
     };
-    const pending = new Harness({ model: model(async () => "done") }).add(capability).build();
-    capability.id = "mutated";
-    capability.version = "2";
-    release();
-    const result = await pending;
-    if (!result.ok) throw new Error("build failed");
-    expect(result.manifest.capabilities).toEqual([{ id: "original", version: "1" }]);
+    const agent = Agent.create({ model: model(async () => "done") })
+      .with(capability)
+      .build();
+    expect(agent.manifest.capabilities).toEqual([{ id: "original", version: "1" }]);
   });
 
   it("starts a Session from run without submitting input", async () => {
-    const result = await new Harness({ model: model(async () => "hello") }).build();
-    if (!result.ok) throw new Error("build failed");
-    const session = result.agent.run();
+    const agent = Agent.create({ model: model(async () => "hello") }).build();
+    const session = agent.run();
     expect(session.state.status).toBe("idle");
     await session.input("hi").completed;
     expect(session.state.transcript.some((entry) => entry.kind === "final")).toBe(true);
-    const other = turn(result.agent, "other");
+    const other = turn(agent, "other");
     expect(other.session.id).not.toBe(session.id);
     await other.handle.completed;
     await session.stop();

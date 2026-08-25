@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { Harness, defineCapability } from "../src/index.js";
+import { Agent, defineCapability } from "../src/index.js";
 import { adapter, model, tool, turn } from "./fixtures.js";
 
 describe("Session loop", () => {
   it("submits eagerly and processes overlapping inputs FIFO", async () => {
     const seen: string[] = [];
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async (request) => {
         const arrival = request.arrivals[0];
         const text =
@@ -15,8 +15,7 @@ describe("Session loop", () => {
         return text;
       }),
     }).build();
-    if (!result.ok) throw new Error("build failed");
-    const { session, handle: one } = turn(result.agent, "one");
+    const { session, handle: one } = turn(result, "one");
     const two = session.input({ kind: "user-message", text: "two" });
     const three = session.input({ kind: "interrupt", text: "three" });
     expect(
@@ -33,7 +32,7 @@ describe("Session loop", () => {
 
   it("does not impose a native model-step ceiling", async () => {
     let modelCalls = 0;
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () =>
         ++modelCalls <= 33
           ? { toolCalls: [{ id: `call-${modelCalls}`, name: "echo", args: {} }] }
@@ -41,11 +40,10 @@ describe("Session loop", () => {
       ),
       adapters: { local: adapter(async () => ({ kind: "completed", output: "ok" })) },
     })
-      .add(defineCapability({ id: "tools", setup: () => ({ tools: [tool()] }) }))
+      .with(defineCapability({ id: "tools", setup: () => ({ tools: [tool()] }) }))
       .build();
-    if (!result.ok) throw new Error("build failed");
 
-    const completion = await turn(result.agent, "go").handle.completed;
+    const completion = await turn(result, "go").handle.completed;
 
     expect(completion).toMatchObject({
       status: "completed",
@@ -55,14 +53,13 @@ describe("Session loop", () => {
   });
 
   it("quarantines a late model result after stop", async () => {
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return "late";
       }),
     }).build();
-    if (!result.ok) throw new Error("build failed");
-    const { session, handle } = turn(result.agent, "go");
+    const { session, handle } = turn(result, "go");
     await session.stop();
     const completion = await handle.completed;
     expect(completion.status).toBe("stopped");
@@ -84,17 +81,16 @@ describe("Session loop", () => {
       await adapterGate;
       return { kind: "completed", output: "late" };
     });
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async () =>
         ++modelStep === 1 ? { toolCalls: [{ id: "call", name: "echo", args: {} }] } : "next",
       ),
       adapters: { local },
     })
-      .add(defineCapability({ id: "tools", setup: () => ({ tools: [tool()] }) }))
+      .with(defineCapability({ id: "tools", setup: () => ({ tools: [tool()] }) }))
       .build();
-    if (!result.ok) throw new Error("build failed");
     const controller = new AbortController();
-    const { session, handle: active } = turn(result.agent, "first", { signal: controller.signal });
+    const { session, handle: active } = turn(result, "first", { signal: controller.signal });
     await adapterStarted;
     const queued = session.input({ kind: "user-message", text: "second" });
     controller.abort(new Error("stop the tool"));
@@ -122,9 +118,8 @@ describe("Session loop", () => {
   });
 
   it("replays the Session conversation log from the start and is not input()", async () => {
-    const result = await new Harness({ model: model(async () => "hello") }).build();
-    if (!result.ok) throw new Error("build failed");
-    const session = result.agent.run();
+    const result = Agent.create({ model: model(async () => "hello") }).build();
+    const session = result.run();
     const handle = session.input("go");
     expect(Symbol.asyncIterator in handle).toBe(false);
     await handle.completed;

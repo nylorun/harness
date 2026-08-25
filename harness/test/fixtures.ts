@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  AgentBuildError,
   defineAdapter,
   defineCapability,
   defineModel,
@@ -32,6 +33,16 @@ export function adapter(execute?: ToolAdapter["execute"]) {
 
 export function model(invoke: ModelInvoker["invoke"]) {
   return defineModel({ id: "test-model", invoke });
+}
+
+export function expectBuildError(build: () => unknown): AgentBuildError {
+  try {
+    build();
+  } catch (error) {
+    if (error instanceof AgentBuildError) return error;
+    throw error;
+  }
+  throw new Error("expected AgentBuildError");
 }
 
 export function turn(

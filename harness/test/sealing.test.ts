@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { Harness } from "../src/index.js";
+import { Agent } from "../src/index.js";
 import { adapter, capability, model, tool, turn } from "./fixtures.js";
 
 describe("sealing", () => {
   it("turns invalid calls into paired failures and dispatches only sealed calls", async () => {
     const execute = vi.fn(async (call) => ({ kind: "completed" as const, output: call.args }));
     let calls = 0;
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async (request) => {
         calls += 1;
         return calls === 1
@@ -20,10 +20,9 @@ describe("sealing", () => {
       }),
       adapters: { local: adapter(execute) },
     })
-      .add(capability(tool()))
+      .with(capability(tool()))
       .build();
-    if (!result.ok) throw new Error("build failed");
-    const output = (await turn(result.agent, "go").handle.completed).events;
+    const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([{ type: "final", output: "results:failed,completed" }]);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(Object.isFrozen(execute.mock.calls[0]![0])).toBe(true);
@@ -33,7 +32,7 @@ describe("sealing", () => {
     const candidateArgs = { value: 1 };
     const adapterOutput = { nested: { value: 1 } };
     let step = 0;
-    const result = await new Harness({
+    const result = Agent.create({
       model: model(async (request) => {
         if (++step > 1) return "done";
         return {
@@ -47,10 +46,9 @@ describe("sealing", () => {
       }),
       adapters: { local: adapter(async () => ({ kind: "completed", output: adapterOutput })) },
     })
-      .add(capability(tool()))
+      .with(capability(tool()))
       .build();
-    if (!result.ok) throw new Error("build failed");
-    const { session, handle } = turn(result.agent, "go");
+    const { session, handle } = turn(result, "go");
     await handle.completed;
 
     candidateArgs.value = 9;
@@ -74,17 +72,16 @@ describe("sealing", () => {
   });
 
   it("normalizes malformed JavaScript model and adapter scalar fields into failures", async () => {
-    const malformedModel = await new Harness({
+    const malformedModel = Agent.create({
       model: model(async () => ({ content: { invalid: true } }) as never),
     }).build();
-    if (!malformedModel.ok) throw new Error("build failed");
-    const modelCompletion = await turn(malformedModel.agent, "go").handle.completed;
+    const modelCompletion = await turn(malformedModel, "go").handle.completed;
     expect(modelCompletion.events).toMatchObject([
       { type: "tripwire", tripwire: { code: "model.failed" } },
     ]);
 
     let step = 0;
-    const malformedAdapter = await new Harness({
+    const malformedAdapter = Agent.create({
       model: model(async () =>
         ++step === 1 ? { toolCalls: [{ id: "call", name: "echo", args: {} }] } : "done",
       ),
@@ -92,10 +89,9 @@ describe("sealing", () => {
         local: adapter(async () => ({ kind: "denied", reason: { mutable: true } }) as never),
       },
     })
-      .add(capability(tool()))
+      .with(capability(tool()))
       .build();
-    if (!malformedAdapter.ok) throw new Error("build failed");
-    const { session, handle } = turn(malformedAdapter.agent, "go");
+    const { session, handle } = turn(malformedAdapter, "go");
     await handle.completed;
     const results = session.state.transcript.find((entry) => entry.kind === "tool-results");
     expect(results?.kind).toBe("tool-results");
