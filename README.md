@@ -1,35 +1,56 @@
 # Nylo Agents
 
-Open-source TypeScript authoring and build tooling for Nylo agents.
+Open-source TypeScript authoring, build and run tooling for Nylo agents.
 
-This repository contains two independently versioned packages:
+This repository contains five independently versioned packages:
 
-- [`@nylorun/agents`](./agents) — authoring types, structural validation, typed tools, the Vite build integration, and the session loop that runs the result.
+- [`@nylorun/agent`](./agent) — the executable-free adapter contract shared by hosts and harnesses.
+- [`@nylorun/harness`](./harness) — Nylo's native configurable agent loop.
+- [`@nylorun/runtime`](./runtime) — the production-safe host layer: authoring types, structural validation, typed tools, the Vite build, local records and REST/SSE door, and publishing.
+- [`@nylorun/studio`](./studio) — the optional developer-only `nylo` command, loopback Studio host, and local browser workspace.
 - [`@nylorun/create-agent`](./create-agent) — the generator invoked by `npm create @nylorun/agent@latest`.
+
+**A generated project installs runtime and `@nylorun/harness`**, Nylo's native loop, then passes a
+deferred Harness factory to `Run((options) => new Harness(options), runOptions)`. Runtime owns the
+host and supplies model, tool, and observation bindings before it constructs the Harness. Use
+`nylo adapter probe` to inspect the bound Harness declaration without starting a Session.
 
 ## Quick start
 
 ```sh
 npm create @nylorun/agent@latest my-agent -- --model anthropic/example
 cd my-agent
-echo "OPENROUTER_API_KEY=sk-or-..." > .env
-npm run dev -- "What can you do?"
+cp .env.example .env
+npm run dev
 ```
 
-The session loop that answers is the same one the hosted runtime uses — one implementation, two callers. Deployment is a separate future capability.
+Create a session with `POST /v1/sessions` using `{ "agent_id": "<agent>", "message": "…" }`, then follow it with `GET /v1/sessions/<id>/stream`. The same session accepts later `{ "message": "…" }` posts and exposes both bounded event pages and resumable SSE.
+`nylo dev`, `nylo serve`, and `nylo studio` are supplied by the developer-only Studio package; model access remains outbound runtime
+composition through `ModelGatewayAdapter` or standard local resolution.
 
-Public npm publication is intentionally deferred until a release candidate is approved. Development and integration use `npm pack` tarballs in the meantime; the manual, environment-protected staging workflow cannot run without an explicit maintainer confirmation.
+Public npm publication is intentionally deferred until a release candidate is approved. Development
+and integration use `npm pack` tarballs in the meantime; the manual, environment-protected staging
+workflow cannot run without an explicit maintainer confirmation.
 
 ## Development
 
-Each package is standalone and owns its dependencies and lockfile.
+The six packages form one npm workspace. The executable-free contract is shared by runtime and every
+harness; a packaged clean-project test is required because unpublished dependencies do not resolve
+from the registry.
 
 ```sh
-npm ci --prefix agents
-npm run check --prefix agents
+npm ci
+npm run check      # build, test, generated-reference and tarball gates
+```
 
-npm ci --prefix create-agent
-npm run check --prefix create-agent
+Per package:
+
+```sh
+npm run check --workspace @nylorun/agent
+npm run check --workspace @nylorun/harness
+npm run check --workspace @nylorun/runtime
+npm run check --workspace @nylorun/studio
+npm run check --workspace @nylorun/create-agent
 ```
 
 ## License

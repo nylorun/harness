@@ -14,19 +14,25 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        package: [agents, create-agent]
+        package: [harness, runtime, create-agent]
+        # Every line the published `engines` range admits, so the range is tested rather than
+        # asserted: the declared floor, the Active LTS, and the line that becomes LTS in October.
+        node: ["22.14.0", "24.x", "26.x"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 22.14.0
+          node-version: ${{ matrix.node }}
           cache: npm
-          cache-dependency-path: ${{ matrix.package }}/package-lock.json
+          cache-dependency-path: package-lock.json
+      # One workspace install: @nylorun/runtime depends on @nylorun/harness, which is unpublished,
+      # so the two only resolve together.
       - run: npm ci
-        working-directory: ${{ matrix.package }}
-      - run: npm run check
-        working-directory: ${{ matrix.package }}
+      - run: npm run check --workspace @nylorun/${{ matrix.package }}
+        if: matrix.package != 'create-agent'
+      - run: npm run check --workspace @nylorun/create-agent
+        if: matrix.package == 'create-agent'
 
   packed-integration:
     runs-on: ubuntu-latest
@@ -34,28 +40,27 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
+          # Deliberately the floor rather than the Active LTS: the lowest supported line is where
+          # an integration is most likely to break, and the matrix above covers the rest.
           node-version: 22.14.0
           cache: npm
-          cache-dependency-path: |
-            agents/package-lock.json
-            create-agent/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
-        working-directory: agents
-      - run: npm ci
-        working-directory: create-agent
       - run: npm run build
-        working-directory: create-agent
-      - name: Pack SDK
+      - name: Pack the toolchain
         shell: bash
+        # Both packages: a generated project installs the runtime, which needs the harness beside it.
         # The filename carries the version, so resolve it rather than pinning it here.
         run: |
-          tarball="$(npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
-          echo "NYLO_AGENTS_SPEC=file:$RUNNER_TEMP/$tarball" >> "$GITHUB_ENV"
-        working-directory: agents
+          harness="$(cd harness && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          runtime="$(cd runtime && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          echo "NYLO_HARNESS_TARBALL=$RUNNER_TEMP/$harness" >> "$GITHUB_ENV"
+          echo "NYLO_RUNTIME_SPEC=file:$RUNNER_TEMP/$runtime" >> "$GITHUB_ENV"
       - name: Generate, build, and run consumer
         shell: bash
         run: |
           node create-agent/dist/cli.js "$RUNNER_TEMP/sample-agent" --model openai/gpt-4o --yes
+          npm install --prefix "$RUNNER_TEMP/sample-agent" "$NYLO_HARNESS_TARBALL"
           npm run check --prefix "$RUNNER_TEMP/sample-agent"
           npm run build --prefix "$RUNNER_TEMP/sample-agent"
 
@@ -88,18 +93,14 @@ jobs:
         if: matrix.package-manager == 'pnpm' || matrix.package-manager == 'yarn'
         run: npm install --global ${{ matrix.package-manager }}
       - run: npm ci
-        working-directory: agents
-      - run: npm ci
-        working-directory: create-agent
       - run: npm run build
-        working-directory: create-agent
-      - name: Pack SDK
+      - name: Pack the toolchain
         shell: bash
-        # The filename carries the version, so resolve it rather than pinning it here.
         run: |
-          tarball="$(npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
-          echo "NYLO_AGENTS_SPEC=file:$RUNNER_TEMP/$tarball" >> "$GITHUB_ENV"
-        working-directory: agents
+          harness="$(cd harness && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          runtime="$(cd runtime && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          echo "NYLO_HARNESS_TARBALL=$RUNNER_TEMP/$harness" >> "$GITHUB_ENV"
+          echo "NYLO_RUNTIME_SPEC=file:$RUNNER_TEMP/$runtime" >> "$GITHUB_ENV"
       - name: Generate through selected installer
         shell: bash
         run: node create-agent/dist/cli.js "$RUNNER_TEMP/${{ matrix.package-manager }}-agent" --model anthropic/example --yes
@@ -107,7 +108,9 @@ jobs:
           npm_config_user_agent: ${{ matrix.package-manager }}/test
       - name: Build generated project
         shell: bash
-        run: ${{ matrix.package-manager }} run build
+        run: |
+          ${{ matrix.package-manager }} add "$NYLO_HARNESS_TARBALL" || ${{ matrix.package-manager }} install "$NYLO_HARNESS_TARBALL"
+          ${{ matrix.package-manager }} run build
         working-directory: ${{ runner.temp }}/${{ matrix.package-manager }}-agent
 
   audit:
@@ -118,6 +121,3 @@ jobs:
         with:
           node-version: 22.14.0
       - run: npm audit --omit=dev --audit-level=high
-        working-directory: agents
-      - run: npm audit --omit=dev --audit-level=high
-        working-directory: create-agent

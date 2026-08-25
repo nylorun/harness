@@ -1,0 +1,53 @@
+{
+  "name": "@nylorun/harness",
+  "version": "0.4.0-rc.1",
+  "description": "A capability-first, in-memory agent orchestration kernel.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nylorun/agents.git",
+    "directory": "harness"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": "^22.14.0 || ^24.0.0 || >=26.0.0"
+  },
+  "scripts": {
+    "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:types": "tsc -p test/types/tsconfig.json",
+    "check": "npm run format:check && npm run build && npm run test:types && npm test && node scripts/check-package.mjs",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "zod": "^4.1.12"
+  },
+  "peerDependencies": {
+    "zod": "^4.1.12"
+  }
+}

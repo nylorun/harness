@@ -1,0 +1,90 @@
+import { z } from "zod";
+import type { output } from "zod";
+import type { ToolObjectSchema } from "../types/tool.js";
+import { copyJsonObject } from "../utils/immutable.js";
+
+export type SchemaValidation<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly issues: readonly string[] };
+
+export interface NormalizedToolSchema<T> {
+  readonly jsonSchema: import("../types/shared.js").JsonObject;
+  validate(value: unknown): SchemaValidation<T>;
+}
+
+/** Converts a synchronous Zod object schema into Harness's immutable runtime representation. */
+export function normalizeSchema<Input extends ToolObjectSchema>(
+  input: Input,
+): NormalizedToolSchema<output<Input>> {
+  if (!(input instanceof z.ZodObject)) {
+    throw new TypeError("Tool input schema must be a Zod object schema");
+  }
+  if (hasDeclaredAsyncWork(input)) {
+    throw new TypeError("Tool input schema must validate synchronously");
+  }
+
+  let jsonSchema: import("../types/shared.js").JsonObject;
+  try {
+    jsonSchema = copyJsonObject(
+      z.toJSONSchema(input, { target: "draft-07" }),
+      "tool.input.jsonSchema",
+    );
+  } catch (error) {
+    throw new TypeError(`Tool input schema must convert to JSON Schema: ${message(error)}`);
+  }
+  if (jsonSchema.type !== "object") {
+    throw new TypeError("Tool JSON Schema root type must be object");
+  }
+
+  return Object.freeze({
+    jsonSchema,
+    validate(value: unknown): SchemaValidation<output<Input>> {
+      try {
+        const result = input.safeParse(value);
+        if (result.success) return { ok: true, value: result.data };
+        return {
+          ok: false,
+          issues: result.error.issues.map(
+            (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
+          ),
+        };
+      } catch (error) {
+        return { ok: false, issues: [synchronousIssue(error)] };
+      }
+    },
+  });
+}
+
+/** Zod exposes declared checks in its stable v4 definition graph; reject async checks before a run. */
+function hasDeclaredAsyncWork(schema: ToolObjectSchema): boolean {
+  return visitDefinition((schema as unknown as { _zod?: { def?: unknown } })._zod?.def, new Set());
+}
+
+function visitDefinition(value: unknown, seen: Set<object>): boolean {
+  if (typeof value === "function") return value.constructor.name === "AsyncFunction";
+  if (!value || typeof value !== "object") return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
+
+  // Nested Zod schemas carry their own definition graph. Inspect it directly so public helpers
+  // such as `parseAsync` do not make every otherwise-synchronous schema look asynchronous.
+  const nestedDefinition = (value as { _zod?: { def?: unknown } })._zod?.def;
+  if (nestedDefinition !== undefined && nestedDefinition !== value)
+    return visitDefinition(nestedDefinition, seen);
+
+  for (const item of Object.values(value)) {
+    if (visitDefinition(item, seen)) return true;
+  }
+  return false;
+}
+
+function synchronousIssue(error: unknown): string {
+  const reason = message(error);
+  return reason.includes("Promise during synchronous parse")
+    ? "Schema validation must be synchronous"
+    : reason;
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

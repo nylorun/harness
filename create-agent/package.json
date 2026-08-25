@@ -24,7 +24,7 @@
     "provenance": true
   },
   "engines": {
-    "node": ">=22.14 <23"
+    "node": "^22.14.0 || ^24.0.0 || >=26.0.0"
   },
   "scripts": {
     "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",

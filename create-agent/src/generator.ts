@@ -15,6 +15,12 @@ export type GeneratorOptions = Readonly<{
   install?: boolean;
   userAgent?: string;
   agentsSpec?: string;
+  /** Development only: pins the transitive harness while neither package is published. */
+  harnessSpec?: string;
+  /** Development only: pins the shared contract while neither package is published. */
+  agentSpec?: string;
+  /** Development only: selects the optional Studio package. */
+  studioSpec?: string;
 }>;
 
 export type GeneratorResult = Readonly<{
@@ -44,21 +50,44 @@ async function detectPackageManager(context: string, userAgent: string | undefin
   return runner ? { packageManager: runner, reason: `invoked by ${runner}` } : { packageManager: "npm", reason: "defaulted to npm" };
 }
 
-function packageJson(name: string, agentsSpec: string, packageManager: PackageManager): string {
+function packageJson(
+  name: string,
+  agentsSpec: string,
+  packageManager: PackageManager,
+  harnessSpec: string | undefined,
+  agentSpec: string | undefined,
+  studioSpec: string
+): string {
   return `${JSON.stringify({
     name,
     version: "0.1.0",
     private: true,
     type: "module",
     scripts: {
-      check: "tsc --noEmit",
-      build: "node --input-type=module -e \"import('@nylorun/agents').then(async ({buildAgent})=>{const result=await buildAgent('.');if(!result.ok){for(const d of result.diagnostics)console.error(d.code+': '+d.message);process.exit(1)}})\"",
-      // Build and run stay two visible steps: openAgent deliberately does not build on your behalf.
-      dev: `${runPrefix(packageManager)} build && nylo-run`
+      check: "nylo check && tsc --noEmit",
+      dev: "nylo dev --studio",
+      build: "nylo build",
+      serve: `${runPrefix(packageManager)} build && nylo serve`,
+      studio: "nylo studio"
     },
-    dependencies: { "@nylorun/agents": agentsSpec },
-    devDependencies: { typescript: "^5.9.3", vite: "^8.0.0" },
-    engines: { node: ">=22.14 <23" }
+    dependencies: {
+      "@nylorun/runtime": agentsSpec,
+      "@nylorun/harness": harnessSpec ?? "^0.4.0-rc.1",
+      "zod": "^4.1.12"
+    },
+    devDependencies: { "@nylorun/studio": studioSpec, typescript: "^5.9.3", vite: "^8.0.0" },
+    // Development only, and absent from an ordinary project. Neither package is on the public
+    // registry yet, so a runtime installed from a tarball names a harness nothing can resolve. The
+    // override points it at the tarball beside it, and disappears the day both are published.
+    ...((harnessSpec === undefined && agentSpec === undefined) ? {} : {
+      overrides: {
+        ...(harnessSpec === undefined ? {} : { "@nylorun/harness": harnessSpec }),
+        ...(agentSpec === undefined ? {} : { "@nylorun/agent": agentSpec })
+      }
+    }),
+    // The supported runtime lines, matching what @nylorun/runtime itself declares: a generated
+    // project that refuses to install on the Active LTS would be a bad first thirty seconds.
+    engines: { node: "^22.14.0 || ^24.0.0 || >=26.0.0" }
   }, null, 2)}\n`;
 }
 
@@ -90,26 +119,22 @@ async function runInstall(target: string, packageManager: PackageManager): Promi
  * speak `POST /chat/completions`. Leading with a direct key would fail the very first run.
  */
 function envExample(model: string): string {
-  const creator = model.slice(0, Math.max(0, model.indexOf("/")));
-  const direct: Record<string, string> = {
-    openai: "OPENAI_API_KEY",
-    groq: "GROQ_API_KEY",
-    mistralai: "MISTRAL_API_KEY",
-    deepseek: "DEEPSEEK_API_KEY",
-    xai: "XAI_API_KEY",
-    togethercomputer: "TOGETHER_API_KEY"
-  };
-  const alternative = direct[creator];
-  return [
-    "# One OpenRouter key serves every model in the catalog, and matches how Nylo runs hosted.",
-    "OPENROUTER_API_KEY=",
-    "",
-    alternative === undefined
-      ? `# ${creator || "This provider"} has no directly supported API yet, so OpenRouter is required.`
-      : `# Or call ${creator} directly:`,
-    alternative === undefined ? "" : `# ${alternative}=`,
+  if (model.startsWith("local/")) return [
+    "# Pin local inference to Ollama (no API key is required).",
+    "NYLO_MODEL_GATEWAY_URL=http://127.0.0.1:11434/v1",
+    "NYLO_MODEL_GATEWAY_PROTOCOL=openai-chat-completions",
+    "NYLO_MODEL_GATEWAY_ACCESS_MODE=private-or-local-endpoint",
     ""
-  ].filter((line, index, all) => !(line === "" && all[index - 1] === "")).join("\n");
+  ].join("\n");
+  return [
+    "# Optional: any OpenAI-compatible model gateway.",
+    "# NYLO_MODEL_GATEWAY_URL=http://127.0.0.1:1234/v1",
+    "# NYLO_MODEL_GATEWAY_API_KEY=",
+    "# NYLO_MODEL_GATEWAY_AUTH_HEADER=authorization",
+    "# NYLO_MODEL_GATEWAY_AUTH_PREFIX=Bearer ",
+    "# NYLO_MODEL_GATEWAY_HEADERS={}",
+    ""
+  ].join("\n");
 }
 
 function readme(name: string, model: string, packageManager: PackageManager): string {
@@ -120,20 +145,28 @@ Generated with @nylorun/create-agent.
 
 \`\`\`sh
 ${run} check
+${run} dev
 ${run} build
-${run} dev -- "What can you do?"
+${run} serve
+${run} studio
 \`\`\`
 
-## Credentials
+## Model gateway
 
-\`${model}\` resolves by its \`creator/model\` prefix. Copy \`.env.example\` to \`.env\` and set a key.
+Copy \`.env.example\` to \`.env\` only when your model gateway needs configuration. A local
+OpenAI-compatible server is detected automatically; any compatible gateway can be configured with
+\`NYLO_MODEL_GATEWAY_URL\` and, when needed, \`NYLO_MODEL_GATEWAY_API_KEY\`.
 
-An \`OPENROUTER_API_KEY\` is preferred whenever present — it is the path Nylo takes when hosted, so
-it is the closest local match — and one key covers every model. Otherwise the prefix resolves to
-that provider's own API and its conventional variable.
+Start sessions through the REST API after \`npm run serve\`. Credentials are read from your
+environment first, then \`.env\`; values are never printed or uploaded.
 
-Credentials are read from your environment first, then \`.env\`. Which source answered is printed;
-the value never is. \`.env\` is gitignored and is never uploaded.
+\`\`\`sh
+# Start a session, then follow its event stream.
+curl -X POST http://127.0.0.1:4111/v1/sessions \\
+  -H 'content-type: application/json' \\
+  -d '{"agent_id":"${name}","message":"Hello"}'
+curl -N http://127.0.0.1:4111/v1/sessions/<session-id>/stream
+\`\`\`
 `;
 }
 
@@ -145,15 +178,19 @@ export async function generateAgentProject(options: GeneratorOptions): Promise<G
   if (!NAME.test(name)) throw new Error(`Invalid agent name: ${name}`);
   if (!MODEL.test(options.model)) throw new Error(`Invalid model identity: ${options.model}`);
   const selected = await detectPackageManager(cwd, options.userAgent ?? process.env.npm_config_user_agent);
-  const agentsSpec = options.agentsSpec ?? process.env.NYLO_AGENTS_SPEC ?? "^0.1.0-rc.1";
+  const agentsSpec =
+    options.agentsSpec ?? process.env.NYLO_RUNTIME_SPEC ?? process.env.NYLO_AGENTS_SPEC ?? "^0.1.0-rc.1";
+  const harnessSpec = options.harnessSpec ?? process.env.NYLO_HARNESS_SPEC;
+  const agentSpec = options.agentSpec ?? process.env.NYLO_AGENT_SPEC;
+  const studioSpec = options.studioSpec ?? process.env.NYLO_STUDIO_SPEC ?? "^0.1.0-rc.1";
   await mkdir(join(target, "agent"), { recursive: true });
-  await writeFile(join(target, "package.json"), packageJson(name, agentsSpec, selected.packageManager));
+  await writeFile(join(target, "package.json"), packageJson(name, agentsSpec, selected.packageManager, harnessSpec, agentSpec, studioSpec));
   await writeFile(join(target, "tsconfig.json"), `${JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: true }, include: ["agent/**/*.ts", "vite.config.ts"] }, null, 2)}\n`);
-  await writeFile(join(target, "vite.config.ts"), `import { nyloAgent } from "@nylorun/agents";\nimport { defineConfig } from "vite";\n\nexport default defineConfig({ plugins: [nyloAgent()] });\n`);
-  await writeFile(join(target, ".gitignore"), "node_modules/\ndist/\n.env\n");
+  await writeFile(join(target, "vite.config.ts"), `import { nyloAgent } from "@nylorun/runtime";\n\nexport default { plugins: [nyloAgent()] };\n`);
+  await writeFile(join(target, ".gitignore"), "node_modules/\ndist/\n.env\n.nylo/\n");
   await writeFile(join(target, ".env.example"), envExample(options.model));
   await writeFile(join(target, "README.md"), readme(name, options.model, selected.packageManager));
-  await writeFile(join(target, "agent", "agent.ts"), `import { Agent } from "@nylorun/agents";\n\nexport default Agent({\n  name: ${JSON.stringify(name)},\n  model: ${JSON.stringify(options.model)}\n});\n`);
+  await writeFile(join(target, "agent", "agent.ts"), `import { Harness } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime";\n\nexport default Run(\n  (options) => new Harness(options),\n  {\n    name: ${JSON.stringify(name)},\n    model: ${JSON.stringify(options.model)}\n  }\n);\n`);
   await writeFile(join(target, "agent", "AGENT.md"), "You are a helpful assistant.\n");
   if (options.install !== false) {
     try {

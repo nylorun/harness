@@ -5,15 +5,45 @@ import { describe, expect, it } from "vitest";
 import { generateAgentProject } from "../src/generator.js";
 
 describe("generateAgentProject", () => {
-  it("writes the minimal project, with build and run as separate steps", async () => {
+  it("writes the minimal project with the REST server as its only execution bootstrap", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "create-nylo-"));
     const result = await generateAgentProject({ directory: "reviewer", model: "anthropic/example", cwd, install: false, userAgent: "npm/11.0.0", agentsSpec: "file:../agents.tgz" });
     expect(result.packageManager).toBe("npm");
     const manifest = JSON.parse(await readFile(join(cwd, "reviewer", "package.json"), "utf8"));
-    expect(manifest.dependencies).toEqual({ "@nylorun/agents": "file:../agents.tgz" });
+    expect(manifest.dependencies).toEqual({ "@nylorun/runtime": "file:../agents.tgz", "@nylorun/harness": "^0.4.0-rc.1", "zod": "^4.1.12" });
+    expect(manifest.devDependencies["@nylorun/studio"]).toBe("^0.1.0-rc.1");
     expect(manifest.scripts).toHaveProperty("build");
-    // Build and run stay visible as two steps; openAgent never builds on the caller's behalf.
-    expect(manifest.scripts.dev).toBe("npm run build && nylo-run");
+    expect(manifest.scripts.dev).toBe("nylo dev --studio");
+    expect(manifest.scripts.serve).toBe("npm run build && nylo serve");
+    expect(manifest.scripts.studio).toBe("nylo studio");
+  });
+
+  it("supports the same runtimes the generator itself does", async () => {
+    // These drifted apart once already: the generator's own engines were widened to the supported
+    // LTS lines while the template it writes kept a single line that had entered maintenance, so a
+    // generated project warned on install under the runtime most builders use. Tying them together
+    // is what stops that being a thing anyone has to remember.
+    const cwd = await mkdtemp(join(tmpdir(), "create-nylo-"));
+    await generateAgentProject({ directory: "reviewer", model: "anthropic/example", cwd, install: false });
+    const generated = JSON.parse(await readFile(join(cwd, "reviewer", "package.json"), "utf8"));
+    const own = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+    expect(generated.engines.node).toBe(own.engines.node);
+  });
+
+  it("pins the transitive harness only when a development spec is supplied", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "create-nylo-"));
+    await generateAgentProject({ directory: "plain", model: "anthropic/example", cwd, install: false });
+    expect(JSON.parse(await readFile(join(cwd, "plain", "package.json"), "utf8"))).not.toHaveProperty("overrides");
+
+    await generateAgentProject({
+      directory: "pinned",
+      model: "anthropic/example",
+      cwd,
+      install: false,
+      harnessSpec: "file:../harness.tgz"
+    });
+    const pinned = JSON.parse(await readFile(join(cwd, "pinned", "package.json"), "utf8"));
+    expect(pinned.overrides).toEqual({ "@nylorun/harness": "file:../harness.tgz" });
   });
 
   it("refuses invalid model identities", async () => {
@@ -40,35 +70,37 @@ describe("generateAgentProject", () => {
     const cwd = await mkdtemp(join(tmpdir(), "create-nylo-"));
     await generateAgentProject({ directory: "reviewer", model: "anthropic/example", cwd, install: false });
     const manifest = JSON.parse(await readFile(join(cwd, "reviewer", "package.json"), "utf8"));
-    expect(manifest.dependencies).toEqual({ "@nylorun/agents": "^0.1.0-rc.1" });
+    expect(manifest.dependencies).toEqual({ "@nylorun/runtime": "^0.1.0-rc.1", "@nylorun/harness": "^0.4.0-rc.1", "zod": "^4.1.12" });
     await expect(readFile(join(cwd, "reviewer", "agent", "tools", "example.ts"))).rejects.toThrow();
     await expect(readFile(join(cwd, "reviewer", "agent", "memory", "README.md"))).rejects.toThrow();
   });
 
-  it("leads the credential template with OpenRouter, which the default model requires", async () => {
+  it("writes a vendor-neutral gateway template", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "create-nylo-"));
     await generateAgentProject({ directory: "reviewer", model: "anthropic/example", cwd, install: false });
     const template = await readFile(join(cwd, "reviewer", ".env.example"), "utf8");
-    // Anthropic does not speak POST /chat/completions, so a direct key would fail the first run.
-    expect(template).toContain("OPENROUTER_API_KEY=");
-    expect(template).toContain("no directly supported API");
-    expect(template).not.toContain("ANTHROPIC_API_KEY");
+    expect(template).toContain("NYLO_MODEL_GATEWAY_URL=");
+    expect(template).not.toContain("OPENROUTER_API_KEY=");
     expect(await readFile(join(cwd, "reviewer", ".gitignore"), "utf8")).toContain(".env");
   });
 
-  it("offers the direct variable when the creator has its own OpenAI-compatible API", async () => {
+  it("writes an explicit deferred Harness factory", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "create-nylo-"));
-    await generateAgentProject({ directory: "reviewer", model: "openai/gpt-4o", cwd, install: false });
+    await generateAgentProject({ directory: "reviewer", model: "local/gemma4:e2b-mlx", cwd, install: false });
+    const definition = await readFile(join(cwd, "reviewer", "agent", "agent.ts"), "utf8");
+    expect(definition).toContain('import { Harness } from "@nylorun/harness"');
+    expect(definition).toContain("(options) => new Harness(options)");
+    expect(definition).not.toContain("Agent()");
     const template = await readFile(join(cwd, "reviewer", ".env.example"), "utf8");
-    expect(template).toContain("OPENROUTER_API_KEY=");
-    expect(template).toContain("OPENAI_API_KEY=");
+    expect(template).toContain("http://127.0.0.1:11434/v1");
+    expect(template).not.toContain("API_KEY");
   });
 
-  it("uses the selected package manager in the dev script", async () => {
+  it("uses the selected package manager in the serve script", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "create-nylo-"));
     await writeFile(join(cwd, "package.json"), '{"packageManager":"pnpm@10.0.0"}\n');
     await generateAgentProject({ directory: "reviewer", model: "anthropic/example", cwd, install: false });
     const manifest = JSON.parse(await readFile(join(cwd, "reviewer", "package.json"), "utf8"));
-    expect(manifest.scripts.dev).toBe("pnpm run build && nylo-run");
+    expect(manifest.scripts.serve).toBe("pnpm run build && nylo serve");
   });
 });

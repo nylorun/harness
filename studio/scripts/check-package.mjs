@@ -1,0 +1,11 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const cache = mkdtempSync(join(tmpdir(), "nylo-studio-pack-"));
+const output = execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["pack", "--json", "--dry-run", "--ignore-scripts"], { encoding: "utf8", env: { ...process.env, npm_config_cache: cache } });
+rmSync(cache, { recursive: true, force: true });
+const files = JSON.parse(output)[0].files.map((entry) => entry.path);
+for (const required of ["package.json", "README.md", "LICENSE", "dist/cli.js", "dist/host.js", "dist/web/index.html", "dist/web/nylo-studio.config.json"]) if (!files.includes(required)) throw new Error(`Missing tarball file: ${required}`);
+if (files.includes("dist/ui.js")) throw new Error("Legacy inline Studio UI must not be packaged.");
+console.log(`Studio tarball allowlist passed (${files.length} files).`);
