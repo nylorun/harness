@@ -58,6 +58,8 @@ describe("model candidate blocks", () => {
   it("returns an empty string for empty output and text-only output as joined text", async () => {
     const empty = Agent(model(async () => ({ output: [] }))).build();
     expect((await turn(empty, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
+      { type: "candidate" },
       { type: "final", output: "" },
     ]);
 
@@ -72,6 +74,8 @@ describe("model candidate blocks", () => {
     ).build();
     const { session, handle } = turn(textOnly, "go");
     expect((await handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
+      { type: "candidate" },
       { type: "final", output: "Hello world" },
     ]);
     const minted = session.state.transcript.find((entry) => entry.kind === "candidate");
@@ -91,6 +95,7 @@ describe("model candidate blocks", () => {
       ),
     ).build();
     expect((await turn(nonObject, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.failed" } },
     ]);
 
@@ -98,6 +103,7 @@ describe("model candidate blocks", () => {
       model(async () => ({ output: [], finishReason: "aborted" }) as never),
     ).build();
     expect((await turn(aborted, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.failed" } },
     ]);
 
@@ -105,6 +111,7 @@ describe("model candidate blocks", () => {
       model(async () => ({ output: [], finishReason: "error" }) as never),
     ).build();
     expect((await turn(errored, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.failed" } },
     ]);
   });
@@ -117,6 +124,7 @@ describe("model candidate blocks", () => {
       })),
     ).build();
     expect((await turn(tokens, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.failed" } },
     ]);
 
@@ -126,6 +134,7 @@ describe("model candidate blocks", () => {
       }),
     ).build();
     expect((await turn(thrown, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.failed" } },
     ]);
   });
@@ -149,7 +158,7 @@ describe("model candidate blocks", () => {
     )
       .with(adapter())
       .use("review", async (request, next) => {
-        request.tools.add(tool());
+        request.prefix.tools.set("review", [tool()]);
         const response = await next();
         response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 1 } }));
         return response;
@@ -178,7 +187,7 @@ describe("model candidate blocks", () => {
     )
       .with(adapter())
       .use("typed", async (request, next) => {
-        request.tools.add(tool());
+        request.prefix.tools.set("typed", [tool()]);
         return next();
       })
       .build();

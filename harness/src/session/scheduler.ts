@@ -1,5 +1,5 @@
 import type { InputEvent, InputOptions, SessionEvent, SessionSnapshot } from "../types/session.js";
-import type { Observer } from "../types/shared.js";
+import type { ObserveEvent, Observer } from "../types/shared.js";
 import { createId } from "../utils/ids.js";
 import { createEmitter } from "../utils/observe.js";
 import {
@@ -14,6 +14,7 @@ import { SubmissionStream } from "./submission-stream.js";
 import { commitToolResults, initialState, withStatus } from "./state.js";
 import { type LoopAgent } from "../step/run.js";
 import { TurnRunner, type PendingTurn, type TurnProgress } from "../turn/runner.js";
+import { PromptPrefixState, type PromptPrefixPolicy } from "../step/prompt-prefix.js";
 
 /** Coordinates one active turn at a time; TurnRunner owns the turn's internal state machine. */
 export class SessionScheduler {
@@ -32,6 +33,7 @@ export class SessionScheduler {
   private stopPromise?: Promise<void>;
   private emitObserve = createEmitter();
   private readonly turns: TurnRunner;
+  private readonly prefixState: PromptPrefixState;
 
   constructor(
     readonly id: string,
@@ -40,9 +42,11 @@ export class SessionScheduler {
       readonly userId?: string;
       readonly context?: import("../types/shared.js").JsonObject;
     }>,
+    prefixPolicy: PromptPrefixPolicy = "observe",
   ) {
     this.snapshotValue = initialState(id);
-    this.turns = new TurnRunner(agent, id, session);
+    this.prefixState = new PromptPrefixState(prefixPolicy);
+    this.turns = new TurnRunner(agent, id, session, this.prefixState);
   }
 
   get snapshot(): SessionSnapshot {
@@ -71,7 +75,8 @@ export class SessionScheduler {
     this.watchAbort(submission);
     this.emitObserve({
       type: "input.received",
-      attributes: { inputId: stream.inputId, kind: event.kind },
+      inputId: stream.inputId,
+      kind: event.kind,
     });
     this.pump();
     return stream;
@@ -116,7 +121,7 @@ export class SessionScheduler {
       });
       this.emitObserve({
         type: "input.queued",
-        attributes: { inputId: submission.stream.inputId },
+        inputId: submission.stream.inputId,
       });
     }
     this.queue.add(submission);
@@ -138,7 +143,8 @@ export class SessionScheduler {
     this.publish(stream, { type: "input.rejected", inputId: stream.inputId, reason });
     this.emitObserve({
       type: "input.rejected",
-      attributes: { inputId: stream.inputId, reason },
+      inputId: stream.inputId,
+      reason,
     });
     stream.finish("rejected");
     return stream;
@@ -146,6 +152,11 @@ export class SessionScheduler {
 
   private finishCancelled(stream: SubmissionStream, reason: string): SubmissionStream {
     this.publish(stream, { type: "input.cancelled", inputId: stream.inputId, reason });
+    this.emitObserve({
+      type: "input.cancelled",
+      inputId: stream.inputId,
+      reason,
+    });
     stream.finish("cancelled");
     return stream;
   }
@@ -201,7 +212,8 @@ export class SessionScheduler {
     try {
       const context = {
         signal,
-        observe: (event: import("../types/shared.js").ObserveEvent) => this.emitObserve(event),
+        observe: (event: ObserveEvent) =>
+          this.emitObserve(withInputId(event, submission.stream.inputId)),
         assertCurrent: () => this.assertCurrent(generation, signal),
         onPlanActive: (plan: PendingTurn | undefined) => {
           this.inFlightPlan = plan;
@@ -209,6 +221,7 @@ export class SessionScheduler {
         onState: (state: SessionSnapshot) => {
           this.snapshotValue = state;
         },
+        onConversation: (event: SessionEvent) => this.publish(submission.stream, event),
       };
       const outcome = this.pending
         ? await this.resumeTurn(submission, context)
@@ -246,6 +259,8 @@ export class SessionScheduler {
           type: "turn.completed",
           turnId: outcome.turnId,
           stepId: outcome.stepId,
+          inputId: stream.inputId,
+          attributes: { output: outcome.output },
         });
         stream.finish("completed");
         return;
@@ -256,7 +271,24 @@ export class SessionScheduler {
           type: "interaction.required",
           turnId: outcome.pending.turnId,
           stepId: outcome.pending.stepId,
-          attributes: { interactionId: outcome.interaction.id, kind: outcome.interaction.kind },
+          inputId: stream.inputId,
+          interactionId: outcome.interaction.id,
+          kind: outcome.interaction.kind,
+          ...(outcome.pending.plan.interactionCallId === undefined
+            ? {}
+            : { callId: outcome.pending.plan.interactionCallId }),
+          ...(outcome.pending.plan.interactionToolName === undefined
+            ? {}
+            : { toolName: outcome.pending.plan.interactionToolName }),
+          ...(outcome.pending.plan.interactionPhase === undefined
+            ? {}
+            : { phase: outcome.pending.plan.interactionPhase }),
+          attributes: {
+            prompt: outcome.interaction.prompt,
+            ...(outcome.interaction.metadata === undefined
+              ? {}
+              : { metadata: outcome.interaction.metadata }),
+          },
         });
         this.publish(stream, {
           type: "interaction.required",
@@ -275,8 +307,11 @@ export class SessionScheduler {
         this.emitObserve({
           type: "tripwire",
           turnId: outcome.turnId,
+          inputId: stream.inputId,
           ...(outcome.stepId ? { stepId: outcome.stepId } : {}),
-          attributes: { code: outcome.tripwire.code, scope: outcome.tripwire.scope ?? "step" },
+          code: outcome.tripwire.code,
+          scope: outcome.tripwire.scope ?? "step",
+          attributes: { message: outcome.tripwire.message },
         });
         if (outcome.tripwire.scope === "session") this.beginStop("Session policy tripwire");
         else this.snapshotValue = withStatus(this.snapshotValue, "idle");
@@ -295,7 +330,7 @@ export class SessionScheduler {
     this.snapshotValue = withStatus(this.snapshotValue, "stopped");
     this.events.emit({ type: "session.stopped", sessionId: this.id });
     this.events.finish();
-    this.emitObserve({ type: "session.stopped", attributes: { reason } });
+    this.emitObserve({ type: "session.stopped", reason });
     for (const item of this.queue.drain()) this.finishStopped(item.stream);
   }
 
@@ -313,6 +348,10 @@ export class SessionScheduler {
     if (this.stopped || generation !== this.generation || signal.aborted)
       throw signal.reason ?? new Error("Stale Session result quarantined");
   }
+}
+
+function withInputId(event: ObserveEvent, inputId: string): ObserveEvent {
+  return "turnId" in event ? { ...event, inputId } : event;
 }
 
 function message(error: unknown): string {

@@ -91,4 +91,41 @@ describe("ToolPlanRunner", () => {
     expect(preflight.mock.calls[1]?.[1].resume).toMatchObject({ token: "opaque", value: "yes" });
     expect(execute).toHaveBeenCalledOnce();
   });
+
+  it("emits adapter.completed failed when execute throws and still returns results", async () => {
+    const execute = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const runner = new ToolPlanRunner(plan());
+    const run = context([{ id: "local", validateRoute() {}, execute }]);
+    await expect(runner.run(run)).resolves.toEqual({
+      kind: "completed",
+      results: [
+        expect.objectContaining({
+          callId: "call",
+          kind: "failed",
+          code: "tool.execution-failed",
+          message: "boom",
+        }),
+      ],
+    });
+    expect(run.observe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "adapter.started",
+        toolName: "echo",
+        callId: "call",
+        attributes: { args: { text: "hello" } },
+      }),
+    );
+    expect(run.observe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "adapter.completed",
+        toolName: "echo",
+        callId: "call",
+        outcome: "failed",
+        code: "tool.execution-failed",
+        attributes: expect.objectContaining({ kind: "failed", message: "boom" }),
+      }),
+    );
+  });
 });

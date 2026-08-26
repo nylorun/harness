@@ -50,6 +50,17 @@ export class ToolPlanRunner {
   get interactionKind(): RequiredInteraction["kind"] | undefined {
     return this.pending?.interaction.kind;
   }
+  get interactionCallId(): string | undefined {
+    if (!this.pending) return undefined;
+    return this.plan.executable[this.pending.index]?.call.callId;
+  }
+  get interactionToolName(): string | undefined {
+    if (!this.pending) return undefined;
+    return this.plan.executable[this.pending.index]?.call.toolName;
+  }
+  get interactionPhase(): PlanPhase | undefined {
+    return this.pending?.phase;
+  }
 
   cancelledResults(reason: string): readonly ToolResult[] {
     return this.resultsInOrder("tool.cancelled", reason);
@@ -153,7 +164,10 @@ export class ToolPlanRunner {
       turnId: context.ids.turnId,
       stepId: context.ids.stepId,
       adapterId: adapter.id,
-      attributes: { callId: entry.call.callId },
+      toolName: entry.call.toolName,
+      callId: entry.call.callId,
+      invocationId: entry.invocationId,
+      attributes: { args: copyJson(entry.call.args) },
     });
     try {
       const outcome = await adapter.preflight(entry.call, {
@@ -172,11 +186,25 @@ export class ToolPlanRunner {
         turnId: context.ids.turnId,
         stepId: context.ids.stepId,
         adapterId: adapter.id,
-        attributes: { callId: entry.call.callId, outcome: outcome.kind },
+        toolName: entry.call.toolName,
+        callId: entry.call.callId,
+        outcome: outcome.kind,
+        ...adapterCompleted(this.results.get(entry.call.callId)),
       });
     } catch (error) {
       this.throwIfAborted(context.signal);
-      this.results.set(entry.call.callId, failed(entry, "tool.preflight-failed", error));
+      const result = failed(entry, "tool.preflight-failed", error);
+      this.results.set(entry.call.callId, result);
+      context.observe({
+        type: "adapter.preflight.completed",
+        turnId: context.ids.turnId,
+        stepId: context.ids.stepId,
+        adapterId: adapter.id,
+        toolName: entry.call.toolName,
+        callId: entry.call.callId,
+        outcome: "failed",
+        ...adapterCompleted(result),
+      });
     }
     return undefined;
   }
@@ -191,7 +219,10 @@ export class ToolPlanRunner {
       turnId: context.ids.turnId,
       stepId: context.ids.stepId,
       adapterId: adapter.id,
-      attributes: { callId: entry.call.callId, invocationId: entry.invocationId },
+      toolName: entry.call.toolName,
+      callId: entry.call.callId,
+      invocationId: entry.invocationId,
+      attributes: { args: copyJson(entry.call.args) },
     });
     try {
       const outcome = await adapter.execute(entry.call, {
@@ -208,11 +239,25 @@ export class ToolPlanRunner {
         turnId: context.ids.turnId,
         stepId: context.ids.stepId,
         adapterId: adapter.id,
-        attributes: { callId: entry.call.callId, outcome: outcome.kind },
+        toolName: entry.call.toolName,
+        callId: entry.call.callId,
+        outcome: outcome.kind,
+        ...adapterCompleted(this.results.get(entry.call.callId)),
       });
     } catch (error) {
       this.throwIfAborted(context.signal);
-      this.results.set(entry.call.callId, failed(entry, "tool.execution-failed", error));
+      const result = failed(entry, "tool.execution-failed", error);
+      this.results.set(entry.call.callId, result);
+      context.observe({
+        type: "adapter.completed",
+        turnId: context.ids.turnId,
+        stepId: context.ids.stepId,
+        adapterId: adapter.id,
+        toolName: entry.call.toolName,
+        callId: entry.call.callId,
+        outcome: "failed",
+        ...adapterCompleted(result),
+      });
     }
     return undefined;
   }
@@ -329,6 +374,17 @@ function resultFrom(
     default:
       throw new TypeError("Tool adapter returned an invalid outcome");
   }
+}
+
+function adapterCompleted(result?: ToolResult): {
+  readonly code?: string;
+  readonly attributes?: ToolResult;
+} {
+  if (!result) return {};
+  return {
+    ...(result.code === undefined ? {} : { code: result.code }),
+    attributes: copyJson(result),
+  };
 }
 
 function failed(entry: ExecutablePlanEntry, code: string, error: unknown): ToolResult {

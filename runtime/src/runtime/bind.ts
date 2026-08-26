@@ -130,8 +130,8 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
         builder.with(bridged.adapter);
         const instructions = [input.config.instructions ?? "", ...loaded.skills.map((skill) => `Skill: ${skill.name}\n${skill.body}`)].filter(Boolean);
         builder.prepend("nylorun-folder", async (request, next) => {
-          for (const item of bridged.tools) request.tools.add(item);
-          for (const text of instructions) request.instructions.add(text);
+          request.prefix.tools.set("folder-tools", bridged.tools, { order: 0 });
+          request.prefix.instructions.set("folder-instructions", instructions, { order: 0 });
           return next();
         });
         boundAgent = builder.build();

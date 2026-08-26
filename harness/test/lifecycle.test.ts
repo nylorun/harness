@@ -75,6 +75,10 @@ describe("lifecycle", () => {
       status: "completed",
       events: [
         expect.objectContaining({
+          type: "input",
+          event: { kind: "user-message", text: "one" },
+        }),
+        expect.objectContaining({
           type: "tripwire",
           tripwire: expect.objectContaining({ code: "policy.step" }),
         }),

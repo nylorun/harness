@@ -1,4 +1,4 @@
-import { Agent as KernelAgent } from "@nylorun/harness";
+import { Agent as HarnessAgent } from "@nylorun/harness";
 import type {
   AgentConfig,
   AgentSpec as AgentSpecRecord,
@@ -52,7 +52,7 @@ export type AgentSpec = AgentSpecRecord;
 
 export function AgentSpec(options: AgentSpecOptions): AgentSpec {
   return Object.freeze({
-    ...Run((model) => KernelAgent(model), options),
+    ...Run((model) => HarnessAgent(model), options),
     ...(options.instructions === undefined ? {} : { instructions: options.instructions })
   });
 }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as publicApi from "../src/index.js";
 import { Agent, AgentSpec, Run, buildAgent, validateAgent } from "../src/index.js";
-import { Agent as KernelAgent } from "@nylorun/harness";
+import { Agent as HarnessAgent } from "@nylorun/harness";
 
 async function project(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "nylo-agents-"));
@@ -45,7 +45,7 @@ describe("Agent", () => {
   });
 
   it("requires a branded harness and keeps the two factories separate", () => {
-    expect(Run((model) => KernelAgent(model), { model: "anthropic/example" })).toMatchObject({
+    expect(Run((model) => HarnessAgent(model), { model: "anthropic/example" })).toMatchObject({
       harness: expect.any(Function), secrets: [], mcp: []
     });
     expect(() => Run({} as never, { model: "anthropic/example" })).toThrow("Harness factory");

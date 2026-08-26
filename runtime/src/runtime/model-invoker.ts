@@ -26,7 +26,7 @@ export class GatewayModelInvoker implements ModelInvoker {
     for await (const chunk of this.gateway.complete({
       model: this.id,
       messages: messages(request),
-      tools: request.tools.map((tool) => ({ name: tool.name, ...(tool.description === undefined ? {} : { description: tool.description }), inputSchema: "jsonSchema" in tool.input ? tool.input.jsonSchema : {} })),
+      tools: request.prefix.tools.map((tool) => ({ name: tool.name, ...(tool.description === undefined ? {} : { description: tool.description }), inputSchema: "jsonSchema" in tool.input ? tool.input.jsonSchema : {} })),
       maxOutputTokens: 4096
     }, signal)) {
       if (chunk.type === "text") content.push(chunk.text);
@@ -59,7 +59,8 @@ export class GatewayModelInvoker implements ModelInvoker {
 
 function messages(request: ModelRequest): ChatMessage[] {
   const output: ChatMessage[] = [];
-  if (request.instructions.length > 0) output.push({ role: "system", content: request.instructions.join("\n\n") });
+  if (request.prefix.instructions.length > 0)
+    output.push({ role: "system", content: request.prefix.instructions.map((item) => item.text).join("\n\n") });
   for (const entry of request.transcript) appendTranscript(output, entry);
   return output;
 }

@@ -9,6 +9,13 @@ export type InputEvent =
   | { readonly kind: "respond"; readonly interactionId: string; readonly value: JsonValue };
 
 export type SessionEvent =
+  | { readonly type: "input"; readonly event: InputEvent; readonly turnId: string }
+  | {
+      readonly type: "candidate";
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly candidate: ModelCandidate;
+    }
   | { readonly type: "final"; readonly output: string; readonly turnId: string }
   | {
       readonly type: "interaction.required";
@@ -37,6 +44,7 @@ export interface SessionOptions {
   readonly id?: string;
   readonly userId?: string;
   readonly context?: JsonObject;
+  readonly prefixPolicy?: "observe" | "strict";
 }
 
 export interface InputOptions {

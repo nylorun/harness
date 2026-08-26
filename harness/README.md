@@ -1,6 +1,6 @@
 # @nylorun/harness
 
-`@nylorun/harness` is a small, provider-neutral agent kernel. It seals one model invoker, adapters, and an ordered middleware onion into a fixed Agent, then runs independent in-memory Sessions. Each Step drafts instructions, context, tools, and an optional model directive, calls that invoker once, reviews the candidate, and seals a tool plan before any adapter runs.
+`@nylorun/harness` is a small, provider-neutral agent loop. It seals one model invoker, adapters, and an ordered middleware onion into a fixed Agent, then runs independent in-memory Sessions. Middleware stages named changes against a session-scoped prompt-prefix state; each Model call receives an immutable canonical prefix, then its candidate is reviewed and its tool plan sealed before any adapter runs.
 
 ```ts
 import { Agent, defineAdapter, defineModel, defineTool } from "@nylorun/harness";
@@ -36,8 +36,8 @@ const model = defineModel({
 const session = Agent(model)
   .with(local)
   .use("echo", async (request, next) => {
-    request.tools.add(echo);
-    request.instructions.add("Echo the user text.");
+    request.prefix.tools.set("echo-tools", [echo], { order: 100 });
+    request.prefix.instructions.set("echo-policy", ["Echo the user text."], { order: 100 });
     return next();
   })
   .use("turn-budget", async (request, next) => {
@@ -60,7 +60,7 @@ for await (const event of session.stream()) {
 }
 ```
 
-`Agent(model)` returns a builder. `.with(adapter)` registers an adapter by `adapter.id` (required for tool dispatch via `executeWith`); call order has no onion effect. `.use(middleware)` or `.use(id, middleware)` appends middleware (later is more inward); omitted ids become `middleware-1`, `middleware-2`, …. Hosts may `.prepend(middleware)` or `.prepend(id, middleware)` so a folder or runtime module sits outermost. `.build()` validates ids and seals a `BuiltAgent`, or throws `AgentBuildError`. `BuiltAgent.run(options?)` creates an in-memory Session. `session.input()` submits work and returns a completion handle. `session.stream()` yields conversation events. `session.observe(listener)` receives fail-open kernel telemetry. `session.stop()` ends that Session only.
+`Agent(model)` returns a builder. `.with(adapter)` registers an adapter by `adapter.id` (required for tool dispatch via `executeWith`); call order has no onion effect. `.use(middleware)` or `.use(id, middleware)` appends middleware (later is more inward); omitted ids become `middleware-1`, `middleware-2`, …. Hosts may `.prepend(middleware)` or `.prepend(id, middleware)` so a folder or runtime module sits outermost. `.build()` validates ids and seals a `BuiltAgent`, or throws `AgentBuildError`. `BuiltAgent.run(options?)` creates an in-memory Session. `session.input()` submits work and returns a completion handle. `session.stream()` yields the conversation (`input`, per-step `candidate`, then settlement events) — not observe events or tool results. `session.observe(listener)` receives fail-open observe events. `session.stop()` ends that Session only.
 
 ## Middleware
 
@@ -73,15 +73,17 @@ type StepMiddleware = (
 ) => Promise<StepResponse>;
 ```
 
-Draft on `request` (add instructions, context, and tools; hide tools; `request.model.select` a directive; tripwire). `await next()` runs the inner onion and one Model call, then returns a branded `StepResponse`. Review that candidate (`deny`, `requireInteraction`, `requirePreflight`, `replace`, `tripwire`) and return it. Skipping `next()` is legal only by returning `request.tripwire(...)`. `void next()` is not supported.
+Draft on `request.prefix`: named `instructions.set` / `remove`, `tools.set` / `remove` / `withhold` / `restore`, and `model.select` / `replace` / `clear`; add dynamic tail data through `request.context`; or tripwire. `await next()` runs the inner onion and one Model call, then returns a branded `StepResponse`. Review that candidate (`deny`, `requireInteraction`, `requirePreflight`, `replace`, `tripwire`) and return it. Skipping `next()` is legal only by returning `request.tripwire(...)`. `void next()` is not supported.
 
-Tools and instructions accumulate for that Step only. The next Step starts empty. A model directive is `{ id?, controls?, config? }`: `controls` holds portable `temperature` and `maxOutputTokens`; `config` remains the opaque provider namespace. A second different `select` tripwires; `select({})` reserves the invoker’s own default and blocks a later non-default selection. An omitted `select` leaves `ModelRequest.model` unset — the harness does not supply a fallback; the invoker may use its constructor default or reject. Duplicate tool names and invalid schemas tripwire before the Model runs.
+Each named slot is owned by its middleware and persists until explicitly removed. Effective instruction and visible-tool order is canonical: explicit `order`, middleware registration order, slot name, then declaration order. A model directive is `{ id?, controls?, config? }`; `select` is idempotent and `replace` is the explicit override. Duplicate tool names and invalid schemas tripwire before the Model runs. In `run({ prefixPolicy: "strict" })`, an effective non-initial prefix change requires a mutation `reason`.
+
+`ModelRequest.prefix` carries the selected model directive, ordered instruction text, visible provider tool contracts, contributor provenance, and logical/model/combined digests. Harness emits `model.prefix` before every `model.started` event with `initial`, `unchanged`, or `declared-change` status. These fingerprints describe the Harness logical prefix; they do not claim provider-wire equivalence, provider cache support, or a cache hit.
 
 A successful Model return is a `ModelCandidate`: an ordered `output` of `text`, `reasoning`, and `tool-call` blocks, plus optional `finishReason`, `usage`, and `evidence`. A string return becomes one text block. Session `final` joins text blocks with `""`; reasoning is stored on the transcript candidate for observability and is never part of that string or of the tool plan. Portable-history projection (an invoker concern) must not replay reasoning as assistant content. Tool-call `args` are a JSON object; `{}` is valid and is not a stand-in for parse failure. `finishReason` is `stop`, `length`, `tool-calls`, `content-filter`, or `other` — never `error` or `aborted`. Thrown `invoke` or an aborted signal stays on the `model.failed` / abort path. `evidence.extras` is for small safe fields, not raw request or response bodies. Token counts that are present must be non-negative integers; `costUsd` is optional and only when the provider supplied it.
 
-The kernel canonicalizes tool-call ids when it mints the response; `sealStep` reuses those ids. `replace` may drop calls and rewrite text or reasoning but cannot change a retained call’s name or arguments or undo an inner denial. A replace that omits `finishReason`, `usage`, or `evidence` keeps the current values.
+The harness canonicalizes tool-call ids when it mints the response; `sealStep` reuses those ids. `replace` may drop calls and rewrite text or reasoning but cannot change a retained call’s name or arguments or undo an inner denial. A replace that omits `finishReason`, `usage`, or `evidence` keeps the current values.
 
-A tripwire, invalid return, or bind failure on one Session does not stop sibling Sessions. Kernel contract breaks are session-scoped. Late `setTimeout` mutations throw and emit observe events; they do not stop a settled Session.
+A tripwire, invalid return, or bind failure on one Session does not stop sibling Sessions. Harness contract breaks are session-scoped. Late `setTimeout` mutations throw and emit observe events; they do not stop a settled Session.
 
 The harness has no automatic turn, Step, or wall-clock timeout. Applications own budgets through middleware.
 
@@ -91,6 +93,6 @@ Harness `0.4.0-rc.1` accepts synchronous `z.object(...)` schemas only. Import `z
 
 ## Manifest
 
-`agent.manifest` is a frozen description of the sealed onion, the one bound model invoker, and adapters (`id` / optional `version` only). It does not list tools, instructions, routable model ids, or digests; those concerns stay per-Step or with the host. Observe `step.catalog` for the offered tool names and digest of that Step. Observe `model.started` / `model.completed` for optional `requestedModelId` when middleware selected an id.
+`agent.manifest` is a frozen description of the sealed onion, the one bound model invoker, and adapters (`id` / optional `version` only). It does not list session prefix state. Observe `model.prefix` for the per-call prefix ledger and `model.started` for the exact immutable prefix delivered to the model boundary.
 
 The package intentionally does not own persistence, restart recovery, credentials, transports, provider conversion, background jobs, or detached Tool work.

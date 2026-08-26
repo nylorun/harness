@@ -45,10 +45,13 @@ describe("Session loop", () => {
 
     const completion = await turn(result, "go").handle.completed;
 
-    expect(completion).toMatchObject({
-      status: "completed",
-      events: [expect.objectContaining({ type: "final", output: "done" })],
+    expect(completion.status).toBe("completed");
+    expect(completion.events[0]).toMatchObject({
+      type: "input",
+      event: { kind: "user-message", text: "go" },
     });
+    expect(completion.events.some((event) => event.type === "candidate")).toBe(true);
+    expect(completion.events.at(-1)).toMatchObject({ type: "final", output: "done" });
     expect(modelCalls).toBe(34);
   });
 
@@ -128,7 +131,7 @@ describe("Session loop", () => {
     for await (const event of session.stream()) first.push(event.type);
     const second: string[] = [];
     for await (const event of session.stream()) second.push(event.type);
-    expect(first).toEqual(["final", "session.stopped"]);
+    expect(first).toEqual(["input", "candidate", "final", "session.stopped"]);
     expect(second).toEqual(first);
   });
 });

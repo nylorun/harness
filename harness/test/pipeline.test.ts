@@ -15,11 +15,14 @@ describe("step pipeline", () => {
       })
       .build();
     const output = (await turn(result, "go").handle.completed).events;
-    expect(output).toMatchObject([{ type: "tripwire", tripwire: { code: "turn.limit" } }]);
+    expect(output).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
+      { type: "tripwire", tripwire: { code: "turn.limit" } },
+    ]);
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("does not offer a tool on the next Step unless middleware re-adds it", async () => {
+  it("retains a named tool slot on the next Step until middleware removes it", async () => {
     let step = 0;
     const seen: string[][] = [];
     const result = Agent(
@@ -30,12 +33,12 @@ describe("step pipeline", () => {
     )
       .with(adapter())
       .use("once", async (request, next) => {
-        if (request.stepNumber === 1) request.tools.add(tool());
+        if (request.stepNumber === 1) request.prefix.tools.set("once", [tool()]);
         return next();
       })
       .build();
     await turn(result, "go").handle.completed;
-    expect(seen).toEqual([["echo"], []]);
+    expect(seen).toEqual([["echo"], ["echo"]]);
   });
 
   it("tripwires duplicate dynamic tools before the Model runs", async () => {
@@ -43,12 +46,15 @@ describe("step pipeline", () => {
     const result = Agent(model(invoke))
       .with(adapter())
       .use("dup", async (request, next) => {
-        request.tools.add(tool("echo"), tool("echo"));
+        request.prefix.tools.set("dup", [tool("echo"), tool("echo")]);
         return next();
       })
       .build();
     const output = (await turn(result, "go").handle.completed).events;
-    expect(output).toMatchObject([{ type: "tripwire", tripwire: { code: "tool.duplicate-name" } }]);
+    expect(output).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
+      { type: "tripwire", tripwire: { code: "tool.duplicate-name" } },
+    ]);
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -71,7 +77,7 @@ describe("step pipeline", () => {
         return response;
       })
       .use("inner", async (request, next) => {
-        request.tools.add(tool());
+        request.prefix.tools.set("inner", [tool()]);
         const response = await next();
         expect(response.toolCalls().map((call) => call.id)).toEqual(["keep", "drop"]);
         response.deny("keep", "blocked");
@@ -99,7 +105,7 @@ describe("step pipeline", () => {
     )
       .with(adapter())
       .use("rewrite", async (request, next) => {
-        request.tools.add(tool());
+        request.prefix.tools.set("rewrite", [tool()]);
         const response = await next();
         response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 99 } }));
         return response;
@@ -107,6 +113,8 @@ describe("step pipeline", () => {
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
+      { type: "candidate" },
       { type: "tripwire", tripwire: { code: "response.replace-invalid" } },
     ]);
   });
@@ -118,7 +126,7 @@ describe("step pipeline", () => {
       .use("late", async (request, next) => {
         setTimeout(() => {
           try {
-            request.tools.add(tool());
+            request.prefix.tools.set("late", [tool()]);
           } catch (error) {
             lateError = error instanceof Error ? error.message : String(error);
           }
@@ -153,7 +161,7 @@ describe("step pipeline", () => {
     )
       .with(adapter())
       .use("snapshot", async (request, next) => {
-        request.tools.add(definition);
+        request.prefix.tools.set("snapshot", [definition]);
         (definition as { route: unknown }).route = { path: "/admin" };
         return next();
       })
@@ -162,7 +170,7 @@ describe("step pipeline", () => {
     expect(routes).toEqual([{ path: "/v1" }]);
   });
 
-  it("emits step.catalog before model.started and tool.sealed after the onion returns", async () => {
+  it("emits step.started before middleware and model.started, and tool.sealed after the onion", async () => {
     const types: string[] = [];
     let step = 0;
     const result = Agent(
@@ -177,10 +185,10 @@ describe("step pipeline", () => {
     session.observe((event) => types.push(event.type));
     const handle = session.input("go");
     await handle.completed;
-    expect(types.indexOf("step.catalog")).toBeLessThan(types.indexOf("model.started"));
+    expect(types.indexOf("step.started")).toBeLessThan(types.indexOf("middleware.entered"));
+    expect(types.indexOf("middleware.entered")).toBeLessThan(types.indexOf("model.started"));
     expect(types.indexOf("model.started")).toBeLessThan(types.indexOf("tool.sealed"));
-    const catalog = types.filter((type) => type === "step.catalog");
-    expect(catalog.length).toBeGreaterThan(0);
+    expect(types.filter((type) => type === "step.started").length).toBeGreaterThan(0);
   });
 
   it("keeps a sibling Session running after a session-scoped tripwire", async () => {
@@ -199,19 +207,26 @@ describe("step pipeline", () => {
     const a = turn(agent, "go", { userId: "a" });
     const b = turn(agent, "go", { userId: "b" });
     await expect(a.handle.completed).resolves.toMatchObject({
-      events: [{ type: "tripwire", tripwire: { code: "policy.stop" } }],
+      events: [
+        { type: "input", event: { kind: "user-message", text: "go" } },
+        { type: "tripwire", tripwire: { code: "policy.stop" } },
+      ],
     });
     expect(a.session.state.status).toBe("stopped");
     await expect(b.handle.completed).resolves.toMatchObject({
-      events: [{ type: "final", output: "ok" }],
+      events: [
+        { type: "input", event: { kind: "user-message", text: "go" } },
+        { type: "candidate" },
+        { type: "final", output: "ok" },
+      ],
     });
     expect(b.session.state.status).toBe("idle");
   });
 
   it("lets application middleware hide a prepended host tool on the same Step", async () => {
     const folder = async (request, next) => {
-      request.tools.add(tool("folder"));
-      request.instructions.add("from folder");
+      request.prefix.tools.set("folder", [tool("folder")]);
+      request.prefix.instructions.set("folder", ["from folder"]);
       return next();
     };
     const seen: string[][] = [];
@@ -223,7 +238,7 @@ describe("step pipeline", () => {
     )
       .with(adapter())
       .use("app", async (request, next) => {
-        request.tools.hide("folder");
+        request.prefix.tools.withhold("folder");
         return next();
       });
     builder.prepend("nylorun-folder", folder);

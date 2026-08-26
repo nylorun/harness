@@ -1,10 +1,12 @@
-import type { InputEvent, SessionSnapshot } from "../types/session.js";
+import type { InputEvent, SessionEvent, SessionSnapshot } from "../types/session.js";
 import type { JsonObject, Tripwire } from "../types/shared.js";
 import type { RequiredInteraction, ToolResult } from "../types/tool.js";
 import { beginTurn, commitCandidate, commitFinal, commitToolResults } from "../session/state.js";
 import { runStep, type LoopAgent } from "../step/run.js";
 import { createId } from "../utils/ids.js";
+import { copyJson } from "../utils/immutable.js";
 import { ToolPlanRunner } from "./plan-runner.js";
+import { PromptPrefixState } from "../step/prompt-prefix.js";
 
 export interface PendingTurn {
   readonly plan: ToolPlanRunner;
@@ -41,6 +43,7 @@ export interface TurnRunContext {
   readonly assertCurrent: () => void;
   readonly onPlanActive: (pending: PendingTurn | undefined) => void;
   readonly onState: (state: SessionSnapshot) => void;
+  readonly onConversation: (event: SessionEvent) => void;
 }
 
 /** Advances one Turn until it finalizes, trips a policy, or pauses for an interaction. */
@@ -49,6 +52,7 @@ export class TurnRunner {
     private readonly agent: LoopAgent,
     private readonly sessionId: string,
     private readonly session: Readonly<{ readonly userId?: string; readonly context?: JsonObject }>,
+    private readonly prefixState: PromptPrefixState = new PromptPrefixState(),
   ) {}
 
   async start(
@@ -59,6 +63,7 @@ export class TurnRunner {
     const turnId = createId("turn");
     const started = beginTurn(state, turnId, event);
     context.onState(started);
+    context.onConversation({ type: "input", event, turnId });
     return this.advance(started, turnId, 1, [event], [], context);
   }
 
@@ -68,6 +73,7 @@ export class TurnRunner {
     event: InputEvent,
     context: TurnRunContext,
   ): Promise<TurnProgress> {
+    context.onConversation({ type: "input", event, turnId: pending.turnId });
     const progress = await this.runPlan(pending, context, event);
     if (progress.kind === "interaction-required")
       return { kind: "interaction-required", state, pending, interaction: progress.interaction };
@@ -109,11 +115,13 @@ export class TurnRunner {
         toolResults,
         signal: context.signal,
         session: this.session,
+        prefixState: this.prefixState,
       });
       context.assertCurrent();
       if (run.candidate) {
         state = commitCandidate(state, turnId, stepId, run.candidate);
         context.onState(state);
+        context.onConversation({ type: "candidate", turnId, stepId, candidate: run.candidate });
       }
 
       if (run.output.kind === "tripwire")
@@ -131,7 +139,25 @@ export class TurnRunner {
         type: "tool.sealed",
         turnId,
         stepId,
-        attributes: { calls: run.output.plan.executable.length },
+        attributes: {
+          executable: Object.freeze(
+            run.output.plan.executable.map((entry) =>
+              Object.freeze({
+                callId: entry.call.callId,
+                toolName: entry.call.toolName,
+                args: copyJson(entry.call.args),
+                executeWith: entry.call.executeWith,
+                route: copyJson(entry.call.route),
+                invocationId: entry.invocationId,
+                ...(entry.preflight === undefined ? {} : { preflight: entry.preflight }),
+                ...(entry.interaction === undefined
+                  ? {}
+                  : { interaction: copyJson(entry.interaction) }),
+              }),
+            ),
+          ),
+          immediate: copyJson(run.output.plan.immediateResults),
+        },
       });
       const pending: PendingTurn = {
         plan: new ToolPlanRunner(run.output.plan),

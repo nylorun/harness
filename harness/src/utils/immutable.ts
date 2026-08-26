@@ -20,7 +20,7 @@ export function assertJson(value: unknown, path = "value"): asserts value is Jso
   throw new TypeError(`${path} must be JSON-serializable`);
 }
 
-export function copyJson<T extends JsonValue>(value: T): T {
+export function copyJson<T>(value: T): T {
   assertJson(value);
   if (Array.isArray(value)) return Object.freeze(value.map((item) => copyJson(item))) as T;
   if (value !== null && typeof value === "object") {

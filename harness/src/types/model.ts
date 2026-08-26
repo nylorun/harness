@@ -57,11 +57,57 @@ export interface ModelDirective {
   readonly config?: JsonObject;
 }
 
+/** A middleware-owned change to the model-visible prefix. */
+export interface PromptPrefixMutationOptions {
+  readonly order?: number;
+  readonly reason?: string;
+}
+
+export interface PromptPrefixContributor {
+  readonly middlewareId: string;
+  readonly slot: string;
+  readonly order: number;
+  readonly digest: string;
+  readonly reason?: string;
+}
+
+export interface PromptPrefixTool {
+  readonly name: string;
+  readonly description?: string;
+  readonly inputSchema: JsonObject;
+  readonly digest: string;
+  readonly contributor: PromptPrefixContributor;
+}
+
+export interface PromptPrefixInstruction {
+  readonly text: string;
+  readonly digest: string;
+  readonly contributor: PromptPrefixContributor;
+}
+
+export interface PromptPrefixSnapshot {
+  readonly version: 1;
+  readonly model?: ModelDirective;
+  readonly instructions: readonly PromptPrefixInstruction[];
+  /** Bound tools are retained for execution; their digest covers only their provider-visible contract. */
+  readonly tools: readonly BoundToolDefinition[];
+  readonly toolContracts: readonly PromptPrefixTool[];
+  readonly withheldTools: readonly string[];
+  readonly contributors: readonly PromptPrefixContributor[];
+  readonly digests: Readonly<{
+    readonly logical: string;
+    readonly model: string;
+    readonly request: string;
+  }>;
+}
+
 export interface ModelRequest {
   readonly sessionId: string;
   readonly turnId: string;
   readonly stepId: string;
   readonly model?: ModelDirective;
+  /** Canonical, immutable Harness-owned model prefix for this call. */
+  readonly prefix: PromptPrefixSnapshot;
   readonly instructions: readonly string[];
   readonly context: readonly ContextItem[];
   readonly transcript: readonly TranscriptEntry[];

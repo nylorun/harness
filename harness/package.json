@@ -1,7 +1,7 @@
 {
   "name": "@nylorun/harness",
   "version": "0.4.0-rc.1",
-  "description": "A capability-first, in-memory agent orchestration kernel.",
+  "description": "A capability-first, in-memory agent loop.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {

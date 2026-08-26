@@ -25,7 +25,7 @@ export class LiveSession implements Session {
       ...(options.userId ? { userId: options.userId } : {}),
       ...(options.context ? { context: copyJsonObject(options.context, "session context") } : {}),
     });
-    this.scheduler = new SessionScheduler(id, agent, session);
+    this.scheduler = new SessionScheduler(id, agent, session, options.prefixPolicy);
   }
 
   get state(): SessionSnapshot {

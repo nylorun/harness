@@ -159,9 +159,12 @@ describe("interaction resume", () => {
       interactionId: required.interaction.id,
       approved: true,
     }).completed;
-    expect(resumed).toMatchObject({
-      status: "completed",
-      events: [expect.objectContaining({ type: "final", output: "done" })],
+    expect(resumed.status).toBe("completed");
+    expect(resumed.events[0]).toMatchObject({
+      type: "input",
+      event: { kind: "approve", approved: true },
     });
+    expect(resumed.events.some((event) => event.type === "candidate")).toBe(true);
+    expect(resumed.events.at(-1)).toMatchObject({ type: "final", output: "done" });
   });
 });

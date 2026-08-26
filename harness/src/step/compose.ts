@@ -13,7 +13,7 @@ export async function runMiddleware(
     if (index === middleware.length) return terminal();
 
     const item = middleware[index]!;
-    const lease = context.requestFacade(item.id);
+    const lease = context.requestFacade(item.id, index);
     let returned = false;
     let nextCalledTwice = false;
     let nextPromise: Promise<StepResponse> | undefined;
@@ -21,7 +21,7 @@ export async function runMiddleware(
       type: "middleware.entered",
       turnId: context.input.turnId,
       stepId: context.input.stepId,
-      attributes: { middlewareId: item.id },
+      middlewareId: item.id,
     });
     try {
       let handlerError: unknown;
@@ -91,7 +91,7 @@ export async function runMiddleware(
         type: "middleware.completed",
         turnId: context.input.turnId,
         stepId: context.input.stepId,
-        attributes: { middlewareId: item.id },
+        middlewareId: item.id,
       });
     }
   };

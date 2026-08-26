@@ -1,4 +1,9 @@
-import type { ModelCandidate, ModelDirective, ModelToolCall } from "./model.js";
+import type {
+  ModelCandidate,
+  ModelDirective,
+  ModelToolCall,
+  PromptPrefixMutationOptions,
+} from "./model.js";
 import type { InputEvent, TranscriptEntry } from "./session.js";
 import type { ContextItem, JsonObject, Tripwire } from "./shared.js";
 import type { Interaction, ToolDefinition, ToolResult } from "./tool.js";
@@ -27,13 +32,31 @@ export interface StepRequest {
   readonly arrivals: readonly InputEvent[];
   readonly toolResults: readonly ToolResult[];
   readonly transcript: readonly TranscriptEntry[];
-  readonly instructions: { add(...items: string[]): void };
   readonly context: { add(...items: ContextItem[]): void };
-  readonly tools: {
-    add(...tools: ToolDefinition[]): void;
-    hide(...toolNames: string[]): void;
+  readonly prefix: {
+    readonly instructions: {
+      set(slot: string, items: readonly string[], options?: PromptPrefixMutationOptions): void;
+      remove(slot: string, options?: Omit<PromptPrefixMutationOptions, "order">): void;
+    };
+    readonly tools: {
+      set(
+        slot: string,
+        tools: readonly ToolDefinition[],
+        options?: PromptPrefixMutationOptions,
+      ): void;
+      remove(slot: string, options?: Omit<PromptPrefixMutationOptions, "order">): void;
+      withhold(name: string, options?: Omit<PromptPrefixMutationOptions, "order">): void;
+      restore(name: string, options?: Omit<PromptPrefixMutationOptions, "order">): void;
+    };
+    readonly model: {
+      select(directive: ModelDirective, options?: Omit<PromptPrefixMutationOptions, "order">): void;
+      replace(
+        directive: ModelDirective,
+        options?: Omit<PromptPrefixMutationOptions, "order">,
+      ): void;
+      clear(options?: Omit<PromptPrefixMutationOptions, "order">): void;
+    };
   };
-  readonly model: { select(directive: ModelDirective): void };
   tripwire(error: Tripwire): StepResponse;
 }
 

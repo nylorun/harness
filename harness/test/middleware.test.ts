@@ -14,7 +14,7 @@ describe("middleware", () => {
       .with(adapter())
       .use("one", async (request, next) => {
         order.push("enter-one");
-        request.instructions.add("extra");
+        request.prefix.instructions.set("extra", ["extra"]);
         const response = await next();
         order.push("exit-one");
         return response;
@@ -33,16 +33,17 @@ describe("middleware", () => {
   it("tripwires conflicting model selection", async () => {
     const result = Agent(model(async () => "done"))
       .use("a", async (request, next) => {
-        request.model.select({ id: "haiku" });
+        request.prefix.model.select({ id: "haiku" });
         return next();
       })
       .use("b", async (request, next) => {
-        request.model.select({ id: "opus" });
+        request.prefix.model.select({ id: "opus" });
         return next();
       })
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.selection-conflict" } },
     ]);
   });
@@ -80,8 +81,8 @@ describe("middleware", () => {
         return response;
       })
       .use("restrictions", async (request, next) => {
-        request.tools.add(tool("hidden"), tool("echo"));
-        request.tools.hide("hidden");
+        request.prefix.tools.set("restrictions", [tool("hidden"), tool("echo")]);
+        request.prefix.tools.withhold("hidden");
         const response = await next();
         response.deny("deny", "policy");
         response.requireInteraction("deny", { kind: "approval", prompt: "approve" });
@@ -111,6 +112,7 @@ describe("middleware", () => {
       .use("omitted", async () => undefined as never)
       .build();
     expect((await turn(omitted, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "middleware.invalid-response" } },
     ]);
 
@@ -121,7 +123,11 @@ describe("middleware", () => {
       })
       .build();
     await expect(turn(doubled, "go").handle.completed).resolves.toMatchObject({
-      events: [{ type: "tripwire", tripwire: { code: "middleware.next-called-twice" } }],
+      events: [
+        { type: "input", event: { kind: "user-message", text: "go" } },
+        { type: "candidate" },
+        { type: "tripwire", tripwire: { code: "middleware.next-called-twice" } },
+      ],
     });
     expect(doubled.run().state.status).toBe("idle");
 
@@ -132,6 +138,7 @@ describe("middleware", () => {
       .build();
     const spoofedTurn = turn(spoofed, "go");
     expect((await spoofedTurn.handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "middleware.failed" } },
     ]);
     expect(spoofedTurn.session.state.status).toBe("idle");
@@ -184,8 +191,8 @@ describe("middleware", () => {
       }),
     )
       .use("route", async (request, next) => {
-        request.model.select({
-          id: "opus",
+        request.prefix.model.select({
+          id: "test-model",
           controls: { temperature: 0.2, maxOutputTokens: 128 },
           config: { reasoning: "high" },
         });
@@ -195,7 +202,7 @@ describe("middleware", () => {
     await turn(selected, "go").handle.completed;
     expect(seen).toEqual([
       {
-        id: "opus",
+        id: "test-model",
         controls: { temperature: 0.2, maxOutputTokens: 128 },
         config: { reasoning: "high" },
       },
@@ -221,11 +228,11 @@ describe("middleware", () => {
       }),
     )
       .use("outer", async (request, next) => {
-        request.model.select({ id: undefined });
+        request.prefix.model.select({ id: undefined });
         return next();
       })
       .use("inner", async (request, next) => {
-        request.model.select({});
+        request.prefix.model.select({});
         return next();
       })
       .build();
@@ -236,45 +243,49 @@ describe("middleware", () => {
   it("tripwires a partial-merge select and invalid directives", async () => {
     const merge = Agent(model(async () => "done"))
       .use("id", async (request, next) => {
-        request.model.select({ id: "haiku" });
+        request.prefix.model.select({ id: "haiku" });
         return next();
       })
       .use("config", async (request, next) => {
-        request.model.select({ config: { reasoning: "high" } });
+        request.prefix.model.select({ config: { reasoning: "high" } });
         return next();
       })
       .build();
     expect((await turn(merge, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.selection-conflict" } },
     ]);
 
     const unknownKey = Agent(model(async () => "done"))
       .use("bad", async (request, next) => {
-        request.model.select({ id: "haiku", extra: true } as never);
+        request.prefix.model.select({ id: "haiku", extra: true } as never);
         return next();
       })
       .build();
     expect((await turn(unknownKey, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.invalid-directive" } },
     ]);
 
     const emptyId = Agent(model(async () => "done"))
       .use("empty", async (request, next) => {
-        request.model.select({ id: "" });
+        request.prefix.model.select({ id: "" });
         return next();
       })
       .build();
     expect((await turn(emptyId, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.invalid-directive" } },
     ]);
 
     const unknownControl = Agent(model(async () => "done"))
       .use("bad-control", async (request, next) => {
-        request.model.select({ controls: { topP: 0.5 } } as never);
+        request.prefix.model.select({ controls: { topP: 0.5 } } as never);
         return next();
       })
       .build();
     expect((await turn(unknownControl, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.invalid-directive" } },
     ]);
   });
@@ -290,7 +301,7 @@ describe("middleware", () => {
       }),
     )
       .use("route", async (request, next) => {
-        request.model.select({ id: "haiku", config: source });
+        request.prefix.model.select({ id: "test-model", config: source });
         source.nested.n = 9;
         source.reasoning = "high";
         return next();
@@ -316,14 +327,15 @@ describe("middleware", () => {
         expect(() => {
           (request.transcript as { kind: string }[]).push({ kind: "forged" });
         }).toThrow();
-        if (request.stepNumber === 1) request.model.select({ id: "haiku" });
+        if (request.stepNumber === 1) request.prefix.model.select({ id: "test-model" });
+        else request.prefix.model.clear({ reason: "Tool loop returned to default route." });
         return next();
       })
       .use("test", offer(tool()))
       .build();
     await turn(result, "go").handle.completed;
     expect(seen).toEqual([
-      { model: { id: "haiku" }, transcriptKinds: ["input"] },
+      { model: { id: "test-model" }, transcriptKinds: ["input"] },
       { model: undefined, transcriptKinds: ["input", "candidate", "tool-results"] },
     ]);
   });
@@ -335,7 +347,7 @@ describe("middleware", () => {
       .use("late", async (request, next) => {
         const response = await next();
         try {
-          request.model.select({ id: "opus" });
+          request.prefix.model.select({ id: "test-model" });
         } catch (error) {
           lateError = error instanceof Error ? error.message : String(error);
         }

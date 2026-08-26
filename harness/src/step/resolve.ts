@@ -15,6 +15,7 @@ export function resolveModelRequest(input: {
     turnId: ctx.input.turnId,
     stepId: ctx.input.stepId,
     ...(ctx.selectedDirective === undefined ? {} : { model: ctx.selectedDirective }),
+    prefix: ctx.prefixSnapshot(),
     instructions: Object.freeze([...ctx.instructions]),
     context: Object.freeze([
       ...(input.sessionContext ? [{ type: "session", value: input.sessionContext }] : []),

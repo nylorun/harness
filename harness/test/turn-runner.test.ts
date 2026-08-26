@@ -22,6 +22,7 @@ describe("TurnRunner", () => {
         assertCurrent() {},
         onPlanActive() {},
         onState: (state) => states.push(state.status),
+        onConversation() {},
       },
     );
 

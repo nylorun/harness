@@ -24,7 +24,7 @@ export function tool(name = "echo", executeWith = "local") {
 
 export function offer(...tools: ReturnType<typeof tool>[]) {
   return async (request: StepRequest, next: () => Promise<StepResponse>) => {
-    for (const item of tools) request.tools.add(item);
+    request.prefix.tools.set("fixture-tools", tools);
     return next();
   };
 }
@@ -73,6 +73,7 @@ export function turn(
     ...(options.id === undefined ? {} : { id: options.id }),
     ...(options.userId === undefined ? {} : { userId: options.userId }),
     ...(options.context === undefined ? {} : { context: options.context }),
+    ...(options.prefixPolicy === undefined ? {} : { prefixPolicy: options.prefixPolicy }),
   });
   const handle = session.input(
     input,

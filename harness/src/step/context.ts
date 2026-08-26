@@ -1,9 +1,12 @@
-import type { ModelCandidate, ModelDirective } from "../types/model.js";
+import type {
+  ModelCandidate,
+  ModelDirective,
+  PromptPrefixMutationOptions,
+  PromptPrefixSnapshot,
+} from "../types/model.js";
 import type { StepInput, StepRequest, StepResponse } from "../types/middleware.js";
 import type { ContextItem, ObserveEvent, Tripwire } from "../types/shared.js";
 import type { BoundToolDefinition, Interaction, ToolDefinition } from "../types/tool.js";
-import { bindTool } from "../build/bind-tool.js";
-import type { AdapterRegistry } from "../build/adapters.js";
 import { copyJson } from "../utils/immutable.js";
 import {
   callsFromCanonical,
@@ -12,7 +15,8 @@ import {
   identityKey,
   type CanonicalCall,
 } from "./canonicalize.js";
-import { normalizeCandidate, normalizeDirective, sameDirective } from "../types/model.js";
+import { normalizeCandidate } from "../types/model.js";
+import { owner, PromptPrefixTransaction } from "./prompt-prefix.js";
 
 const branded = new WeakSet<object>();
 
@@ -23,31 +27,28 @@ export function isBrandedResponse(value: unknown): value is StepResponse {
 /** Mutable Step state. Middleware receives leased request views and one branded response. */
 export class StepContext {
   readonly input: Readonly<StepInput>;
-  readonly #adapters: AdapterRegistry;
   readonly #observe: (event: ObserveEvent) => void;
-  readonly #instructions: string[] = [];
   readonly #contextItems: ContextItem[] = [];
-  readonly #catalog: BoundToolDefinition[] = [];
-  readonly #hiddenTools = new Set<string>();
+  readonly #prefix: PromptPrefixTransaction;
   readonly #denials = new Map<string, string>();
   readonly #interactions = new Map<string, Interaction>();
   readonly #preflights = new Map<string, "sandbox" | "validation">();
   readonly #identities = new Map<string, string>();
-  #selectedDirective?: ModelDirective;
   #canonical: readonly CanonicalCall[] = Object.freeze([]);
   #candidate?: ModelCandidate;
   #tripwire?: Tripwire;
   #response?: StepResponse;
   #sealed = false;
+  #committedPrefix?: PromptPrefixSnapshot;
 
   constructor(
     input: Readonly<StepInput>,
-    adapters: AdapterRegistry,
     observe: (event: ObserveEvent) => void,
+    prefix: PromptPrefixTransaction,
   ) {
     this.input = input;
-    this.#adapters = adapters;
     this.#observe = observe;
+    this.#prefix = prefix;
   }
 
   get currentTripwire(): Tripwire | undefined {
@@ -57,23 +58,29 @@ export class StepContext {
     return this.#candidate;
   }
   get selectedDirective(): ModelDirective | undefined {
-    return this.#selectedDirective;
+    return this.prefixSnapshot().model;
   }
   get instructions(): readonly string[] {
-    return Object.freeze([...this.#instructions]);
+    return Object.freeze(this.prefixSnapshot().instructions.map((item) => item.text));
   }
   get contextItems(): readonly ContextItem[] {
     return Object.freeze([...this.#contextItems]);
   }
   get offeredTools(): readonly BoundToolDefinition[] {
-    return Object.freeze(this.#catalog.filter((tool) => !this.#hiddenTools.has(tool.name)));
+    return this.prefixSnapshot().tools;
   }
   get catalogByName(): ReadonlyMap<string, BoundToolDefinition> {
-    return new Map(this.#catalog.map((tool) => [tool.name, tool]));
+    return this.#prefix.catalogByName();
   }
 
   isToolHidden(toolName: string): boolean {
-    return this.#hiddenTools.has(toolName);
+    return this.#prefix.isWithheld(toolName);
+  }
+  prefixSnapshot(): PromptPrefixSnapshot {
+    return this.#committedPrefix ?? this.#prefix.snapshot();
+  }
+  commitPrefix(snapshot: PromptPrefixSnapshot): void {
+    this.#committedPrefix = snapshot;
   }
   denialFor(callId: string): string | undefined {
     return this.#denials.get(callId);
@@ -106,7 +113,10 @@ export class StepContext {
     this.#sealed = true;
   }
 
-  requestFacade(middlewareId: string): {
+  requestFacade(
+    middlewareId: string,
+    middlewareOrder: number,
+  ): {
     readonly value: StepRequest;
     revokeMutators(): void;
   } {
@@ -117,15 +127,30 @@ export class StepContext {
           type: "middleware.lease-violation",
           turnId: this.input.turnId,
           stepId: this.input.stepId,
-          attributes: {
-            middlewareId,
-            reason: this.#sealed ? "step-sealed" : "mutators-revoked",
-          },
+          middlewareId,
+          reason: this.#sealed ? "step-sealed" : "mutators-revoked",
         });
         throw new Error("Middleware request mutators are no longer active");
       }
       action();
     };
+    const mutatePrefix = (kind: "instructions" | "tools" | "model", action: () => void): void =>
+      mutate(() => {
+        try {
+          action();
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : String(cause);
+          const code =
+            kind === "tools"
+              ? "tool.invalid"
+              : kind === "model"
+                ? message.startsWith("A different model directive")
+                  ? "model.selection-conflict"
+                  : "model.invalid-directive"
+                : "prefix.invalid";
+          this.#tripwire ??= Object.freeze({ code, message });
+        }
+      });
     const value: StepRequest = Object.freeze({
       session: this.input.session,
       turnNumber: this.input.turnNumber,
@@ -133,14 +158,6 @@ export class StepContext {
       arrivals: this.input.arrivals,
       toolResults: this.input.toolResults,
       transcript: this.input.transcript,
-      instructions: Object.freeze({
-        add: (...items: string[]) =>
-          mutate(() => {
-            if (items.some((item) => typeof item !== "string"))
-              throw new TypeError("Step instructions must be strings");
-            this.#instructions.push(...items);
-          }),
-      }),
       context: Object.freeze({
         add: (...items: ContextItem[]) =>
           mutate(() => {
@@ -158,20 +175,71 @@ export class StepContext {
             );
           }),
       }),
-      tools: Object.freeze({
-        add: (...tools: ToolDefinition[]) =>
-          mutate(() => {
-            for (const tool of tools) this.#addTool(tool);
-          }),
-        hide: (...toolNames: string[]) =>
-          mutate(() => {
-            if (toolNames.some((name) => typeof name !== "string" || !name))
-              throw new TypeError("Hidden Tool names must be non-empty strings");
-            toolNames.forEach((name) => this.#hiddenTools.add(name));
-          }),
-      }),
-      model: Object.freeze({
-        select: (directive: ModelDirective) => mutate(() => this.#selectDirective(directive)),
+      prefix: Object.freeze({
+        instructions: Object.freeze({
+          set: (slot: string, items: readonly string[], options?: PromptPrefixMutationOptions) =>
+            mutatePrefix("instructions", () =>
+              this.#prefix.setInstructions(
+                owner(middlewareId, middlewareOrder, slot),
+                items,
+                options,
+              ),
+            ),
+          remove: (slot: string, options?: Omit<PromptPrefixMutationOptions, "order">) =>
+            mutatePrefix("instructions", () =>
+              this.#prefix.removeInstructions(owner(middlewareId, middlewareOrder, slot), options),
+            ),
+        }),
+        tools: Object.freeze({
+          set: (
+            slot: string,
+            tools: readonly ToolDefinition[],
+            options?: PromptPrefixMutationOptions,
+          ) =>
+            mutatePrefix("tools", () =>
+              this.#prefix.setTools(owner(middlewareId, middlewareOrder, slot), tools, options),
+            ),
+          remove: (slot: string, options?: Omit<PromptPrefixMutationOptions, "order">) =>
+            mutatePrefix("tools", () =>
+              this.#prefix.removeTools(owner(middlewareId, middlewareOrder, slot), options),
+            ),
+          withhold: (name: string, options?: Omit<PromptPrefixMutationOptions, "order">) =>
+            mutatePrefix("tools", () =>
+              this.#prefix.withhold(
+                owner(middlewareId, middlewareOrder, `withhold:${name}`),
+                name,
+                options,
+              ),
+            ),
+          restore: (name: string, options?: Omit<PromptPrefixMutationOptions, "order">) =>
+            mutatePrefix("tools", () => this.#prefix.restore(name, options)),
+        }),
+        model: Object.freeze({
+          select: (
+            directive: ModelDirective,
+            options?: Omit<PromptPrefixMutationOptions, "order">,
+          ) =>
+            mutatePrefix("model", () =>
+              this.#prefix.select(
+                owner(middlewareId, middlewareOrder, "model"),
+                directive,
+                options,
+              ),
+            ),
+          replace: (
+            directive: ModelDirective,
+            options?: Omit<PromptPrefixMutationOptions, "order">,
+          ) =>
+            mutatePrefix("model", () =>
+              this.#prefix.replace(
+                owner(middlewareId, middlewareOrder, "model"),
+                directive,
+                options,
+              ),
+            ),
+          clear: (options?: Omit<PromptPrefixMutationOptions, "order">) =>
+            mutatePrefix("model", () => this.#prefix.clearModel(options)),
+        }),
       }),
       tripwire: (error: Tripwire) => {
         let minted!: StepResponse;
@@ -187,46 +255,6 @@ export class StepContext {
         mutatorsActive = false;
       },
     });
-  }
-
-  #addTool(item: ToolDefinition): void {
-    try {
-      const bound = bindTool(item, this.#adapters);
-      if (this.#catalog.some((tool) => tool.name === bound.name)) {
-        this.#tripwire ??= Object.freeze({
-          code: "tool.duplicate-name",
-          message: `Duplicate Tool '${bound.name}'`,
-          scope: "step" as const,
-        });
-        return;
-      }
-      this.#catalog.push(bound);
-    } catch (cause) {
-      this.#tripwire ??= Object.freeze({
-        code: "tool.invalid",
-        message: `Tool '${item.name ?? "unknown"}' is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
-        scope: "step" as const,
-      });
-    }
-  }
-
-  #selectDirective(value: ModelDirective): void {
-    const normalized = normalizeDirective(value);
-    if (normalized instanceof Error) {
-      this.#tripwire ??= Object.freeze({
-        code: "model.invalid-directive",
-        message: normalized.message,
-      });
-      return;
-    }
-    if (this.#selectedDirective && !sameDirective(this.#selectedDirective, normalized)) {
-      this.#tripwire ??= Object.freeze({
-        code: "model.selection-conflict",
-        message: "A different model directive was already selected",
-      });
-      return;
-    }
-    this.#selectedDirective = normalized;
   }
 
   #ensureResponse(): StepResponse {

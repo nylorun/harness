@@ -21,7 +21,12 @@ describe("sealing", () => {
       .use("test", offer(tool()))
       .build();
     const output = (await turn(result, "go").handle.completed).events;
-    expect(output).toMatchObject([{ type: "final", output: "results:failed,completed" }]);
+    expect(output).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
+      { type: "candidate" },
+      { type: "candidate" },
+      { type: "final", output: "results:failed,completed" },
+    ]);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(Object.isFrozen(execute.mock.calls[0]![0])).toBe(true);
   });
@@ -78,6 +83,7 @@ describe("sealing", () => {
     const malformedModel = Agent(model(async () => ({ output: "invalid" }) as never)).build();
     const modelCompletion = await turn(malformedModel, "go").handle.completed;
     expect(modelCompletion.events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.failed" } },
     ]);
 
