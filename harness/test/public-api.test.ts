@@ -10,7 +10,6 @@ describe("public API", () => {
         "AgentBuilder",
         "AgentBuildError",
         "AgentLifecycleError",
-        "AgentInvariantError",
         "BuiltAgent",
         "defineTool",
         "defineMiddleware",

@@ -8,7 +8,6 @@ export interface AgentManifest {
     readonly id: string;
     readonly version?: string;
   }[];
-  readonly digests: Readonly<Record<"middleware" | "model" | "adapters" | "aggregate", string>>;
 }
 
 export type BuildResult<Agent> =

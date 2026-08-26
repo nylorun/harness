@@ -15,6 +15,7 @@ export async function runMiddleware(
     const item = middleware[index]!;
     const lease = context.requestFacade(item.id);
     let returned = false;
+    let nextCalledTwice = false;
     let nextPromise: Promise<StepResponse> | undefined;
     observe({
       type: "middleware.entered",
@@ -28,7 +29,10 @@ export async function runMiddleware(
       try {
         result = await item.handle(lease.value, () => {
           if (returned) throw new Error(`Middleware '${item.id}' called next() after returning`);
-          if (nextPromise) throw new Error(`Middleware '${item.id}' called next() more than once`);
+          if (nextPromise) {
+            nextCalledTwice = true;
+            throw new Error(`Middleware '${item.id}' called next() more than once`);
+          }
           lease.revokeMutators();
           nextPromise = dispatch(index + 1);
           return nextPromise;
@@ -50,7 +54,7 @@ export async function runMiddleware(
       }
 
       if (handlerError) {
-        if (/called next\(\) more than once/.test(message(handlerError))) {
+        if (nextCalledTwice) {
           return context.tripwire({
             code: "middleware.next-called-twice",
             message: message(handlerError),

@@ -124,6 +124,17 @@ describe("middleware", () => {
       events: [{ type: "tripwire", tripwire: { code: "middleware.next-called-twice" } }],
     });
     expect(doubled.run().state.status).toBe("idle");
+
+    const spoofed = Agent(model(invoke))
+      .use("spoof", async () => {
+        throw new Error("Middleware 'spoof' called next() more than once");
+      })
+      .build();
+    const spoofedTurn = turn(spoofed, "go");
+    expect((await spoofedTurn.handle.completed).events).toMatchObject([
+      { type: "tripwire", tripwire: { code: "middleware.failed" } },
+    ]);
+    expect(spoofedTurn.session.state.status).toBe("idle");
   });
 
   it("copies context contributions before their source can mutate", async () => {

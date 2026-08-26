@@ -52,19 +52,7 @@ export class ToolPlanRunner {
   }
 
   cancelledResults(reason: string): readonly ToolResult[] {
-    return Object.freeze(
-      this.plan.order.map(
-        ({ callId, toolName }) =>
-          this.results.get(callId) ??
-          Object.freeze({
-            callId,
-            toolName,
-            kind: "failed" as const,
-            code: "tool.cancelled",
-            message: reason,
-          }),
-      ),
-    );
+    return this.resultsInOrder("tool.cancelled", reason);
   }
 
   async run(context: ToolPlanRunContext, resume?: InputEvent): Promise<ToolPlanProgress> {
@@ -245,6 +233,10 @@ export class ToolPlanRunner {
   }
 
   private orderedResults(): readonly ToolResult[] {
+    return this.resultsInOrder("tool.missing-result", "Tool call did not produce a result");
+  }
+
+  private resultsInOrder(code: string, message: string): readonly ToolResult[] {
     return Object.freeze(
       this.plan.order.map(
         ({ callId, toolName }) =>
@@ -253,8 +245,8 @@ export class ToolPlanRunner {
             callId,
             toolName,
             kind: "failed" as const,
-            code: "tool.missing-result",
-            message: "Tool call did not produce a result",
+            code,
+            message,
           }),
       ),
     );

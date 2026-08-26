@@ -52,7 +52,6 @@ try {
     "AgentBuilder",
     "AgentBuildError",
     "AgentLifecycleError",
-    "AgentInvariantError",
     "Agent",
     "BuiltAgent",
     "defineTool",

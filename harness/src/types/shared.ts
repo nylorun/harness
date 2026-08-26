@@ -22,7 +22,6 @@ export interface Tripwire {
 }
 
 export type ObserveEvent =
-  | { readonly type: "session.created" }
   | { readonly type: "session.stopped"; readonly attributes?: { readonly reason: string } }
   | {
       readonly type: "input.received";
@@ -92,9 +91,3 @@ export type ObserveEvent =
     };
 
 export type Observer = (event: ObserveEvent) => void | Promise<void>;
-
-export interface CorrelationIds {
-  readonly sessionId: string;
-  readonly turnId: string;
-  readonly stepId: string;
-}

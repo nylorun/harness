@@ -60,7 +60,7 @@ for await (const event of session.stream()) {
 }
 ```
 
-`Agent(model)` returns a builder. `.with(adapter)` registers an adapter by `adapter.id`; call order has no onion effect. `.use(id, middleware)` appends named middleware (later is more inward). Hosts may `prepend(id, middleware)` so a folder or runtime module sits outermost. `.build()` validates ids and seals a `BuiltAgent`, or throws `AgentBuildError`. `BuiltAgent.run(options?)` creates an in-memory Session. `session.input()` submits work and returns a completion handle. `session.stream()` yields conversation events. `session.observe(listener)` receives fail-open kernel telemetry. `session.stop()` ends that Session only.
+`Agent(model)` returns a builder. `.with(adapter)` registers an adapter by `adapter.id` (required for tool dispatch via `executeWith`); call order has no onion effect. `.use(middleware)` or `.use(id, middleware)` appends middleware (later is more inward); omitted ids become `middleware-1`, `middleware-2`, …. Hosts may `.prepend(middleware)` or `.prepend(id, middleware)` so a folder or runtime module sits outermost. `.build()` validates ids and seals a `BuiltAgent`, or throws `AgentBuildError`. `BuiltAgent.run(options?)` creates an in-memory Session. `session.input()` submits work and returns a completion handle. `session.stream()` yields conversation events. `session.observe(listener)` receives fail-open kernel telemetry. `session.stop()` ends that Session only.
 
 ## Middleware
 
@@ -91,6 +91,6 @@ Harness `0.4.0-rc.1` accepts synchronous `z.object(...)` schemas only. Import `z
 
 ## Manifest
 
-`agent.manifest` snapshots the sealed onion, the one bound model invoker, and adapters. It does not list tools, instructions, or routable model ids; those are per-Step. Observe `step.catalog` for the offered tool names and digest of that Step. Observe `model.started` / `model.completed` for optional `requestedModelId` when middleware selected an id.
+`agent.manifest` is a frozen description of the sealed onion, the one bound model invoker, and adapters (`id` / optional `version` only). It does not list tools, instructions, routable model ids, or digests; those concerns stay per-Step or with the host. Observe `step.catalog` for the offered tool names and digest of that Step. Observe `model.started` / `model.completed` for optional `requestedModelId` when middleware selected an id.
 
 The package intentionally does not own persistence, restart recovery, credentials, transports, provider conversion, background jobs, or detached Tool work.

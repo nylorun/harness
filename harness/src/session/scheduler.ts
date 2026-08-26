@@ -1,5 +1,5 @@
 import type { InputEvent, InputOptions, SessionEvent, SessionSnapshot } from "../types/session.js";
-import type { ObserveEvent, Observer } from "../types/shared.js";
+import type { Observer } from "../types/shared.js";
 import { createId } from "../utils/ids.js";
 import { createEmitter } from "../utils/observe.js";
 import {
@@ -35,8 +35,8 @@ export class SessionScheduler {
 
   constructor(
     readonly id: string,
-    private readonly agent: LoopAgent,
-    private readonly session: Readonly<{
+    agent: LoopAgent,
+    session: Readonly<{
       readonly userId?: string;
       readonly context?: import("../types/shared.js").JsonObject;
     }>,
@@ -51,10 +51,6 @@ export class SessionScheduler {
 
   setObserver(listener: Observer): void {
     this.emitObserve = createEmitter(listener);
-  }
-
-  observeKernel(event: ObserveEvent): void {
-    this.emitObserve(event);
   }
 
   submit(event: InputEvent, options?: InputOptions): SubmissionStream {

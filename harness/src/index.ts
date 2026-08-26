@@ -1,6 +1,6 @@
 export { Agent, AgentBuilder } from "./builder.js";
 export { BuiltAgent } from "./agent.js";
-export { AgentBuildError, AgentInvariantError, AgentLifecycleError } from "./errors.js";
+export { AgentBuildError, AgentLifecycleError } from "./errors.js";
 export { defineAdapter, defineMiddleware, defineModel, defineTool } from "./definitions.js";
 
 export type { AgentManifest } from "./types/manifest.js";
@@ -51,7 +51,6 @@ export type {
   PreflightOutcome,
   RequiredInteraction,
   SealedToolCall,
-  SealedToolPlan,
   ToolAdapter,
   ToolContent,
   ToolDefinition,

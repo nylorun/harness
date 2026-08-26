@@ -105,8 +105,3 @@ export interface ToolResult {
   readonly code?: string;
   readonly message?: string;
 }
-
-export interface SealedToolPlan {
-  readonly calls: readonly SealedToolCall[];
-  readonly immediateResults: readonly ToolResult[];
-}

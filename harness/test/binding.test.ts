@@ -16,7 +16,6 @@ describe("build", () => {
     expect(agent.manifest.middleware[0]).toEqual({ id: "first" });
     expect(agent.manifest.model).toEqual({ id: "test-model" });
     expect(agent.manifest.adapters).toEqual([{ id: "local" }]);
-    expect(agent.manifest.digests.model).toEqual(expect.any(String));
     expect(Object.isFrozen(agent.manifest)).toBe(true);
   });
 
@@ -43,6 +42,34 @@ describe("build", () => {
   it("throws AgentBuildError when the model invoker is missing invoke", () => {
     const error = expectBuildError(() => Agent({} as never).build());
     expect(error.diagnostics.some((item) => item.code === "harness.invalid-model")).toBe(true);
+  });
+
+  it("assigns generated middleware ids when omitted", () => {
+    const agent = Agent(model(async () => "done"))
+      .use(async (_request, next) => next())
+      .use("named", async (_request, next) => next())
+      .build();
+    expect(agent.manifest.middleware.map((item) => item.id)).toEqual(["middleware-1", "named"]);
+  });
+
+  it("places prepended unnamed middleware outermost with a generated id", () => {
+    const builder = Agent(model(async () => "done")).use("app", async (_request, next) => next());
+    builder.prepend(async (_request, next) => next());
+    expect(builder.build().manifest.middleware.map((item) => item.id)).toEqual([
+      "middleware-1",
+      "app",
+    ]);
+  });
+
+  it("skips generated ids that collide with an explicit middleware id", () => {
+    const agent = Agent(model(async () => "done"))
+      .use("middleware-1", async (_request, next) => next())
+      .use(async (_request, next) => next())
+      .build();
+    expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
+      "middleware-1",
+      "middleware-2",
+    ]);
   });
 
   it("snapshots middleware descriptors when build() starts", () => {

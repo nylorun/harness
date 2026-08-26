@@ -26,7 +26,6 @@ export class LiveSession implements Session {
       ...(options.context ? { context: copyJsonObject(options.context, "session context") } : {}),
     });
     this.scheduler = new SessionScheduler(id, agent, session);
-    this.scheduler.observeKernel({ type: "session.created" });
   }
 
   get state(): SessionSnapshot {

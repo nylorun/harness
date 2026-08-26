@@ -13,10 +13,3 @@ export class AgentLifecycleError extends Error {
     this.name = "AgentLifecycleError";
   }
 }
-
-export class AgentInvariantError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AgentInvariantError";
-  }
-}

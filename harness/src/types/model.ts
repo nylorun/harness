@@ -1,7 +1,7 @@
 import type { ContextItem, JsonObject } from "./shared.js";
 import type { InputEvent, TranscriptEntry } from "./session.js";
 import type { BoundToolDefinition, ToolResult } from "./tool.js";
-import { copyJson, copyJsonObject } from "../utils/immutable.js";
+import { copyJsonObject } from "../utils/immutable.js";
 import { digest } from "../utils/digest.js";
 
 export interface ModelToolCall {
@@ -130,16 +130,6 @@ export function sameDirective(left: ModelDirective, right: ModelDirective): bool
 
 export function textFromOutput(output: readonly ModelOutputBlock[]): string {
   return output.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
-}
-
-export function toolCallsFromOutput(output: readonly ModelOutputBlock[]): readonly ModelToolCall[] {
-  return Object.freeze(
-    output.flatMap((block) =>
-      block.type === "tool-call"
-        ? [Object.freeze({ id: block.id, name: block.name, args: block.args })]
-        : [],
-    ),
-  );
 }
 
 export function normalizeCandidate(value: ModelCandidate | string): ModelCandidate {

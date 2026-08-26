@@ -15,6 +15,7 @@ export class AgentBuilder {
   private sealed = false;
   private agent?: BuiltAgent;
   private error?: AgentBuildError;
+  private middlewareSeq = 0;
 
   constructor(private readonly model: ModelInvoker) {}
 
@@ -24,30 +25,46 @@ export class AgentBuilder {
     return this;
   }
 
-  use(id: string, middleware: StepMiddleware): this {
-    return this.#push({ id, handle: middleware }, false);
+  use(middleware: StepMiddleware): this;
+  use(id: string, middleware: StepMiddleware): this;
+  use(idOrMiddleware: string | StepMiddleware, middleware?: StepMiddleware): this {
+    if (typeof idOrMiddleware === "function") {
+      return this.#push({ id: this.#nextMiddlewareId(), handle: idOrMiddleware }, false);
+    }
+    return this.#push({ id: idOrMiddleware, handle: middleware! }, false);
   }
 
   /** Host injection. Inserts ahead of `.use` so the middleware is outermost. */
-  prepend(id: string, middleware: StepMiddleware): this {
-    return this.#push({ id, handle: middleware }, true);
+  prepend(middleware: StepMiddleware): this;
+  prepend(id: string, middleware: StepMiddleware): this;
+  prepend(idOrMiddleware: string | StepMiddleware, middleware?: StepMiddleware): this {
+    if (typeof idOrMiddleware === "function") {
+      return this.#push({ id: this.#nextMiddlewareId(), handle: idOrMiddleware }, true);
+    }
+    return this.#push({ id: idOrMiddleware, handle: middleware! }, true);
   }
 
   build(): BuiltAgent {
     if (this.agent) return this.agent;
     if (this.error) throw this.error;
     this.sealed = true;
-    const result = assembleAgent(
-      Object.freeze(this.middleware.map((item) => Object.freeze({ ...item }))),
-      this.model,
-      Object.freeze(this.adapters.slice()),
-    );
+    const result = assembleAgent(this.middleware, this.model, this.adapters);
     if (!result.ok) {
       this.error = new AgentBuildError(result.diagnostics);
       throw this.error;
     }
     this.agent = result.agent;
     return this.agent;
+  }
+
+  #nextMiddlewareId(): string {
+    const taken = new Set(this.middleware.map((item) => item.id));
+    let id: string;
+    do {
+      this.middlewareSeq += 1;
+      id = `middleware-${this.middlewareSeq}`;
+    } while (taken.has(id));
+    return id;
   }
 
   #push(entry: BoundMiddleware, front: boolean): this {
