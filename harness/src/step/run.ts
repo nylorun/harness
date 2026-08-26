@@ -1,5 +1,5 @@
 import type { BoundMiddleware, StepInput } from "../types/middleware.js";
-import type { ModelCandidate, ModelInvoker, ModelRequest } from "../types/model.js";
+import type { ModelAdapter, ModelCandidate, ModelDirective, ModelRequest } from "../types/model.js";
 import type { ObserveEvent, ObserveModelRequest, ObserveToolSnapshot } from "../types/shared.js";
 import type { InputEvent, SessionSnapshot } from "../types/session.js";
 import type { BoundToolDefinition } from "../types/tool.js";
@@ -14,7 +14,8 @@ import { assertCanonicalPrefix, type PromptPrefixState } from "./prompt-prefix.j
 
 export interface LoopAgent {
   readonly middleware: readonly BoundMiddleware[];
-  readonly model: ModelInvoker;
+  readonly invoke: ModelAdapter;
+  readonly directive?: ModelDirective;
   readonly adapters: AdapterRegistry;
 }
 
@@ -71,15 +72,6 @@ export async function runStep(input: {
       let ledger;
       try {
         const prefix = prefixTransaction.snapshot();
-        if (
-          prefix.model?.id !== undefined &&
-          input.agent.model.id !== undefined &&
-          prefix.model.id !== input.agent.model.id
-        )
-          return context.tripwire({
-            code: "model.unsupported-directive",
-            message: `Model invoker '${input.agent.model.id}' cannot serve '${prefix.model.id}'`,
-          });
         ledger = input.prefixState.preview(prefixTransaction, prefix);
         context.commitPrefix(ledger.snapshot);
       } catch (error) {
@@ -137,7 +129,7 @@ export async function runStep(input: {
       });
       try {
         const minted = context.mintFromModel(
-          normalizeCandidate(await input.agent.model.invoke(request, input.signal)),
+          normalizeCandidate(await input.agent.invoke(request, input.signal)),
         );
         if (input.signal.aborted) throw input.signal.reason;
         const candidate = context.currentCandidate;

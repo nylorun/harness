@@ -49,7 +49,7 @@ describe("prompt prefix stability", () => {
         request.prefix.tools.set("late", [tool("late")], { order: 20 });
         return next();
       })
-      .prepend("first", async (request, next) => {
+      .use("first", async (request, next) => {
         request.prefix.instructions.set("z", ["first"], { order: 10 });
         request.prefix.tools.set("first", [tool("first")], { order: 10 });
         return next();

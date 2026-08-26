@@ -14,9 +14,36 @@ describe("build", () => {
     expect(() => builder.with(adapter())).toThrow(/after build/);
     expect(agent.manifest.middleware.map((item) => item.id)).toEqual(["first", "second"]);
     expect(agent.manifest.middleware[0]).toEqual({ id: "first" });
-    expect(agent.manifest.model).toEqual({ id: "test-model" });
+    expect(agent.manifest.model).toBeUndefined();
     expect(agent.manifest.adapters).toEqual([{ id: "local" }]);
     expect(Object.isFrozen(agent.manifest)).toBe(true);
+  });
+
+  it("seals an optional model directive onto the manifest", () => {
+    const agent = Agent(
+      model(async () => "done"),
+      {
+        id: "opus",
+        controls: { temperature: 0.2 },
+        config: { reasoning: "high" },
+      },
+    ).build();
+    expect(agent.manifest.model).toEqual({
+      id: "opus",
+      controls: { temperature: 0.2 },
+      config: { reasoning: "high" },
+    });
+    expect(Object.isFrozen(agent.manifest.model)).toBe(true);
+  });
+
+  it("throws AgentBuildError when the sealed directive is invalid", () => {
+    const error = expectBuildError(() =>
+      Agent(
+        model(async () => "done"),
+        { id: "", extra: true } as never,
+      ).build(),
+    );
+    expect(error.diagnostics.some((item) => item.code === "harness.invalid-directive")).toBe(true);
   });
 
   it("throws AgentBuildError when middleware ids collide", () => {
@@ -39,7 +66,7 @@ describe("build", () => {
     expect(error.diagnostics.some((item) => item.code === "adapter.duplicate-id")).toBe(true);
   });
 
-  it("throws AgentBuildError when the model invoker is missing invoke", () => {
+  it("throws AgentBuildError when the model invoke callback is missing", () => {
     const error = expectBuildError(() => Agent({} as never).build());
     expect(error.diagnostics.some((item) => item.code === "harness.invalid-model")).toBe(true);
   });
@@ -50,15 +77,6 @@ describe("build", () => {
       .use("named", async (_request, next) => next())
       .build();
     expect(agent.manifest.middleware.map((item) => item.id)).toEqual(["middleware-1", "named"]);
-  });
-
-  it("places prepended unnamed middleware outermost with a generated id", () => {
-    const builder = Agent(model(async () => "done")).use("app", async (_request, next) => next());
-    builder.prepend(async (_request, next) => next());
-    expect(builder.build().manifest.middleware.map((item) => item.id)).toEqual([
-      "middleware-1",
-      "app",
-    ]);
   });
 
   it("skips generated ids that collide with an explicit middleware id", () => {
@@ -94,8 +112,8 @@ describe("build", () => {
 
   it("exposes fixed registry views and hides raw maps on the Agent", () => {
     const local = adapter();
-    const invoker = model(async () => "done");
-    const agent = Agent(invoker).with(local).build();
+    const invoke = model(async () => "done");
+    const agent = Agent(invoke).with(local).build();
 
     const adapterEntries = createAdapterRegistry([local]).entries as unknown as Record<
       string,
@@ -104,7 +122,7 @@ describe("build", () => {
     expect(adapterEntries.set).toBeUndefined();
     expect(adapterEntries.clear).toBeUndefined();
     expect([...createAdapterRegistry([local]).entries.keys()]).toEqual(["local"]);
-    expect(agent.manifest.model).toEqual({ id: "test-model" });
+    expect(agent.manifest.model).toBeUndefined();
     expect(agent.manifest.adapters).toEqual([{ id: "local" }]);
 
     const rawAgent = agent as unknown as Record<string, unknown>;

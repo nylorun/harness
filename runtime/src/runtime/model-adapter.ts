@@ -2,21 +2,20 @@ import type {
   JsonObject,
   JsonValue,
   ModelCandidate,
-  ModelInvoker,
   ModelRequest,
   ModelToolCall,
   TranscriptEntry,
 } from "@nylorun/harness";
 import type { ChatMessage, ModelGatewayAdapter, ModelGatewayCallEvidence, ModelGatewayUsage } from "./contracts.js";
 
-export class GatewayModelInvoker implements ModelInvoker {
-  readonly id: string;
+export class GatewayModelAdapter {
+  readonly #model: string;
 
   constructor(
     model: string,
     private readonly gateway: ModelGatewayAdapter,
     private readonly onCall?: (details: Readonly<{ sessionId: string; usage: ModelGatewayUsage; evidence?: ModelGatewayCallEvidence; content: string; toolCalls: readonly ModelToolCall[] }>) => void
-  ) { this.id = model; }
+  ) { this.#model = model; }
 
   async invoke(request: ModelRequest, signal: AbortSignal): Promise<ModelCandidate> {
     const content: string[] = [];
@@ -24,7 +23,7 @@ export class GatewayModelInvoker implements ModelInvoker {
     let usage: ModelGatewayUsage = { tokensIn: 0, tokensOut: 0 };
     let evidence: ModelGatewayCallEvidence | undefined;
     for await (const chunk of this.gateway.complete({
-      model: this.id,
+      model: request.model?.id ?? this.#model,
       messages: messages(request),
       tools: request.prefix.tools.map((tool) => ({ name: tool.name, ...(tool.description === undefined ? {} : { description: tool.description }), inputSchema: "jsonSchema" in tool.input ? tool.input.jsonSchema : {} })),
       maxOutputTokens: 4096

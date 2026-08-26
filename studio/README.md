@@ -28,7 +28,7 @@ nylo studio --agent-server-url https://agent.example.internal
 
 ## Dashboards
 
-`/` is the Agent Dashboard. Its Agent tab renders the build manifest and local relative record path when one is available; its Sessions tab lists persisted sessions. Selecting a session, or the top-bar New Session button, opens `/session/:sessionId`. A draft ID becomes persistent only when its first chat message reaches the Agent Server.
+`/` is the Agent Dashboard. Its Agent tab renders the build manifest, the bound Harness model/middleware/adapters when the Agent Server reports them, and the local relative record path when one is available; its Sessions tab lists persisted sessions. Selecting a session, or the top-bar New Session button, opens `/session/:sessionId`. A draft ID becomes persistent only when its first chat message reaches the Agent Server.
 
 The Session Dashboard has Chat and Events tabs. Chat uses assistant-ui's AG-UI runtime with `HttpAgent` against `/v1/ag-ui`; Events uses canonical Nylo events and opens a detail Sheet. The fixed top bar shows the breadcrumb, New Session action, and the directly-polled Agent Server state. No Studio request carries cookies or credentials.
 

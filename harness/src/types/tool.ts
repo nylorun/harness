@@ -75,7 +75,6 @@ export type PreflightOutcome =
 
 export interface ToolAdapter<Route extends JsonValue = JsonValue> {
   readonly id: string;
-  readonly version?: string;
   validateRoute(route: Route): void;
   preflight?(
     call: SealedToolCall<Route>,

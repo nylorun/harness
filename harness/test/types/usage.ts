@@ -1,8 +1,8 @@
 import { z } from "zod";
 import {
   Agent,
-  defineAdapter,
-  defineTool,
+  adapter,
+  tool,
   type BuiltAgent,
   type ModelCandidate,
   type ModelDirective,
@@ -12,14 +12,14 @@ import {
 // @ts-expect-error bindAgent is not a public export
 import { bindAgent } from "../../src/index.js";
 
-defineTool({
+tool({
   name: "echo",
   input: z.object({ text: z.string().trim() }),
   executeWith: "local",
   route: {},
 });
 
-defineTool({
+tool({
   name: "invalid-root",
   // @ts-expect-error Harness accepts Zod object roots only.
   input: z.string(),
@@ -27,7 +27,7 @@ defineTool({
   route: {},
 });
 
-const local = defineAdapter({
+const local = adapter({
   id: "local",
   validateRoute() {},
   async execute(call) {
@@ -35,23 +35,28 @@ const local = defineAdapter({
   },
 });
 
-Agent({ invoke: async () => "done" })
+Agent(async () => "done")
   .with(local)
   .use("echo", async (_request, next) => next())
   .build()
   .run();
 
+Agent(async () => "done", { id: "opus" });
+
 // @ts-expect-error model is required
 Agent();
 
-// @ts-expect-error Agent takes a model invoker, not a create-options bag
+// @ts-expect-error Agent takes a model adapter function, not an invoker object
+Agent({ invoke: async () => "done" });
+
+// @ts-expect-error Agent takes a model adapter function, not a create-options bag
 Agent({ model: { invoke: async () => "done" } });
 
 // @ts-expect-error run belongs on BuiltAgent, not the builder
-Agent({ invoke: async () => "done" }).run();
+Agent(async () => "done").run();
 
 // @ts-expect-error Agent is a factory, not a constructable class
-new Agent({ invoke: async () => "done" });
+new Agent(async () => "done");
 
 declare const agent: BuiltAgent;
 

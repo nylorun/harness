@@ -11,9 +11,9 @@ This repository contains five independently versioned packages:
 - [`@nylorun/create-agent`](./create-agent) — the generator invoked by `npm create @nylorun/agent@latest`.
 
 **A generated project installs runtime and `@nylorun/harness`**, Nylo's native loop, then passes a
-deferred Harness factory to `Run((options) => new Harness(options), runOptions)`. Runtime owns the
-host and supplies model, tool, and observation bindings before it constructs the Harness. Use
-`nylo adapter probe` to inspect the bound Harness declaration without starting a Session.
+deferred Harness factory to `Run((model, directive) => Agent(model, directive), runOptions)`. Runtime owns the host and
+supplies model, tool, and observation bindings before it builds the Harness. Use `nylo adapter
+probe` to inspect the bound Harness declaration without starting a Session.
 
 ## Quick start
 

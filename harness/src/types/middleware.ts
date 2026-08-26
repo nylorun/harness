@@ -77,6 +77,5 @@ export type StepMiddleware = (
 
 export interface BoundMiddleware {
   readonly id: string;
-  readonly version?: string;
   readonly handle: StepMiddleware;
 }

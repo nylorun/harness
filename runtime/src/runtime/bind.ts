@@ -9,7 +9,7 @@ import type { AgentConfig, CapabilityManifest, FolderDiagnostic } from "../types
 import { resolveCredential } from "./credentials.js";
 import type { ModelGatewayAdapter, RuntimeSessionState, WireSessionEvent } from "./contracts.js";
 import { resolveModel, type ResolvedModel } from "./model.js";
-import { GatewayModelInvoker } from "./model-invoker.js";
+import { GatewayModelAdapter } from "./model-adapter.js";
 import { PiModelGatewayAdapter, type RetryPolicy } from "./pi-model-gateway.js";
 import type { RecordWriter, SessionRecorder } from "./record-store.js";
 import { createMemorySessionStore, type SessionRecord, type SessionStore } from "./session-store.js";
@@ -123,13 +123,13 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
           const warning = diagnostics.find((item) => item.severity === "warning");
           if (warning !== undefined) throw new NyloBuildError(warning);
         }
-        const invoker = new GatewayModelInvoker(input.config.model, gateway, (call) => {
+        const modelAdapter = new GatewayModelAdapter(input.config.model, gateway, (call) => {
           append(call.sessionId, "model.call", { content: call.content, tool_calls: call.toolCalls.map((item) => ({ id: item.id, name: item.name, arguments: JSON.stringify(item.args) })), tokens_in: call.usage.tokensIn, tokens_out: call.usage.tokensOut, ...(call.evidence ?? {}) });
         });
-        const builder = input.config.harness(invoker);
+        const builder = input.config.harness(modelAdapter.invoke.bind(modelAdapter), { id: input.config.model });
         builder.with(bridged.adapter);
         const instructions = [input.config.instructions ?? "", ...loaded.skills.map((skill) => `Skill: ${skill.name}\n${skill.body}`)].filter(Boolean);
-        builder.prepend("nylorun-folder", async (request, next) => {
+        builder.use("nylorun-folder", async (request, next) => {
           request.prefix.tools.set("folder-tools", bridged.tools, { order: 0 });
           request.prefix.instructions.set("folder-instructions", instructions, { order: 0 });
           return next();

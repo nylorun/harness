@@ -47,7 +47,7 @@ export function describeTools(entries: readonly { file: string; exports: Record<
   const tools = entries.map(({ file, exports }) => {
     const exported = Object.keys(exports);
     if (exported.length !== 1 || exported[0] !== "default" || !isToolDefinition(exports.default)) {
-      throw new NyloBuildError(diagnostic("NYLO_BUILD_TOOL_EXPORT_INVALID", "build", "error", file, "A tool module must default-export exactly one defineTool(...) value.", "Remove other exports and default-export defineTool({...})."));
+      throw new NyloBuildError(diagnostic("NYLO_BUILD_TOOL_EXPORT_INVALID", "build", "error", file, "A tool module must default-export exactly one tool(...) value.", "Remove other exports and default-export tool({...})."));
     }
     const definition = exports.default;
     const schema = stripSchemaMetadata(z.toJSONSchema(definition.input)) as Record<string, unknown>;

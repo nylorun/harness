@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
-import { Agent, defineTool } from "../src/index.js";
+import { Agent, tool } from "../src/index.js";
 import { adapter, model, toolCalls, turn } from "./fixtures.js";
 
 describe("Zod schemas", () => {
   it("executes a tool with Zod's parsed object output", async () => {
     let call = 0;
     let executed: unknown;
-    const convert = defineTool({
+    const convert = tool({
       name: "convert",
       input: z.object({ count: z.coerce.number() }),
       executeWith: "local",
@@ -39,7 +39,7 @@ describe("Zod schemas", () => {
 
   it("binds a Zod object onto the offered Model request", async () => {
     const input = z.object({ text: z.string() });
-    const echo = defineTool({ name: "echo", input, executeWith: "local", route: {} });
+    const echo = tool({ name: "echo", input, executeWith: "local", route: {} });
     const result = Agent(
       model(async (request) => {
         expect(request.tools[0]?.input.jsonSchema).toMatchObject({
@@ -65,7 +65,7 @@ describe("Zod schemas", () => {
       .with(adapter())
       .use("bad", async (request, next) => {
         request.prefix.tools.set("bad", [
-          defineTool({
+          tool({
             name: "bad",
             input: z.string() as never,
             executeWith: "local",
@@ -90,7 +90,7 @@ describe("Zod schemas", () => {
       .with(adapter())
       .use("async", async (request, next) => {
         request.prefix.tools.set("async", [
-          defineTool({ name: "async", input, executeWith: "local", route: {} }),
+          tool({ name: "async", input, executeWith: "local", route: {} }),
         ]);
         return next();
       })
@@ -109,7 +109,7 @@ describe("Zod schemas", () => {
       .with(adapter())
       .use("unconvertible", async (request, next) => {
         request.prefix.tools.set("unconvertible", [
-          defineTool({
+          tool({
             name: "bigint",
             input: z.object({ value: z.bigint() }),
             executeWith: "local",
@@ -138,7 +138,7 @@ describe("Zod schemas", () => {
       .with(adapter())
       .use("typed", async (request, next) => {
         request.prefix.tools.set("typed", [
-          defineTool({
+          tool({
             name: "echo",
             input: z.object({ text: z.string() }),
             executeWith: "local",

@@ -3,7 +3,7 @@ export { AUTHORING_REFERENCE } from "./contract-reference.js";
 export { buildAgent, watchAgent } from "./build.js";
 export type { AgentBuildWatcher } from "./build.js";
 export { nyloAgent } from "./plugin.js";
-export { defineTool } from "./tool.js";
+export { tool } from "./tool.js";
 export { createFilesystemReader, validateAgent } from "./validate.js";
 export type {
   AgentConfig,

@@ -1,4 +1,4 @@
-import { defineAdapter, defineTool as defineHarnessTool } from "@nylorun/harness";
+import { adapter, tool as harnessTool } from "@nylorun/harness";
 import type { JsonValue, ToolAdapter, ToolDefinition as HarnessToolDefinition } from "@nylorun/harness";
 import { diagnostic, NyloBuildError } from "../diagnostics.js";
 import { describeTools } from "../manifest.js";
@@ -17,7 +17,7 @@ export function bridgeTools(modules: readonly ToolModule[]): { tools: HarnessToo
     if (descriptor.sandbox) throw unsupported(descriptor.name, "sandbox: true");
     if (descriptor.maxCallsPerSession !== undefined) throw unsupported(descriptor.name, "maxCallsPerSession");
     definitions.set(descriptor.name, definition as ToolDefinition);
-    return defineHarnessTool({
+    return harnessTool({
       name: descriptor.name,
       description: descriptor.description,
       input: (definition as ToolDefinition).input,
@@ -25,7 +25,7 @@ export function bridgeTools(modules: readonly ToolModule[]): { tools: HarnessToo
       route: { tool: descriptor.name }
     });
   });
-  const adapter = defineAdapter({
+  const localAdapter = adapter({
     id: "runtime-local",
     validateRoute(route) {
       const name = route && typeof route === "object" && !Array.isArray(route) ? (route as Readonly<Record<string, JsonValue>>).tool : undefined;
@@ -48,7 +48,7 @@ export function bridgeTools(modules: readonly ToolModule[]): { tools: HarnessToo
       }
     }
   });
-  return { tools, adapter, descriptors };
+  return { tools, adapter: localAdapter, descriptors };
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> { return typeof value === "object" && value !== null && Symbol.asyncIterator in value; }

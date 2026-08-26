@@ -117,11 +117,10 @@ export interface ModelRequest {
   readonly tools: readonly BoundToolDefinition[];
 }
 
-export interface ModelInvoker {
-  readonly id?: string;
-  readonly version?: string;
-  invoke(request: ModelRequest, signal: AbortSignal): Promise<ModelCandidate | string>;
-}
+export type ModelAdapter = (
+  request: ModelRequest,
+  signal: AbortSignal,
+) => Promise<ModelCandidate | string>;
 
 const FINISH_REASONS = new Set<ModelFinishReason>([
   "stop",

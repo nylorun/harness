@@ -8,7 +8,7 @@ const list = (label) => [...source.matchAll(new RegExp(`${label}[\\s\\S]*?\\[([\
 const options = list("options");
 const diagnostics = list("diagnostics");
 const index = { generation: "0.1", factory: "Run(harnessFactory, options)", options, diagnostics };
-const markdown = `<!-- Generated from src/contract-reference.ts; do not edit. -->\n# Nylo authoring contract\n\nUse \`Run((model) => Agent(model), { model, … })\`.\n\n## Run options\n\n${options.map((option) => `- \`${option}\``).join("\n")}\n\n## Stable diagnostics\n\n${diagnostics.map((code) => `- \`${code}\``).join("\n")}\n`;
+const markdown = `<!-- Generated from src/contract-reference.ts; do not edit. -->\n# Nylo authoring contract\n\nUse \`Run((model, directive) => Agent(model, directive), { model, … })\`.\n\n## Run options\n\n${options.map((option) => `- \`${option}\``).join("\n")}\n\n## Stable diagnostics\n\n${diagnostics.map((code) => `- \`${code}\``).join("\n")}\n`;
 const targets = [
   [resolve(root, "CONTRACT-REFERENCE.md"), markdown],
   [resolve(root, "contract-index.json"), `${JSON.stringify(index, null, 2)}\n`]

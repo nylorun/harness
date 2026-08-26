@@ -16,7 +16,7 @@ async function project(): Promise<string> {
   await writeFile(join(root, "package.json"), '{"name":"@fixtures/sample","type":"module"}\n');
   await writeFile(join(root, "package-lock.json"), "{}\n");
   await writeFile(join(root, "vite.config.ts"), `import { nyloAgent } from "@nylorun/runtime";\nexport default {plugins:[nyloAgent()]};\n`);
-  await writeFile(join(root, "agent", "agent.ts"), `import { Run } from "@nylorun/runtime";\nimport { Agent } from "@nylorun/harness";\nexport default Run((model)=>Agent(model),{model:"anthropic/example"});\n`);
+  await writeFile(join(root, "agent", "agent.ts"), `import { Run } from "@nylorun/runtime";\nimport { Agent } from "@nylorun/harness";\nexport default Run((model,directive)=>Agent(model,directive),{model:"anthropic/example"});\n`);
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n");
   return root;
 }
@@ -27,7 +27,7 @@ describe("Agent", () => {
   it("keeps the runtime export barrel reviewed", () => {
     expect(Object.keys(publicApi).sort()).toEqual([
       // Authoring and build
-      "AUTHORING_REFERENCE", "Agent", "AgentSpec", "Run", "buildAgent", "createFilesystemReader", "defineTool",
+      "AUTHORING_REFERENCE", "Agent", "AgentSpec", "Run", "buildAgent", "createFilesystemReader", "tool",
       "isModelIdentity", "isPortableName", "nyloAgent", "validateAgent",
       "MODEL_GATEWAY_ACCESS_MODE_VARIABLE", "MODEL_GATEWAY_API_KEY_VARIABLE", "MODEL_GATEWAY_PROTOCOLS", "MODEL_GATEWAY_PROTOCOL_VARIABLE", "MODEL_GATEWAY_URL_VARIABLE", "OPENROUTER_VARIABLE",
       "OpenAICompatibleModelGatewayAdapter", "ModelGatewayError",
@@ -45,7 +45,7 @@ describe("Agent", () => {
   });
 
   it("requires a branded harness and keeps the two factories separate", () => {
-    expect(Run((model) => HarnessAgent(model), { model: "anthropic/example" })).toMatchObject({
+    expect(Run((model, directive) => HarnessAgent(model, directive), { model: "anthropic/example" })).toMatchObject({
       harness: expect.any(Function), secrets: [], mcp: []
     });
     expect(() => Run({} as never, { model: "anthropic/example" })).toThrow("Harness factory");
@@ -117,7 +117,7 @@ describe("build", () => {
     const sdk = JSON.stringify("@nylorun/runtime");
     const zod = JSON.stringify(new URL("../../node_modules/zod/index.js", import.meta.url).pathname);
     await mkdir(join(root, "agent", "tools"));
-    await writeFile(join(root, "agent", "tools", "lookup.ts"), `import { z } from ${zod};\nimport { defineTool } from ${sdk};\nexport default defineTool({description:"Look up a record",input:z.object({id:z.string()}),run:({id})=>id});\n`);
+    await writeFile(join(root, "agent", "tools", "lookup.ts"), `import { z } from ${zod};\nimport { tool } from ${sdk};\nexport default tool({description:"Look up a record",input:z.object({id:z.string()}),run:({id})=>id});\n`);
     await mkdir(join(root, "agent", "skills", "review"), { recursive: true });
     await writeFile(join(root, "agent", "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Review code carefully.\n---\n\n# Review\n");
     const secretValue = "never-emit-this-value";

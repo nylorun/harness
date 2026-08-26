@@ -11,10 +11,10 @@ describe("public API", () => {
         "AgentBuildError",
         "AgentLifecycleError",
         "BuiltAgent",
-        "defineTool",
-        "defineMiddleware",
-        "defineAdapter",
-        "defineModel",
+        "tool",
+        "adapter",
+        "model",
+        "middleware",
       ]),
     );
     expect(api).not.toHaveProperty("bindAgent");

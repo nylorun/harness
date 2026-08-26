@@ -1,7 +1,7 @@
 import type { ZodObject } from "zod";
-import type { AgentBuilder, ModelInvoker } from "@nylorun/harness";
+import type { AgentBuilder, ModelAdapter, ModelDirective } from "@nylorun/harness";
 
-export type HarnessFactory = (model: ModelInvoker) => AgentBuilder;
+export type HarnessFactory = (model: ModelAdapter, directive?: ModelDirective) => AgentBuilder;
 
 export type McpDeclaration = Readonly<{
   name: string;

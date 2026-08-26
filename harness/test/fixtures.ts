@@ -1,15 +1,15 @@
 import { z } from "zod";
 import {
   AgentBuildError,
-  defineAdapter,
-  defineModel,
-  defineTool,
+  adapter as typedAdapter,
+  model as typedModel,
+  tool as typedTool,
   type BuiltAgent,
   type AgentRunInput,
   type InputOptions,
   type JsonObject,
   type ModelCandidate,
-  type ModelInvoker,
+  type ModelAdapter,
   type SessionOptions,
   type StepRequest,
   type StepResponse,
@@ -19,7 +19,7 @@ import {
 export const objectSchema = z.object({}).passthrough();
 
 export function tool(name = "echo", executeWith = "local") {
-  return defineTool({ name, input: objectSchema, executeWith, route: { operation: name } });
+  return typedTool({ name, input: objectSchema, executeWith, route: { operation: name } });
 }
 
 export function offer(...tools: ReturnType<typeof tool>[]) {
@@ -30,15 +30,15 @@ export function offer(...tools: ReturnType<typeof tool>[]) {
 }
 
 export function adapter(execute?: ToolAdapter["execute"]) {
-  return defineAdapter({
+  return typedAdapter({
     id: "local",
     validateRoute() {},
     execute: execute ?? (async (call) => ({ kind: "completed" as const, output: call.args })),
   });
 }
 
-export function model(invoke: ModelInvoker["invoke"]) {
-  return defineModel({ id: "test-model", invoke });
+export function model(invoke: ModelAdapter) {
+  return typedModel(invoke);
 }
 
 export function toolCalls(

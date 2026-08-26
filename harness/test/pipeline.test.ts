@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Agent, defineTool } from "../src/index.js";
+import { Agent, tool as authoredTool } from "../src/index.js";
 import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 import { z } from "zod";
 
@@ -146,7 +146,7 @@ describe("step pipeline", () => {
   });
 
   it("freezes the tool snapshot so later mutations do not change the bound route", async () => {
-    const definition = defineTool({
+    const definition = authoredTool({
       name: "echo",
       input: z.object({}).passthrough(),
       executeWith: "local",
@@ -223,7 +223,7 @@ describe("step pipeline", () => {
     expect(b.session.state.status).toBe("idle");
   });
 
-  it("lets application middleware hide a prepended host tool on the same Step", async () => {
+  it("lets application middleware hide a host tool on the same Step", async () => {
     const folder = async (request, next) => {
       request.prefix.tools.set("folder", [tool("folder")]);
       request.prefix.instructions.set("folder", ["from folder"]);
@@ -240,13 +240,13 @@ describe("step pipeline", () => {
       .use("app", async (request, next) => {
         request.prefix.tools.withhold("folder");
         return next();
-      });
-    builder.prepend("nylorun-folder", folder);
+      })
+      .use("nylorun-folder", folder);
     await turn(builder.build(), "go").handle.completed;
     expect(seen).toEqual([[]]);
     expect(builder.build().manifest.middleware.map((item) => item.id)).toEqual([
-      "nylorun-folder",
       "app",
+      "nylorun-folder",
     ]);
   });
 });

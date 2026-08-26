@@ -1,11 +1,11 @@
 import type { BuildResult } from "../types/manifest.js";
 import type { BoundMiddleware } from "../types/middleware.js";
+import { normalizeDirective, type ModelAdapter, type ModelDirective } from "../types/model.js";
 import type { BuildDiagnostic } from "../types/shared.js";
 import type { ToolAdapter } from "../types/tool.js";
 import { bindAgent, type BuiltAgent } from "../agent.js";
 import { createAdapterRegistry } from "./adapters.js";
 import { createManifest } from "./manifest.js";
-import type { ModelInvoker } from "../types/model.js";
 
 const diagnostic = (
   code: string,
@@ -15,8 +15,9 @@ const diagnostic = (
 
 export function assembleAgent(
   middleware: readonly BoundMiddleware[],
-  model: ModelInvoker,
+  invoke: ModelAdapter,
   adapters: readonly ToolAdapter[],
+  directive?: ModelDirective,
 ): BuildResult<BuiltAgent> {
   const diagnostics: BuildDiagnostic[] = [];
 
@@ -37,10 +38,16 @@ export function assembleAgent(
     }
   }
 
-  if (!model || typeof model.invoke !== "function") {
-    diagnostics.push(
-      diagnostic("harness.invalid-model", "A model invoker with invoke() is required"),
-    );
+  if (typeof invoke !== "function") {
+    diagnostics.push(diagnostic("harness.invalid-model", "A model invoke function is required"));
+  }
+
+  let frozenDirective: ModelDirective | undefined;
+  if (directive !== undefined) {
+    const normalized = normalizeDirective(directive);
+    if (normalized instanceof Error)
+      diagnostics.push(diagnostic("harness.invalid-directive", normalized.message));
+    else frozenDirective = normalized;
   }
 
   const middlewareIds = new Set<string>();
@@ -61,7 +68,6 @@ export function assembleAgent(
       frozen.push(
         Object.freeze({
           id: item.id,
-          ...(item.version === undefined ? {} : { version: item.version }),
           handle: item.handle,
         }),
       );
@@ -71,17 +77,12 @@ export function assembleAgent(
   if (diagnostics.length)
     return Object.freeze({ ok: false, diagnostics: Object.freeze(diagnostics) });
   const frozenMiddleware = Object.freeze(frozen);
-  const frozenModel = Object.freeze({
-    ...(model.id === undefined ? {} : { id: model.id }),
-    ...(model.version === undefined ? {} : { version: model.version }),
-    invoke: model.invoke.bind(model),
-  });
   const registry = createAdapterRegistry(Object.freeze(validAdapters));
   const manifest = createManifest({
     middleware: frozenMiddleware,
-    model: frozenModel,
+    ...(frozenDirective === undefined ? {} : { directive: frozenDirective }),
     adapters: registry,
   });
-  const agent = bindAgent(frozenMiddleware, frozenModel, registry, manifest);
+  const agent = bindAgent(frozenMiddleware, invoke, registry, manifest, frozenDirective);
   return Object.freeze({ ok: true, agent, manifest });
 }

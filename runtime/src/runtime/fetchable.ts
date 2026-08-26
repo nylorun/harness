@@ -100,11 +100,13 @@ export function Fetchable(agent: BuiltAgent, options: FetchableOptions = {}): Fe
     if (segments.length === 2 && segments[0] === "v1" && segments[1] === "agent") {
       if (method !== "GET") return refuse(methodRefusal(method, path, "GET"));
       const inspection = await agent.inspect();
+      const readiness = await agent.ready();
       return json(200, {
         protocolVersion: 1,
         agentServerVersion: inspection.manifest.sdkVersion,
         capabilities: ["agent-dashboard", "session-records", "ag-ui"],
         manifest: inspection.manifest,
+        harness: readiness.harness,
         agUiUrl: route("/v1/ag-ui"),
         ...(agent.records === undefined ? {} : { sessionRecords: { path: ".nylo/runs" } })
       });

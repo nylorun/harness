@@ -1,7 +1,7 @@
 <!-- Generated from src/contract-reference.ts; do not edit. -->
 # Nylo authoring contract
 
-Use `Run((model) => Agent(model), { model, … })`.
+Use `Run((model, directive) => Agent(model, directive), { model, … })`.
 
 ## Run options
 

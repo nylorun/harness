@@ -34,7 +34,7 @@ interface ToolSlot {
 }
 interface ModelSelection {
   readonly directive: ModelDirective;
-  readonly owner: Owner;
+  readonly owner?: Owner;
   readonly reason?: string;
 }
 interface WithheldTool {
@@ -61,9 +61,14 @@ interface State {
 
 /** Session-scoped prefix state. Only named transactions can alter its effective prefix. */
 export class PromptPrefixState {
-  #state: State = emptyState();
+  #state: State;
 
-  constructor(readonly policy: PromptPrefixPolicy = "observe") {}
+  constructor(
+    readonly policy: PromptPrefixPolicy = "observe",
+    directive?: ModelDirective,
+  ) {
+    this.#state = seededState(directive);
+  }
 
   begin(adapters: AdapterRegistry): PromptPrefixTransaction {
     return new PromptPrefixTransaction(this.#state, adapters);
@@ -260,7 +265,7 @@ export class PromptPrefixTransaction {
       ...[...this.#tools.values()]
         .sort(compareSlots)
         .map((slot) => contributor(slot.owner, slot.reason)),
-      ...(this.#model ? [contributor(this.#model.owner, this.#model.reason)] : []),
+      ...(this.#model?.owner ? [contributor(this.#model.owner, this.#model.reason)] : []),
     ]);
     const model = this.#model?.directive;
     const logical = digest({
@@ -338,8 +343,13 @@ export function assertCanonicalPrefix(snapshot: PromptPrefixSnapshot): void {
     throw new Error("Prompt prefix digests do not match its canonical logical content");
 }
 
-function emptyState(): State {
-  return Object.freeze({ instructions: new Map(), tools: new Map(), withheld: new Map() });
+function seededState(directive?: ModelDirective): State {
+  return Object.freeze({
+    instructions: new Map(),
+    tools: new Map(),
+    withheld: new Map(),
+    ...(directive === undefined ? {} : { model: Object.freeze({ directive }) }),
+  });
 }
 function slotKey(value: Owner): string {
   return `${value.middlewareId}\u0000${value.slot}`;

@@ -190,7 +190,7 @@ export async function generateAgentProject(options: GeneratorOptions): Promise<G
   await writeFile(join(target, ".gitignore"), "node_modules/\ndist/\n.env\n.nylo/\n");
   await writeFile(join(target, ".env.example"), envExample(options.model));
   await writeFile(join(target, "README.md"), readme(name, options.model, selected.packageManager));
-  await writeFile(join(target, "agent", "agent.ts"), `import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime";\n\nexport default Run(\n  (model) => Agent(model),\n  {\n    name: ${JSON.stringify(name)},\n    model: ${JSON.stringify(options.model)}\n  }\n);\n`);
+  await writeFile(join(target, "agent", "agent.ts"), `import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime";\n\nexport default Run(\n  (model, directive) => Agent(model, directive),\n  {\n    name: ${JSON.stringify(name)},\n    model: ${JSON.stringify(options.model)}\n  }\n);\n`);
   await writeFile(join(target, "agent", "AGENT.md"), "You are a helpful assistant.\n");
   if (options.install !== false) {
     try {

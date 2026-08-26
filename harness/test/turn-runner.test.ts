@@ -8,7 +8,7 @@ describe("TurnRunner", () => {
   it("returns a final outcome while reporting each committed state transition", async () => {
     const agent = {
       middleware: [],
-      model: model(async () => "done"),
+      invoke: model(async () => "done"),
       adapters: createAdapterRegistry(),
     };
     const states: string[] = [];

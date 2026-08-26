@@ -1,7 +1,6 @@
-export { Agent, AgentBuilder } from "./builder.js";
+export { Agent, AgentBuilder, AgentBuildError, AgentLifecycleError } from "./builder.js";
 export { BuiltAgent } from "./agent.js";
-export { AgentBuildError, AgentLifecycleError } from "./errors.js";
-export { defineAdapter, defineMiddleware, defineModel, defineTool } from "./definitions.js";
+export { adapter, middleware, model, tool } from "./helpers.js";
 
 export type { AgentManifest } from "./types/manifest.js";
 export type {
@@ -10,7 +9,7 @@ export type {
   ModelDirective,
   ModelEvidence,
   ModelFinishReason,
-  ModelInvoker,
+  ModelAdapter,
   ModelOutputBlock,
   PromptPrefixContributor,
   PromptPrefixInstruction,

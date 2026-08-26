@@ -362,4 +362,82 @@ describe("middleware", () => {
     expect(session.state.status).toBe("idle");
     await session.stop();
   });
+
+  it("seeds the Session prefix from the Agent directive without a middleware owner", async () => {
+    const seen: unknown[] = [];
+    const prefixes: unknown[] = [];
+    const agent = Agent(
+      model(async (request) => {
+        seen.push(request.model);
+        return "done";
+      }),
+      { id: "opus", controls: { temperature: 0.2 } },
+    ).build();
+    const session = agent.run();
+    session.observe((event) => {
+      if (event.type === "model.prefix") prefixes.push(event.attributes);
+    });
+    await session.input("go").completed;
+    expect(seen).toEqual([{ id: "opus", controls: { temperature: 0.2 } }]);
+    expect(prefixes).toMatchObject([
+      {
+        status: "initial",
+        snapshot: { model: { id: "opus", controls: { temperature: 0.2 } }, contributors: [] },
+      },
+    ]);
+    await session.stop();
+  });
+
+  it("lets middleware replace or clear a seeded directive and rejects a conflicting select", async () => {
+    const replaced: unknown[] = [];
+    const replaceAgent = Agent(
+      model(async (request) => {
+        replaced.push(request.model);
+        return "done";
+      }),
+      { id: "opus" },
+    )
+      .use("route", async (request, next) => {
+        request.prefix.model.select({ id: "opus" });
+        request.prefix.model.replace({ id: "haiku" });
+        return next();
+      })
+      .build();
+    await turn(replaceAgent, "go").handle.completed;
+    expect(replaced).toEqual([{ id: "haiku" }]);
+
+    const cleared: unknown[] = [];
+    const clearAgent = Agent(
+      model(async (request) => {
+        cleared.push(request.model);
+        return request.toolResults.length === 0
+          ? toolCalls({ id: "call", name: "echo", args: {} })
+          : "done";
+      }),
+      { id: "opus" },
+    )
+      .with(adapter())
+      .use("route", async (request, next) => {
+        if (request.stepNumber === 2) request.prefix.model.clear();
+        return next();
+      })
+      .use("tools", offer(tool()))
+      .build();
+    await turn(clearAgent, "go").handle.completed;
+    expect(cleared).toEqual([{ id: "opus" }, undefined]);
+
+    const conflict = Agent(
+      model(async () => "done"),
+      { id: "opus" },
+    )
+      .use("route", async (request, next) => {
+        request.prefix.model.select({ id: "haiku" });
+        return next();
+      })
+      .build();
+    expect((await turn(conflict, "go").handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
+      { type: "tripwire", tripwire: { code: "model.selection-conflict" } },
+    ]);
+  });
 });

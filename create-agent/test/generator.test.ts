@@ -89,7 +89,7 @@ describe("generateAgentProject", () => {
     await generateAgentProject({ directory: "reviewer", model: "local/gemma4:e2b-mlx", cwd, install: false });
     const definition = await readFile(join(cwd, "reviewer", "agent", "agent.ts"), "utf8");
     expect(definition).toContain('import { Agent } from "@nylorun/harness"');
-    expect(definition).toContain("(model) => Agent(model)");
+    expect(definition).toContain("(model, directive) => Agent(model, directive)");
     const template = await readFile(join(cwd, "reviewer", ".env.example"), "utf8");
     expect(template).toContain("http://127.0.0.1:11434/v1");
     expect(template).not.toContain("API_KEY");

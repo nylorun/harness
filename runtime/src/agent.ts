@@ -52,7 +52,7 @@ export type AgentSpec = AgentSpecRecord;
 
 export function AgentSpec(options: AgentSpecOptions): AgentSpec {
   return Object.freeze({
-    ...Run((model) => HarnessAgent(model), options),
+    ...Run((model, directive) => HarnessAgent(model, directive), options),
     ...(options.instructions === undefined ? {} : { instructions: options.instructions })
   });
 }

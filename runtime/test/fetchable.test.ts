@@ -20,7 +20,7 @@ async function project(): Promise<string> {
   await symlink(join(packageRoot, "node_modules", "zod"), join(root, "node_modules", "zod"), "dir").catch(() => undefined);
   await writeFile(join(root, "package.json"), '{"type":"module"}\n'); await writeFile(join(root, "package-lock.json"), "{}\n");
   await writeFile(join(root, "vite.config.ts"), 'import { nyloAgent } from "@nylorun/runtime"; export default {plugins:[nyloAgent()]};\n');
-  await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness"; import { Run } from "@nylorun/runtime/agent"; export default Run((model)=>Agent(model),{name:"sample",model:"anthropic/example"});\n');
+  await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness"; import { Run } from "@nylorun/runtime/agent"; export default Run((model,directive)=>Agent(model,directive),{name:"sample",model:"anthropic/example"});\n');
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n"); expect((await buildAgent(root)).ok).toBe(true); return root;
 }
 async function built(root: string, host: RuntimeOptions): Promise<BuiltAgent> { const module = await import(`${pathToFileURL(join(root, "dist", "agent.mjs")).href}?t=${imported++}`) as { agent: BuiltAgent }; return module.agent.withHost(host); }
@@ -73,7 +73,7 @@ describe("Fetchable session-first HTTP surface", () => {
     const root = await project(); try {
       const handler = Fetchable(await built(root, { modelGatewayAdapter: scripted(), recorder: createFileRecorder({ projectRoot: root }) }));
       const agent = await handler(new Request("http://local/v1/agent"));
-      expect(agent.status).toBe(200); expect(await agent.json()).toMatchObject({ protocolVersion: 1, agUiUrl: "/v1/ag-ui", sessionRecords: { path: ".nylo/runs" } });
+      expect(agent.status).toBe(200); expect(await agent.json()).toMatchObject({ protocolVersion: 1, agUiUrl: "/v1/ag-ui", sessionRecords: { path: ".nylo/runs" }, harness: { model: { id: "anthropic/example" }, middleware: [{ id: "nylorun-folder" }], adapters: [{ id: "runtime-local" }] } });
       const session = "studio-session";
       const first = await handler(post("/v1/ag-ui", { threadId: session, runId: "run-1", messages: [{ id: "m1", role: "user", content: "hello" }] }));
       expect(first.status).toBe(200); expect(await first.text()).toContain("RUN_STARTED");

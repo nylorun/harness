@@ -45,7 +45,7 @@ export class SessionScheduler {
     prefixPolicy: PromptPrefixPolicy = "observe",
   ) {
     this.snapshotValue = initialState(id);
-    this.prefixState = new PromptPrefixState(prefixPolicy);
+    this.prefixState = new PromptPrefixState(prefixPolicy, agent.directive);
     this.turns = new TurnRunner(agent, id, session, this.prefixState);
   }
 

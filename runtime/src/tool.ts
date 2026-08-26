@@ -7,7 +7,7 @@ export type InternalToolDefinition<Input extends ZodObject = ZodObject, Output =
   readonly [TOOL]: true;
 };
 
-export function defineTool<Input extends ZodObject, Output>(definition: ToolDefinition<Input, Output>): ToolDefinition<Input, Output> {
+export function tool<Input extends ZodObject, Output>(definition: ToolDefinition<Input, Output>): ToolDefinition<Input, Output> {
   if (!definition.description.trim()) throw new TypeError("Tool description is required");
   if (definition.maxCallsPerSession !== undefined && (!Number.isInteger(definition.maxCallsPerSession) || definition.maxCallsPerSession < 1)) {
     throw new TypeError("maxCallsPerSession must be a positive integer");

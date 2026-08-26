@@ -7,7 +7,7 @@ TypeScript authoring and deterministic build tooling for Nylo agents.
 import { Run } from "@nylorun/runtime";
 import { Agent } from "@nylorun/harness";
 
-export default Run((model) => Agent(model), {
+export default Run((model, directive) => Agent(model, directive), {
   name: "reviewer",
   model: "anthropic/example"
 });

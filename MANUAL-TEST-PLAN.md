@@ -13,10 +13,10 @@ adapters, and provider stubs are not valid evidence for this plan.
 Every generated definition must use the deferred factory shape:
 
 ```ts
-import { Harness } from "@nylorun/harness";
+import { Agent } from "@nylorun/harness";
 import { Run } from "@nylorun/runtime";
 
-export default Run((options) => new Harness(options), {
+export default Run((model, directive) => Agent(model, directive), {
   name: "sample",
   model: "local/gemma4:e2b-mlx",
 });
@@ -111,7 +111,8 @@ node ../../studio/dist/cli.js dev --studio --no-open --port 4111
 Open the printed `http://nylo.run.localhost:<port>` URL.
 
 1. Confirm the dashboard shows `ollama-simple`, `local/gemma4:e2b-mlx`,
-   `@nylorun/harness`, version `0.4.0-rc.1`, and Harness capability badges.
+   `@nylorun/harness`, version `0.4.0-rc.1`, and the bound Harness model,
+   middleware, and adapter IDs.
 2. Create a Session and send `Current token: [studio-one]`.
 3. Confirm the assistant returns the sentinel through the AG-UI chat.
 4. Send `Current token: [studio-two]` in the same Session and confirm the new final.
@@ -140,7 +141,7 @@ Use this exact table for the final report.
 | Multi-turn Session | Pass | One Studio Session returned `studio-one` and `studio-two` in order. |
 | Parallel Session isolation | Pass | Six concurrent Sessions retained their own sentinel and event Session ID. |
 | REST / SSE / records | Pass | Monotonic SSE, two turns, AG-UI history, event paging, and terminal JSONL record verified. |
-| Studio manifest | Pass | Rendered Harness package, version, model, tools, and capability badges. |
+| Studio manifest | Pass | Rendered Harness package/version plus the bound model, middleware, adapters, and tools. |
 | Studio real-model chat | Pass | Rendered chat completed against local Ollama. |
 | Studio tool agent | Pass | Tools card listed `lookup-code`; rendered result contained `resolved-GREEN-77`. |
 | Studio Harness events | Pass | Ordered observe, model, tool-adapter, final, and run-ended rows rendered. |

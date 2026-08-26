@@ -54,10 +54,10 @@ try {
     "AgentLifecycleError",
     "Agent",
     "BuiltAgent",
-    "defineTool",
-    "defineMiddleware",
-    "defineAdapter",
-    "defineModel",
+    "tool",
+    "adapter",
+    "model",
+    "middleware",
   ]) {
     if (!(name in entry)) throw new Error(`Missing public export: ${name}`);
   }
