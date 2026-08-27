@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { OpenAICompatibleModelGatewayAdapter, resolveModel } from "../src/index.js";
-import type { ModelGatewayChunk } from "../src/index.js";
-import { PiModelGatewayAdapter } from "../src/runtime/pi-model-gateway.js";
+import { OpenAICompatibleModelGatewayAdapter, resolveModel } from "../../src/local/runtime/index.js";
+import type { ModelGatewayChunk } from "../../src/local/runtime/index.js";
+import { PiModelGatewayAdapter } from "../../src/local/runtime/runtime/pi-model-gateway.js";
 
 async function root(): Promise<string> {
   return mkdtemp(join(tmpdir(), "nylo-model-gateway-"));

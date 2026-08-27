@@ -51,7 +51,10 @@ export interface InputOptions {
   readonly signal?: AbortSignal;
 }
 
-export type AgentRunInput = string | InputEvent;
+export type MessageInput = string | { readonly text: string; readonly metadata?: JsonObject };
+export type InteractionReply = Extract<InputEvent, { kind: "approve" | "respond" }>;
+/** Ordinary user text or an interaction reply. Use `Session.interrupt()` for barge-in text. */
+export type AgentRunInput = MessageInput | InteractionReply;
 
 export interface TranscriptInputEntry {
   readonly kind: "input";
@@ -91,6 +94,7 @@ export interface Session {
   readonly id: string;
   readonly state: SessionSnapshot;
   input(event: AgentRunInput, options?: InputOptions): InputHandle;
+  interrupt(event: MessageInput, options?: InputOptions): InputHandle;
   stream(): AsyncIterable<SessionEvent>;
   observe(listener: Observer): void;
   stop(reason?: string): Promise<void>;

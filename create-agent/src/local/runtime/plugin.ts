@@ -2,7 +2,7 @@ import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Plugin, ResolvedConfig } from "vite";
-import { discoverAgentFolder } from "@nylorun/agent/compiler";
+import { discoverAgentFolder } from "../agent/compiler.js";
 import { diagnostic, NyloBuildError } from "./diagnostics.js";
 import { createManifest, describeSkills, describeTools, stableJson } from "./manifest.js";
 import type { AgentConfig } from "./types.js";
@@ -56,7 +56,7 @@ export function nyloAgent(): Plugin {
       // definition cannot know its own tools, because discovery is the directory's job. `config`
       // and `toolModules` stay exported because writeBundle below reads them to derive the
       // manifest, and because they keep the artifact introspectable without starting anything.
-      return `${imports}\nimport declaredConfig from ${JSON.stringify(folder.definitionPath)};\nimport { mergeAgentFolderDefinition } from "@nylorun/agent/definition";\nimport { __nyloBindAgent, Fetchable } from "@nylorun/runtime/runtime-host";\nexport const config=mergeAgentFolderDefinition(${JSON.stringify({ instructions: folder.instructions, packageName: folder.packageName })},declaredConfig);\nexport const toolModules=[${folder.tools.map((entry, index) => `{file:${JSON.stringify(entry.file)},exports:tool${index}}`).join(",")}];\nexport const agent=__nyloBindAgent({moduleUrl:import.meta.url,config,toolModules});\nconst hostOptions=globalThis[Symbol.for("nylo.runtime.host-options")];\nexport default Fetchable(agent.withHost(hostOptions ?? {}));\n`;
+      return `${imports}\nimport declaredConfig from ${JSON.stringify(folder.definitionPath)};\nimport { mergeAgentFolderDefinition } from "@nylorun/create-agent/local/agent";\nimport { __nyloBindAgent, Fetchable } from "@nylorun/create-agent/local/runtime-host";\nexport const config=mergeAgentFolderDefinition(${JSON.stringify({ instructions: folder.instructions, packageName: folder.packageName })},declaredConfig);\nexport const toolModules=[${folder.tools.map((entry, index) => `{file:${JSON.stringify(entry.file)},exports:tool${index}}`).join(",")}];\nexport const agent=__nyloBindAgent({moduleUrl:import.meta.url,config,toolModules});\nconst hostOptions=globalThis[Symbol.for("nylo.runtime.host-options")];\nexport default Fetchable(agent.withHost(hostOptions ?? {}));\n`;
     },
     async writeBundle() {
       const output = join(config.root, config.build.outDir, "agent.mjs");

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -18,11 +18,16 @@ async function availablePort(): Promise<number> {
 async function project(): Promise<string> {
   const root = await mkdtemp(join(process.cwd(), ".nylo-studio-dev-"));
   await mkdir(join(root, "agent"), { recursive: true });
+  await mkdir(join(root, "node_modules", "@nylorun"), { recursive: true });
+  await symlink(new URL("../../create-agent/", import.meta.url).pathname, join(root, "node_modules", "@nylorun", "create-agent"), "dir");
+  await symlink(new URL("../../harness/", import.meta.url).pathname, join(root, "node_modules", "@nylorun", "harness"), "dir");
+  await symlink(new URL("../../node_modules/zod/", import.meta.url).pathname, join(root, "node_modules", "zod"), "dir");
   await writeFile(join(root, "package.json"), '{"name":"studio-fixture","type":"module"}\n');
   await writeFile(join(root, "package-lock.json"), "{}\n");
-  await writeFile(join(root, "vite.config.ts"), 'import { nyloAgent } from "@nylorun/runtime";\nexport default { plugins: [nyloAgent()] };\n');
+  await writeFile(join(root, "nylo.local.ts"), 'export { Run, nyloAgent } from "@nylorun/create-agent/local";\n');
+  await writeFile(join(root, "vite.config.ts"), 'import { nyloAgent } from "./nylo.local.js";\nexport default { plugins: [nyloAgent()] };\n');
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n");
-  await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((model,directive)=>Agent(model,directive),{name:"sample",model:"anthropic/example"});\n');
+  await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness";\nimport { Run } from "../nylo.local.js";\nexport default Run((model,directive)=>Agent(model,directive),{name:"sample",model:"anthropic/example"});\n');
   return root;
 }
 
@@ -62,7 +67,7 @@ describe("nylo dev options", () => {
       });
       expect(preflight.headers.get("access-control-allow-origin")).toBe(dev.studioAddress);
 
-      await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((model,directive)=>Agent(model,directive),{name:"rebuilt",model:"anthropic/example"});\n');
+      await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness";\nimport { Run } from "../nylo.local.js";\nexport default Run((model,directive)=>Agent(model,directive),{name:"rebuilt",model:"anthropic/example"});\n');
       await expect.poll(async () => {
         const response = await fetch(`${dev!.agentServerUrl}/v1/sessions`, {
           method: "POST",

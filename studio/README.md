@@ -8,9 +8,9 @@ Install it in a project's `devDependencies`, then run:
 npm run dev
 ```
 
-Generated projects use `nylo dev --studio`. It builds and watches the local agent, starts its Agent Server on `--port`, then `PORT`, then `4111`, and starts Studio on the first free loopback URL from `http://nylo.run.localhost:4161` through `:4260`. Studio's URL is stable across rebuilds; the Agent Server restarts on the same selected port after a successful rebuild.
+Generated projects use `nylo dev --studio`. Studio discovers the project's generated `nylo.local.ts` contract, builds and watches the local agent, starts its local server on `--port`, then `PORT`, then `4111`, and starts Studio on the first free loopback URL from `http://nylo.run.localhost:4161` through `:4260`. Studio's URL is stable across rebuilds; the local server restarts on the same selected port after a successful rebuild.
 
-Studio serves `/nylo-studio.config.json` dynamically from memory with the local Agent Server URL. It never writes this configuration into the project or `dist/`. Use `--no-open` to prevent opening a browser.
+Studio serves `/nylo-studio.config.json` dynamically from memory with the local-server URL. It never writes this configuration into the project or `dist/`. Use `--no-open` to prevent opening a browser.
 
 `nylo studio` remains available when you want only the static host:
 
@@ -24,7 +24,7 @@ To connect the static Studio to a developer-owned Agent Server instead:
 nylo studio --agent-server-url https://agent.example.internal
 ```
 
-`--runtime-url` is retained as a deprecated alias. Studio hosts no Agent Server proxy, token bootstrap, browser API, Run-record reader, or session credentials. The browser directly reads Agent Server metadata and sessions, uses AG-UI SSE for chat, and reads the canonical event stream for inspection.
+`--runtime-url` is retained as a deprecated alias. Studio hosts no local-server proxy, token bootstrap, browser API, Run-record reader, or session credentials. The browser directly reads server metadata and sessions, uses AG-UI SSE for chat, and reads the canonical event stream for inspection.
 
 ## Dashboards
 

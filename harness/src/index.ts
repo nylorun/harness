@@ -42,10 +42,12 @@ export type {
 } from "./types/shared.js";
 export type {
   AgentRunInput,
+  InteractionReply,
   InputCompletion,
   InputEvent,
   InputHandle,
   InputOptions,
+  MessageInput,
   Session,
   SessionEvent,
   SessionOptions,

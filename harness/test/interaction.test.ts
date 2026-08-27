@@ -110,10 +110,7 @@ describe("interaction resume", () => {
 
     const cancelledController = new AbortController();
     const cancelledRemove = vi.spyOn(cancelledController.signal, "removeEventListener");
-    const cancelledQueued = session.input(
-      { kind: "user-message", text: "remove-me" },
-      { signal: cancelledController.signal },
-    );
+    const cancelledQueued = session.input("remove-me", { signal: cancelledController.signal });
     cancelledController.abort(new Error("not needed"));
     await expect(cancelledQueued.completed).resolves.toMatchObject({ status: "cancelled" });
     expect(cancelledRemove).toHaveBeenCalledWith("abort", expect.any(Function));

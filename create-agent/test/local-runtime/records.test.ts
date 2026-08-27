@@ -2,9 +2,9 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { WireSessionEvent } from "../src/index.js";
-import { createFileRecorder, redactRecord, RECORDS_DIRECTORY } from "../src/runtime/record-store.js";
-import { createAuthoringArchive, EXCLUDED } from "../src/publish/archive.js";
+import type { WireSessionEvent } from "../../src/local/runtime/index.js";
+import { createFileRecorder, redactRecord, RECORDS_DIRECTORY } from "../../src/local/runtime/runtime/record-store.js";
+import { createAuthoringArchive, EXCLUDED } from "../../src/local/runtime/publish/archive.js";
 
 const CONTEXT = { agent: "sample", model: "openai/gpt-4o-mini", bundleDigest: "bbb", manifestDigest: "mmm" };
 

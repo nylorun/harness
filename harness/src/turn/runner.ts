@@ -1,7 +1,13 @@
 import type { InputEvent, SessionEvent, SessionSnapshot } from "../types/session.js";
 import type { JsonObject, Tripwire } from "../types/shared.js";
 import type { RequiredInteraction, ToolResult } from "../types/tool.js";
-import { beginTurn, commitCandidate, commitFinal, commitToolResults } from "../session/state.js";
+import {
+  beginTurn,
+  commitCandidate,
+  commitFinal,
+  commitInput,
+  commitToolResults,
+} from "../session/state.js";
 import { runStep, type LoopAgent } from "../step/run.js";
 import { createId } from "../utils/ids.js";
 import { copyJson } from "../utils/immutable.js";
@@ -44,6 +50,7 @@ export interface TurnRunContext {
   readonly onPlanActive: (pending: PendingTurn | undefined) => void;
   readonly onState: (state: SessionSnapshot) => void;
   readonly onConversation: (event: SessionEvent) => void;
+  readonly claimInterrupts: (turnId: string) => readonly InputEvent[];
 }
 
 /** Advances one Turn until it finalizes, trips a policy, or pauses for an interaction. */
@@ -79,11 +86,12 @@ export class TurnRunner {
       return { kind: "interaction-required", state, pending, interaction: progress.interaction };
     const afterTools = commitToolResults(state, pending.turnId, pending.stepId, progress.results);
     context.onState(afterTools);
+    const claimed = claimAndRecord(afterTools, pending.turnId, context);
     return this.advance(
-      afterTools,
+      claimed.state,
       pending.turnId,
       pending.stepNumber + 1,
-      [],
+      claimed.arrivals,
       progress.results,
       context,
     );
@@ -170,7 +178,9 @@ export class TurnRunner {
         return { kind: "interaction-required", state, pending, interaction: progress.interaction };
       state = commitToolResults(state, turnId, stepId, progress.results);
       context.onState(state);
-      stepArrivals = [];
+      const claimed = claimAndRecord(state, turnId, context);
+      state = claimed.state;
+      stepArrivals = claimed.arrivals;
       toolResults = progress.results;
     }
   }
@@ -190,4 +200,17 @@ export class TurnRunner {
     context.onPlanActive(undefined);
     return progress;
   }
+}
+
+function claimAndRecord(
+  state: SessionSnapshot,
+  turnId: string,
+  context: TurnRunContext,
+): { readonly state: SessionSnapshot; readonly arrivals: readonly InputEvent[] } {
+  const arrivals = context.claimInterrupts(turnId);
+  if (arrivals.length === 0) return { state, arrivals };
+  let next = state;
+  for (const event of arrivals) next = commitInput(next, turnId, event);
+  context.onState(next);
+  return { state: next, arrivals };
 }

@@ -38,7 +38,7 @@ function studioArgs(argv: readonly string[]): StudioOptions | string {
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command !== "studio" && command !== "dev") {
-    await import("@nylorun/runtime/cli");
+    await import("@nylorun/create-agent/local/cli");
     return;
   }
   if (command === "studio") {

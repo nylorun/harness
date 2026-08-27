@@ -16,8 +16,8 @@ describe("Session loop", () => {
       }),
     ).build();
     const { session, handle: one } = turn(result, "one");
-    const two = session.input({ kind: "user-message", text: "two" });
-    const three = session.input({ kind: "interrupt", text: "three" });
+    const two = session.input("two");
+    const three = session.interrupt("three");
     expect(
       (await Promise.all([one.consume(), two.consume(), three.consume()])).map(
         (item) => item.status,
@@ -95,7 +95,7 @@ describe("Session loop", () => {
     const controller = new AbortController();
     const { session, handle: active } = turn(result, "first", { signal: controller.signal });
     await adapterStarted;
-    const queued = session.input({ kind: "user-message", text: "second" });
+    const queued = session.input("second");
     controller.abort(new Error("stop the tool"));
     releaseAdapter();
 
@@ -118,6 +118,135 @@ describe("Session loop", () => {
       expect(results.results).toEqual([
         expect.objectContaining({ callId: "call", kind: "failed", code: "tool.cancelled" }),
       ]);
+  });
+
+  it("claims an interrupt onto the next step of the same turn", async () => {
+    let releaseTool!: () => void;
+    let markToolStarted!: () => void;
+    const toolStarted = new Promise<void>((resolve) => {
+      markToolStarted = resolve;
+    });
+    const toolGate = new Promise<void>((resolve) => {
+      releaseTool = resolve;
+    });
+    const arrivals: string[][] = [];
+    let modelStep = 0;
+    const result = Agent(
+      model(async (request) => {
+        arrivals.push(
+          request.arrivals.map((item) =>
+            item.kind === "user-message" || item.kind === "interrupt" ? item.text : item.kind,
+          ),
+        );
+        return ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
+      }),
+    )
+      .with(
+        adapter(async () => {
+          markToolStarted();
+          await toolGate;
+          return { kind: "completed" as const, output: "ok" };
+        }),
+      )
+      .use("test", offer(tool()))
+      .build();
+    const { session, handle } = turn(result, "go");
+    await toolStarted;
+    const interrupt = session.interrupt("steer");
+    releaseTool();
+    const interruptDone = await interrupt.completed;
+    expect(interruptDone.status).toBe("completed");
+    expect(interruptDone.events.some((event) => event.type === "final")).toBe(false);
+    expect(interruptDone.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "input",
+          event: { kind: "interrupt", text: "steer" },
+        }),
+      ]),
+    );
+    const turnDone = await handle.completed;
+    expect(turnDone.status).toBe("completed");
+    expect(turnDone.events.at(-1)).toMatchObject({ type: "final", output: "done" });
+    expect(arrivals).toEqual([["go"], ["steer"]]);
+    expect(session.state.turnCount).toBe(1);
+    expect(session.state.transcript.filter((entry) => entry.kind === "final")).toHaveLength(1);
+    expect(
+      session.state.transcript.some(
+        (entry) =>
+          entry.kind === "input" &&
+          entry.event.kind === "interrupt" &&
+          entry.event.text === "steer",
+      ),
+    ).toBe(true);
+    await session.stop();
+    const inputKinds: string[] = [];
+    for await (const event of session.stream()) {
+      if (event.type === "input") inputKinds.push(event.event.kind);
+    }
+    expect(inputKinds).toEqual(["user-message", "interrupt"]);
+  });
+
+  it("starts a new turn when interrupt arrives after the current turn has finalized", async () => {
+    const result = Agent(
+      model(async (request) => {
+        const arrival = request.arrivals[0];
+        return arrival?.kind === "user-message" || arrival?.kind === "interrupt"
+          ? arrival.text
+          : "done";
+      }),
+    ).build();
+    const { session, handle } = turn(result, "one");
+    await handle.completed;
+    const later = await session.interrupt("two").completed;
+    expect(later.status).toBe("completed");
+    expect(later.events.at(-1)).toMatchObject({ type: "final", output: "two" });
+    expect(session.state.turnCount).toBe(2);
+    expect(
+      session.state.transcript
+        .filter((entry) => entry.kind === "final")
+        .map((entry) => entry.output),
+    ).toEqual(["one", "two"]);
+  });
+
+  it("keeps an interrupt queued while waiting, then claims it on the next step after approve", async () => {
+    const arrivals: string[][] = [];
+    let modelStep = 0;
+    const result = Agent(
+      model(async (request) => {
+        arrivals.push(
+          request.arrivals.map((item) =>
+            item.kind === "user-message" || item.kind === "interrupt" ? item.text : item.kind,
+          ),
+        );
+        return ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
+      }),
+    )
+      .with(adapter(async () => ({ kind: "completed" as const, output: "ok" })))
+      .use("approval", async (_request, next) => {
+        const response = await next();
+        response.requireInteraction("call", { kind: "approval", prompt: "approve" });
+        return response;
+      })
+      .use("test", offer(tool()))
+      .build();
+    const { session, handle } = turn(result, "go");
+    const first = await handle.completed;
+    expect(first.status).toBe("waiting");
+    const required = first.events.find((event) => event.type === "interaction.required");
+    if (!required || required.type !== "interaction.required")
+      throw new Error("missing interaction");
+    const interrupt = session.interrupt("steer");
+    expect(session.state.status).toBe("waiting");
+    const resumed = session.input({
+      kind: "approve",
+      interactionId: required.interaction.id,
+      approved: true,
+    });
+    expect((await interrupt.completed).status).toBe("completed");
+    expect((await resumed.completed).status).toBe("completed");
+    expect(arrivals).toEqual([["go"], ["steer"]]);
+    expect(session.state.turnCount).toBe(1);
   });
 
   it("replays the Session conversation log from the start and is not input()", async () => {

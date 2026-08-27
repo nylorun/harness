@@ -222,6 +222,7 @@ export class SessionScheduler {
           this.snapshotValue = state;
         },
         onConversation: (event: SessionEvent) => this.publish(submission.stream, event),
+        claimInterrupts: (turnId: string) => this.claimInterrupts(turnId),
       };
       const outcome = this.pending
         ? await this.resumeTurn(submission, context)
@@ -341,6 +342,24 @@ export class SessionScheduler {
       pending.stepId,
       pending.plan.cancelledResults(reason),
     );
+  }
+
+  private claimInterrupts(turnId: string): readonly InputEvent[] {
+    const claimed = this.queue.takeInterrupts();
+    const events: InputEvent[] = [];
+    for (const item of claimed) {
+      const conversation = Object.freeze({
+        type: "input" as const,
+        event: item.event,
+        turnId,
+      });
+      this.events.emit(conversation);
+      this.activeSubmission?.stream.emit(conversation);
+      item.stream.emit(conversation);
+      item.stream.finish("completed");
+      events.push(item.event);
+    }
+    return Object.freeze(events);
   }
 
   private assertCurrent(generation: number, signal: AbortSignal): void {

@@ -56,6 +56,20 @@ export class InputQueue {
     return this.values.shift();
   }
 
+  takeInterrupts(): QueuedInput[] {
+    const claimed: QueuedInput[] = [];
+    for (let index = 0; index < this.values.length;) {
+      const item = this.values[index]!;
+      if (item.event.kind !== "interrupt") {
+        index += 1;
+        continue;
+      }
+      this.values.splice(index, 1);
+      if (!item.cancelled) claimed.push(item);
+    }
+    return claimed;
+  }
+
   remove(input: QueuedInput): boolean {
     const index = this.values.indexOf(input);
     if (index < 0) return false;

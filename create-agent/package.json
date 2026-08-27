@@ -3,7 +3,7 @@
   "version": "0.1.0-rc.1",
   "description": "Create a buildable Nylo agent project.",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "UNLICENSED",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nylorun/agents.git",
@@ -19,6 +19,27 @@
     "README.md",
     "LICENSE"
   ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./local": {
+      "types": "./dist/local/index.d.ts",
+      "import": "./dist/local/index.js"
+    },
+    "./local/runtime-host": {
+      "types": "./dist/local/runtime/runtime/host.d.ts",
+      "import": "./dist/local/runtime/runtime/host.js"
+    },
+    "./local/agent": {
+      "types": "./dist/local/agent/index.d.ts",
+      "import": "./dist/local/agent/index.js"
+    },
+    "./local/cli": {
+      "import": "./dist/local/runtime/cli/index.js"
+    }
+  },
   "publishConfig": {
     "access": "public",
     "provenance": true
@@ -30,12 +51,29 @@
     "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
     "build": "npm run clean && tsc -p tsconfig.json",
     "test": "vitest run",
-    "check": "npm run build && npm test && node scripts/check-package.mjs",
+    "test:types": "tsc -p test/local-runtime/types/tsconfig.json",
+    "check": "npm run build && npm run test:types && npm test && node scripts/check-package.mjs",
     "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@ag-ui/core": "^0.0.58",
+    "@ag-ui/encoder": "^0.0.58",
+    "@earendil-works/pi-ai": "0.84.2",
+    "@nylorun/harness": "0.4.0-rc.1",
+    "typebox": "1.3.7",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.12"
+  },
+  "peerDependencies": {
+    "vite": "^7.0.0 || ^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": { "optional": true }
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
     "typescript": "^5.9.3",
+    "vite": "^8.0.0",
     "vitest": "^3.2.4"
   }
 }

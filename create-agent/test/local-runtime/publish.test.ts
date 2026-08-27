@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { upload } from "../src/cli/publish.js";
-import type { Args } from "../src/cli/args.js";
-import type { CapabilityManifest } from "../src/types.js";
+import { upload } from "../../src/local/runtime/cli/publish.js";
+import type { Args } from "../../src/local/runtime/cli/args.js";
+import type { CapabilityManifest } from "../../src/local/runtime/types.js";
 
 const bundle = Buffer.from("export default {}");
 const manifest: CapabilityManifest = {

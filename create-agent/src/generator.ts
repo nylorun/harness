@@ -14,11 +14,10 @@ export type GeneratorOptions = Readonly<{
   cwd?: string;
   install?: boolean;
   userAgent?: string;
-  agentsSpec?: string;
   /** Development only: pins the transitive harness while neither package is published. */
   harnessSpec?: string;
-  /** Development only: pins the shared contract while neither package is published. */
-  agentSpec?: string;
+  /** Development only: pins the local-development helper package. */
+  createAgentSpec?: string;
   /** Development only: selects the optional Studio package. */
   studioSpec?: string;
 }>;
@@ -52,10 +51,9 @@ async function detectPackageManager(context: string, userAgent: string | undefin
 
 function packageJson(
   name: string,
-  agentsSpec: string,
   packageManager: PackageManager,
   harnessSpec: string | undefined,
-  agentSpec: string | undefined,
+  createAgentSpec: string,
   studioSpec: string
 ): string {
   return `${JSON.stringify({
@@ -71,22 +69,22 @@ function packageJson(
       studio: "nylo studio"
     },
     dependencies: {
-      "@nylorun/runtime": agentsSpec,
-      "@nylorun/harness": harnessSpec ?? "^0.4.0-rc.1",
+      "@nylorun/harness": harnessSpec ?? "0.4.0-rc.1",
       "zod": "^4.1.12"
     },
-    devDependencies: { "@nylorun/studio": studioSpec, typescript: "^5.9.3", vite: "^8.0.0" },
-    // Development only, and absent from an ordinary project. Neither package is on the public
-    // registry yet, so a runtime installed from a tarball names a harness nothing can resolve. The
-    // override points it at the tarball beside it, and disappears the day both are published.
-    ...((harnessSpec === undefined && agentSpec === undefined) ? {} : {
-      overrides: {
-        ...(harnessSpec === undefined ? {} : { "@nylorun/harness": harnessSpec }),
-        ...(agentSpec === undefined ? {} : { "@nylorun/agent": agentSpec })
-      }
-    }),
-    // The supported runtime lines, matching what @nylorun/runtime itself declares: a generated
-    // project that refuses to install on the Active LTS would be a bad first thirty seconds.
+    devDependencies: { "@nylorun/create-agent": createAgentSpec, "@nylorun/studio": studioSpec, typescript: "^5.9.3", vite: "^8.0.0" },
+    // Before publication, a tarball pin keeps the scaffold, its helper, Studio, and Harness on
+    // one tested release line. This disappears from ordinary registry-generated projects.
+    ...([harnessSpec, createAgentSpec, studioSpec].some((spec) => spec?.startsWith("file:"))
+      ? {
+          overrides: {
+            ...(harnessSpec?.startsWith("file:") ? { "@nylorun/harness": harnessSpec } : {}),
+            ...(createAgentSpec.startsWith("file:") ? { "@nylorun/create-agent": createAgentSpec } : {}),
+            ...(studioSpec.startsWith("file:") ? { "@nylorun/studio": studioSpec } : {})
+          }
+        }
+      : {}),
+    // The local helper supports the same active Node lines as this generator.
     engines: { node: "^22.14.0 || ^24.0.0 || >=26.0.0" }
   }, null, 2)}\n`;
 }
@@ -178,19 +176,18 @@ export async function generateAgentProject(options: GeneratorOptions): Promise<G
   if (!NAME.test(name)) throw new Error(`Invalid agent name: ${name}`);
   if (!MODEL.test(options.model)) throw new Error(`Invalid model identity: ${options.model}`);
   const selected = await detectPackageManager(cwd, options.userAgent ?? process.env.npm_config_user_agent);
-  const agentsSpec =
-    options.agentsSpec ?? process.env.NYLO_RUNTIME_SPEC ?? process.env.NYLO_AGENTS_SPEC ?? "^0.1.0-rc.1";
   const harnessSpec = options.harnessSpec ?? process.env.NYLO_HARNESS_SPEC;
-  const agentSpec = options.agentSpec ?? process.env.NYLO_AGENT_SPEC;
-  const studioSpec = options.studioSpec ?? process.env.NYLO_STUDIO_SPEC ?? "^0.1.0-rc.1";
+  const createAgentSpec = options.createAgentSpec ?? process.env.NYLO_CREATE_AGENT_SPEC ?? "0.1.0-rc.1";
+  const studioSpec = options.studioSpec ?? process.env.NYLO_STUDIO_SPEC ?? "0.1.0-rc.1";
   await mkdir(join(target, "agent"), { recursive: true });
-  await writeFile(join(target, "package.json"), packageJson(name, agentsSpec, selected.packageManager, harnessSpec, agentSpec, studioSpec));
-  await writeFile(join(target, "tsconfig.json"), `${JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: true }, include: ["agent/**/*.ts", "vite.config.ts"] }, null, 2)}\n`);
-  await writeFile(join(target, "vite.config.ts"), `import { nyloAgent } from "@nylorun/runtime";\n\nexport default { plugins: [nyloAgent()] };\n`);
+  await writeFile(join(target, "package.json"), packageJson(name, selected.packageManager, harnessSpec, createAgentSpec, studioSpec));
+  await writeFile(join(target, "tsconfig.json"), `${JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: true }, include: ["agent/**/*.ts", "nylo.local.ts", "vite.config.ts"] }, null, 2)}\n`);
+  await writeFile(join(target, "nylo.local.ts"), `/** Local development contract generated by @nylorun/create-agent. */\nexport { Agent, AgentSpec, Run, tool, nyloAgent } from "@nylorun/create-agent/local";\nexport type { BuildResult, LocalRuntimeHost, RuntimeOptions } from "@nylorun/create-agent/local";\n`);
+  await writeFile(join(target, "vite.config.ts"), `import { nyloAgent } from "./nylo.local.js";\n\nexport default { plugins: [nyloAgent()] };\n`);
   await writeFile(join(target, ".gitignore"), "node_modules/\ndist/\n.env\n.nylo/\n");
   await writeFile(join(target, ".env.example"), envExample(options.model));
   await writeFile(join(target, "README.md"), readme(name, options.model, selected.packageManager));
-  await writeFile(join(target, "agent", "agent.ts"), `import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime";\n\nexport default Run(\n  (model, directive) => Agent(model, directive),\n  {\n    name: ${JSON.stringify(name)},\n    model: ${JSON.stringify(options.model)}\n  }\n);\n`);
+  await writeFile(join(target, "agent", "agent.ts"), `import { Agent } from "@nylorun/harness";\nimport { Run } from "../nylo.local.js";\n\nexport default Run(\n  (model, directive) => Agent(model, directive),\n  {\n    name: ${JSON.stringify(name)},\n    model: ${JSON.stringify(options.model)}\n  }\n);\n`);
   await writeFile(join(target, "agent", "AGENT.md"), "You are a helpful assistant.\n");
   if (options.install !== false) {
     try {

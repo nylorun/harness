@@ -3,7 +3,7 @@
   "version": "0.1.0-rc.1",
   "description": "Developer-only local Studio for Nylo agents.",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "UNLICENSED",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nylorun/agents.git",
@@ -41,7 +41,7 @@
     "@assistant-ui/react": "^0.15.16",
     "@assistant-ui/react-ag-ui": "^0.0.56",
     "@assistant-ui/react-markdown": "^0.14.12",
-    "@nylorun/runtime": "0.1.0-rc.1",
+    "@nylorun/create-agent": "0.1.0-rc.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",

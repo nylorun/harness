@@ -6,6 +6,7 @@ import {
   type BuiltAgent,
   type ModelCandidate,
   type ModelDirective,
+  type Session,
   type SessionOptions,
   type StepRequest,
 } from "../../src/index.js";
@@ -57,6 +58,12 @@ Agent(async () => "done").run();
 
 // @ts-expect-error Agent is a factory, not a constructable class
 new Agent(async () => "done");
+
+declare const session: Session;
+session.interrupt("ok");
+session.interrupt({ text: "ok" });
+// @ts-expect-error input() does not accept interrupt
+session.input({ kind: "interrupt", text: "x" });
 
 declare const agent: BuiltAgent;
 

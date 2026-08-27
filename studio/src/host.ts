@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createFileRecorder, type BuiltAgent } from "@nylorun/runtime";
-import { startLocalRuntime } from "@nylorun/runtime/runtime-host";
+import { createFileRecorder, type BuiltAgent } from "@nylorun/create-agent/local";
+import { startLocalRuntime } from "@nylorun/create-agent/local/runtime-host";
 
 export type StudioOptions = Readonly<{ project: string; agentServerUrl?: string; port?: number; open?: boolean }>;
 export type StaticStudioOptions = Readonly<{ agentServerUrl?: string; port?: number; open?: boolean }>;

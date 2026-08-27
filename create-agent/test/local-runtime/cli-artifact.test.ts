@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { runtimeAgentFrom } from "../src/cli/artifact.js";
-import type { BuiltAgent } from "../src/runtime/bind.js";
+import { runtimeAgentFrom } from "../../src/local/runtime/cli/artifact.js";
+import type { BuiltAgent } from "../../src/local/runtime/runtime/bind.js";
 
 describe("CLI artifact selection", () => {
   it("uses the named runtime handle rather than the default HTTP door", () => {

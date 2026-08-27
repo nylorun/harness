@@ -23,6 +23,7 @@ describe("TurnRunner", () => {
         onPlanActive() {},
         onState: (state) => states.push(state.status),
         onConversation() {},
+        claimInterrupts: () => [],
       },
     );
 

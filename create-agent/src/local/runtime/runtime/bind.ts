@@ -164,7 +164,14 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
         }
         const abort = new AbortController();
         found.activeAbort = abort;
-        const run = found.session.input(event, { signal: options.signal === undefined ? abort.signal : AbortSignal.any([abort.signal, options.signal]) });
+        const signal = options.signal === undefined ? abort.signal : AbortSignal.any([abort.signal, options.signal]);
+        const run =
+          event.kind === "interrupt"
+            ? found.session.interrupt(
+                event.metadata === undefined ? event.text : { text: event.text, metadata: event.metadata },
+                { signal },
+              )
+            : found.session.input(event, { signal });
         append(id, "session.run.started", event.kind === "user-message" || event.kind === "interrupt" ? { input: event.text, input_kind: event.kind } : { input_kind: event.kind, interaction_id: event.interactionId });
         await store.setStatus(id, "running");
         const writer = await openWriter(host.recorder, id, input.config, ready.manifest);

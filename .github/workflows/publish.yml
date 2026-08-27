@@ -7,7 +7,7 @@ on:
         description: Package to stage
         required: true
         type: choice
-        options: [harness, runtime, create-agent]
+        options: [harness, create-agent, studio]
       version:
         description: Exact package version to stage
         required: true

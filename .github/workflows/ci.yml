@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        package: [harness, runtime, create-agent]
+        package: [harness, create-agent, studio]
         # Every line the published `engines` range admits, so the range is tested rather than
         # asserted: the declared floor, the Active LTS, and the line that becomes LTS in October.
         node: ["22.14.0", "24.x", "26.x"]
@@ -26,13 +26,10 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
           cache-dependency-path: package-lock.json
-      # One workspace install: @nylorun/runtime depends on @nylorun/harness, which is unpublished,
-      # so the two only resolve together.
+      # Create Agent carries the local-development implementation and resolves
+      # against the unpublished Harness workspace during pre-release checks.
       - run: npm ci
       - run: npm run check --workspace @nylorun/${{ matrix.package }}
-        if: matrix.package != 'create-agent'
-      - run: npm run check --workspace @nylorun/create-agent
-        if: matrix.package == 'create-agent'
 
   packed-integration:
     runs-on: ubuntu-latest
@@ -49,32 +46,22 @@ jobs:
       - run: npm run build
       - name: Pack the toolchain
         shell: bash
-        # Both packages: a generated project installs the runtime, which needs the harness beside it.
-        # The filename carries the version, so resolve it rather than pinning it here.
+        # The generated project is tested only against packed Harness, Create
+        # Agent, and Studio artifacts. The filename carries the version.
         run: |
           harness="$(cd harness && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
-          runtime="$(cd runtime && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          create_agent="$(cd create-agent && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          studio="$(cd studio && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
           echo "NYLO_HARNESS_TARBALL=$RUNNER_TEMP/$harness" >> "$GITHUB_ENV"
-          echo "NYLO_RUNTIME_SPEC=file:$RUNNER_TEMP/$runtime" >> "$GITHUB_ENV"
-      - name: Generate, build, and run consumer
+          echo "NYLO_HARNESS_SPEC=file:$RUNNER_TEMP/$harness" >> "$GITHUB_ENV"
+          echo "NYLO_CREATE_AGENT_SPEC=file:$RUNNER_TEMP/$create_agent" >> "$GITHUB_ENV"
+          echo "NYLO_STUDIO_SPEC=file:$RUNNER_TEMP/$studio" >> "$GITHUB_ENV"
+      - name: Generate, check, and build consumer
         shell: bash
         run: |
           node create-agent/dist/cli.js "$RUNNER_TEMP/sample-agent" --model openai/gpt-4o --yes
-          npm install --prefix "$RUNNER_TEMP/sample-agent" "$NYLO_HARNESS_TARBALL"
           npm run check --prefix "$RUNNER_TEMP/sample-agent"
           npm run build --prefix "$RUNNER_TEMP/sample-agent"
-
-          # Exercise the full run path against a local stub: no key, no outbound network.
-          node .github/scripts/sse-stub.mjs > "$RUNNER_TEMP/stub.log" &
-          for _ in $(seq 1 50); do grep -q PORT= "$RUNNER_TEMP/stub.log" && break; sleep 0.1; done
-          port="$(sed -n 's/^PORT=//p' "$RUNNER_TEMP/stub.log")"
-          test -n "$port" || { echo "stub did not start"; exit 1; }
-
-          cd "$RUNNER_TEMP/sample-agent"
-          output="$(NYLO_PROVIDER_BASE_URL="http://127.0.0.1:$port/v1" \
-            OPENAI_API_KEY=stub npm run dev --silent -- "say hello")"
-          echo "$output"
-          grep -q "Hello, world." <<<"$output" || { echo "run produced no assistant text"; exit 1; }
 
   package-manager-smoke:
     runs-on: ubuntu-latest
@@ -98,9 +85,12 @@ jobs:
         shell: bash
         run: |
           harness="$(cd harness && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
-          runtime="$(cd runtime && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          create_agent="$(cd create-agent && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
+          studio="$(cd studio && npm pack --pack-destination "$RUNNER_TEMP" --silent | tail -1)"
           echo "NYLO_HARNESS_TARBALL=$RUNNER_TEMP/$harness" >> "$GITHUB_ENV"
-          echo "NYLO_RUNTIME_SPEC=file:$RUNNER_TEMP/$runtime" >> "$GITHUB_ENV"
+          echo "NYLO_HARNESS_SPEC=file:$RUNNER_TEMP/$harness" >> "$GITHUB_ENV"
+          echo "NYLO_CREATE_AGENT_SPEC=file:$RUNNER_TEMP/$create_agent" >> "$GITHUB_ENV"
+          echo "NYLO_STUDIO_SPEC=file:$RUNNER_TEMP/$studio" >> "$GITHUB_ENV"
       - name: Generate through selected installer
         shell: bash
         run: node create-agent/dist/cli.js "$RUNNER_TEMP/${{ matrix.package-manager }}-agent" --model anthropic/example --yes

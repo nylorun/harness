@@ -46,6 +46,12 @@ function append(state: SessionSnapshot, entry: TranscriptEntry): SessionSnapshot
   });
 }
 
+export const commitInput = (
+  state: SessionSnapshot,
+  turnId: string,
+  event: InputEvent,
+): SessionSnapshot => append(state, { kind: "input", turnId, event: Object.freeze({ ...event }) });
+
 export const commitCandidate = (
   state: SessionSnapshot,
   turnId: string,

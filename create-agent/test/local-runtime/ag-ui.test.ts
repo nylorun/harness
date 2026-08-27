@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { WireSessionEvent } from "../src/index.js";
-import { agUiEvents } from "../src/runtime/ag-ui.js";
+import type { WireSessionEvent } from "../../src/local/runtime/index.js";
+import { agUiEvents } from "../../src/local/runtime/runtime/ag-ui.js";
 
 describe("AG-UI event projection", () => {
   it("ends an error stream with RUN_ERROR only", () => {

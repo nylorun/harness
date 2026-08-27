@@ -5,13 +5,14 @@ import { describe, expect, it } from "vitest";
 import { generateAgentProject } from "../src/generator.js";
 
 describe("generateAgentProject", () => {
-  it("writes the minimal project with the REST server as its only execution bootstrap", async () => {
+  it("writes the minimal project with a project-local development contract", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "create-nylo-"));
-    const result = await generateAgentProject({ directory: "reviewer", model: "anthropic/example", cwd, install: false, userAgent: "npm/11.0.0", agentsSpec: "file:../agents.tgz" });
+    const result = await generateAgentProject({ directory: "reviewer", model: "anthropic/example", cwd, install: false, userAgent: "npm/11.0.0", createAgentSpec: "file:../create-agent.tgz", studioSpec: "file:../studio.tgz" });
     expect(result.packageManager).toBe("npm");
     const manifest = JSON.parse(await readFile(join(cwd, "reviewer", "package.json"), "utf8"));
-    expect(manifest.dependencies).toEqual({ "@nylorun/runtime": "file:../agents.tgz", "@nylorun/harness": "^0.4.0-rc.1", "zod": "^4.1.12" });
-    expect(manifest.devDependencies["@nylorun/studio"]).toBe("^0.1.0-rc.1");
+    expect(manifest.dependencies).toEqual({ "@nylorun/harness": "0.4.0-rc.1", "zod": "^4.1.12" });
+    expect(manifest.devDependencies).toMatchObject({ "@nylorun/create-agent": "file:../create-agent.tgz", "@nylorun/studio": "file:../studio.tgz" });
+    await expect(readFile(join(cwd, "reviewer", "nylo.local.ts"), "utf8")).resolves.toContain('@nylorun/create-agent/local');
     expect(manifest.scripts).toHaveProperty("build");
     expect(manifest.scripts.dev).toBe("nylo dev --studio");
     expect(manifest.scripts.serve).toBe("npm run build && nylo serve");
@@ -70,7 +71,8 @@ describe("generateAgentProject", () => {
     const cwd = await mkdtemp(join(tmpdir(), "create-nylo-"));
     await generateAgentProject({ directory: "reviewer", model: "anthropic/example", cwd, install: false });
     const manifest = JSON.parse(await readFile(join(cwd, "reviewer", "package.json"), "utf8"));
-    expect(manifest.dependencies).toEqual({ "@nylorun/runtime": "^0.1.0-rc.1", "@nylorun/harness": "^0.4.0-rc.1", "zod": "^4.1.12" });
+    expect(manifest.dependencies).toEqual({ "@nylorun/harness": "0.4.0-rc.1", "zod": "^4.1.12" });
+    expect(manifest.devDependencies).toMatchObject({ "@nylorun/create-agent": "0.1.0-rc.1", "@nylorun/studio": "0.1.0-rc.1" });
     await expect(readFile(join(cwd, "reviewer", "agent", "tools", "example.ts"))).rejects.toThrow();
     await expect(readFile(join(cwd, "reviewer", "agent", "memory", "README.md"))).rejects.toThrow();
   });
@@ -89,6 +91,7 @@ describe("generateAgentProject", () => {
     await generateAgentProject({ directory: "reviewer", model: "local/gemma4:e2b-mlx", cwd, install: false });
     const definition = await readFile(join(cwd, "reviewer", "agent", "agent.ts"), "utf8");
     expect(definition).toContain('import { Agent } from "@nylorun/harness"');
+    expect(definition).toContain('import { Run } from "../nylo.local.js"');
     expect(definition).toContain("(model, directive) => Agent(model, directive)");
     const template = await readFile(join(cwd, "reviewer", ".env.example"), "utf8");
     expect(template).toContain("http://127.0.0.1:11434/v1");

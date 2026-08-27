@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeAgentFolderDefinition } from "../src/definition.js";
+import { mergeAgentFolderDefinition } from "../../src/local/agent/definition.js";
 
 describe("agent definition contract", () => {
   it("derives a definition from a folder without a bundler", () => {

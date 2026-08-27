@@ -19,7 +19,17 @@ try {
     !/^dist\/.+\.(?:js|d\.ts)$/.test(path)
   );
   if (unexpected.length) throw new Error(`Unexpected tarball files: ${unexpected.join(", ")}`);
-  for (const required of ["package.json", "README.md", "LICENSE", "dist/cli.js", "dist/index.js", "dist/index.d.ts"]) {
+  for (const required of [
+    "package.json",
+    "README.md",
+    "LICENSE",
+    "dist/cli.js",
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/local/index.js",
+    "dist/local/index.d.ts",
+    "dist/local/runtime/runtime/host.js"
+  ]) {
     if (!files.includes(required)) throw new Error(`Missing tarball file: ${required}`);
   }
   console.log(`Tarball allowlist passed (${files.length} files).`);

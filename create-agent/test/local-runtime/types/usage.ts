@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Run, tool, type RuntimeOptions } from "../../src/index.js";
+import { Run, tool, type RuntimeOptions } from "../../../src/local/runtime/index.js";
 import { Agent } from "@nylorun/harness";
 
 Run((model, directive) => Agent(model, directive), { name: "reviewer", model: "anthropic/example", secrets: ["GITHUB_TOKEN"] });

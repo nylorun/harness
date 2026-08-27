@@ -1,4 +1,4 @@
-# Harness → Runtime → Studio manual test plan
+# Harness → Create Agent → Studio manual test plan
 
 This plan validates the current integration with a real local Ollama model. Model mocks, replay
 adapters, and provider stubs are not valid evidence for this plan.
@@ -14,7 +14,7 @@ Every generated definition must use the deferred factory shape:
 
 ```ts
 import { Agent } from "@nylorun/harness";
-import { Run } from "@nylorun/runtime";
+import { Run } from "../nylo.local.js";
 
 export default Run((model, directive) => Agent(model, directive), {
   name: "sample",
@@ -31,7 +31,6 @@ ollama list
 curl -sS http://127.0.0.1:11434/api/tags
 
 npm run check --workspace @nylorun/harness
-npm run check --workspace @nylorun/runtime
 npm run check --workspace @nylorun/create-agent
 npm run check --workspace @nylorun/studio
 npm run check
@@ -45,9 +44,9 @@ check includes its loopback and Playwright tests.
 Generate a disposable project with `@nylorun/create-agent`, model
 `local/gemma4:e2b-mlx`, and the local package specs. Inspect these facts:
 
-- `agent/agent.ts` contains the two-import deferred Harness factory above.
+- `nylo.local.ts` exists and `agent/agent.ts` imports its local helper plus `@nylorun/harness`.
 - `.env.example` pins `http://127.0.0.1:11434/v1` and has no API key.
-- The Harness dependency is `^0.4.0-rc.1`.
+- `@nylorun/harness` is the only Nylo production dependency; Create Agent and Studio are exact development dependency pins.
 - `npm run check` and `npm run build` succeed after install.
 - `dist/nylo.manifest.json` identifies `@nylorun/harness` and its capability list.
 
@@ -131,11 +130,10 @@ Use this exact table for the final report.
 |---|---|---|
 | Environment / Ollama | Pass | Local `gemma4:e2b-mlx` served through Ollama's OpenAI-compatible endpoint. |
 | Harness package | Pass | Build, 30 tests, and tarball boundary passed. |
-| Runtime package | Pass | Build, types, 68 tests, generated contract, and tarball passed. |
-| Create-agent package | Pass | Build, 10 generator tests, and tarball passed. |
+| Create-agent package | Pass | Build, local-contract types/tests, generated-project check, and tarball passed. |
 | Studio package / browser test | Pass | Build, 8 unit tests, Playwright, static host, and tarball passed. |
-| Root workspace check | Pass | All five package gates passed in sequence. |
-| Generated developer syntax | Pass | All three workspace-local fixtures checked and built with the two-import deferred factory. |
+| Root workspace check | Pass | All three package gates passed in sequence. |
+| Generated developer syntax | Pass | The packed scaffold uses `nylo.local.ts` and has no Runtime or Agent package reference. |
 | Simple real-model final | Pass | Returned `ACK [single-real-ollama]` with real model metadata. |
 | Real-model tool loop | Pass | Ollama selected `lookup-code`; Harness sealed and ran it; final contained `resolved-BLUE-42`. |
 | Multi-turn Session | Pass | One Studio Session returned `studio-one` and `studio-two` in order. |

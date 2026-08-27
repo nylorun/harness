@@ -1,3 +1,4 @@
-import { Harness } from "@nylorun/harness";
-import { Run } from "@nylorun/runtime/agent";
-export default Run((options)=>new Harness(options),{name:"rebuilt",model:"anthropic/example"});
+import { Agent } from "@nylorun/harness";
+import { Run } from "../nylo.local.js";
+
+export default Run((model, directive) => Agent(model, directive), { name: "rebuilt", model: "anthropic/example" });

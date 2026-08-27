@@ -1,5 +1,5 @@
-import { startLocalRuntime, type LocalRuntimeHost } from "@nylorun/runtime/runtime-host";
-import { createFileRecorder, watchAgent, type BuildResult, type AgentBuildWatcher } from "@nylorun/runtime";
+import { startLocalRuntime, type LocalRuntimeHost } from "@nylorun/create-agent/local/runtime-host";
+import { createFileRecorder, watchAgent, type BuildResult, type AgentBuildWatcher } from "@nylorun/create-agent/local";
 import { resolve } from "node:path";
 import { loadLocalAgent, startStaticStudio, type StudioHost } from "./host.js";
 

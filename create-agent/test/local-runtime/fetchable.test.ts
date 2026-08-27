@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildAgent, createFileRecorder, Fetchable } from "../src/index.js";
-import type { BuiltAgent, ModelGatewayAdapter, ModelGatewayChunk, RuntimeOptions } from "../src/index.js";
+import { buildAgent, createFileRecorder, Fetchable } from "../../src/local/runtime/index.js";
+import type { BuiltAgent, ModelGatewayAdapter, ModelGatewayChunk, RuntimeOptions } from "../../src/local/runtime/index.js";
 
 let imported = 0;
 const done = (): ModelGatewayChunk => ({ type: "done", finishReason: "stop", usage: { tokensIn: 1, tokensOut: 1 } });
@@ -14,13 +14,13 @@ const post = (path: string, body?: unknown, headers: Record<string, string> = {}
 async function project(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "nylo-fetchable-"));
   await mkdir(join(root, "agent"), { recursive: true }); await mkdir(join(root, "node_modules", "@nylorun"), { recursive: true });
-  const packageRoot = new URL("../", import.meta.url).pathname;
-  await symlink(packageRoot, join(root, "node_modules", "@nylorun", "runtime"), "dir");
+  const packageRoot = new URL("../../", import.meta.url).pathname;
+  await symlink(packageRoot, join(root, "node_modules", "@nylorun", "create-agent"), "dir");
   await symlink(join(packageRoot, "..", "harness"), join(root, "node_modules", "@nylorun", "harness"), "dir");
   await symlink(join(packageRoot, "node_modules", "zod"), join(root, "node_modules", "zod"), "dir").catch(() => undefined);
   await writeFile(join(root, "package.json"), '{"type":"module"}\n'); await writeFile(join(root, "package-lock.json"), "{}\n");
-  await writeFile(join(root, "vite.config.ts"), 'import { nyloAgent } from "@nylorun/runtime"; export default {plugins:[nyloAgent()]};\n');
-  await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness"; import { Run } from "@nylorun/runtime/agent"; export default Run((model,directive)=>Agent(model,directive),{name:"sample",model:"anthropic/example"});\n');
+  await writeFile(join(root, "vite.config.ts"), 'import { nyloAgent } from "@nylorun/create-agent/local"; export default {plugins:[nyloAgent()]};\n');
+  await writeFile(join(root, "agent", "agent.ts"), 'import { Agent } from "@nylorun/harness"; import { Run } from "@nylorun/create-agent/local"; export default Run((model,directive)=>Agent(model,directive),{name:"sample",model:"anthropic/example"});\n');
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n"); expect((await buildAgent(root)).ok).toBe(true); return root;
 }
 async function built(root: string, host: RuntimeOptions): Promise<BuiltAgent> { const module = await import(`${pathToFileURL(join(root, "dist", "agent.mjs")).href}?t=${imported++}`) as { agent: BuiltAgent }; return module.agent.withHost(host); }

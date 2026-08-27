@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFailure, parseArgs, type Args, type ParseFailure } from "../src/cli/args.js";
+import { isFailure, parseArgs, type Args, type ParseFailure } from "../../src/local/runtime/cli/args.js";
 
 function ok(argv: string[]): Args {
   const parsed = parseArgs(argv, "/tmp/project");

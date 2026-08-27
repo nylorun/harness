@@ -51,9 +51,7 @@ describe("lifecycle", () => {
       .build();
     const { session, handle } = turn(result, "one");
     await handle.completed;
-    await expect(
-      session.input({ kind: "user-message", text: "two" }).completed,
-    ).resolves.toMatchObject({
+    await expect(session.input("two").completed).resolves.toMatchObject({
       status: "completed",
     });
     expect(session.state.status).toBe("stopped");
@@ -84,9 +82,7 @@ describe("lifecycle", () => {
         }),
       ],
     });
-    await expect(
-      session.input({ kind: "user-message", text: "two" }).completed,
-    ).resolves.toMatchObject({
+    await expect(session.input("two").completed).resolves.toMatchObject({
       status: "completed",
     });
     expect(session.state.status).toBe("idle");

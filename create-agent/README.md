@@ -1,14 +1,18 @@
 # `@nylorun/create-agent`
 
-Create a buildable Nylo agent project:
+Create a buildable Nylo Harness agent project:
 
 ```sh
-npm create @nylorun/agent@latest my-agent -- --model anthropic/example
+npm create @nylorun/create-agent@latest my-agent -- --model anthropic/example
 cd my-agent
 npm run build
 ```
 
-The generator writes an ordinary TypeScript and Vite project. It does not install a persistent Nylo CLI.
+The generator writes an ordinary TypeScript and Vite project. Its only Nylo production dependency is `@nylorun/harness`; Create Agent and Studio are pinned development dependencies.
+
+Every project also receives a root `nylo.local.ts`. This is the stable project-local contract used by Studio: it exposes the agent authoring helpers plus hooks to validate, build, watch, serve REST/SSE/AG-UI, persist local records, and cancel sessions. It supports environment-driven OpenAI-compatible providers and localhost models, and never writes provider credentials to diagnostics or records.
+
+Run local development with `npm run dev` or `npm run dev -- --studio`. The latter opens the loopback-only Studio host and pairs its exact origin through CORS. The generator does not install a global CLI.
 
 Direct package-runner forms are also supported:
 

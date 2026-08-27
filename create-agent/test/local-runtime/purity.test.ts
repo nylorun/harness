@@ -3,7 +3,7 @@ import { relative, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const ROOT = resolve(import.meta.dirname, "..");
+const ROOT = resolve(import.meta.dirname, "..", "..");
 
 async function sourceFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -24,7 +24,7 @@ const VALUE_IMPORT = /^\s*import\s+(?!type\b)[^;]*?from\s+["']vite["']/mu;
 describe("package boundary", () => {
   it("never loads Vite from the export barrel", async () => {
     const offenders: string[] = [];
-    for (const file of await sourceFiles(resolve(ROOT, "src"))) {
+    for (const file of await sourceFiles(resolve(ROOT, "src", "local", "runtime"))) {
       if (VALUE_IMPORT.test(await readFile(file, "utf8"))) offenders.push(relative(ROOT, file));
     }
 
@@ -43,7 +43,6 @@ describe("package boundary", () => {
       "@ag-ui/core",
       "@ag-ui/encoder",
       "@earendil-works/pi-ai",
-      "@nylorun/agent",
       "@nylorun/harness",
       "typebox",
       "yaml",

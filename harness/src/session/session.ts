@@ -3,6 +3,8 @@ import type {
   InputEvent,
   InputHandle,
   InputOptions,
+  InteractionReply,
+  MessageInput,
   Session,
   SessionEvent,
   SessionOptions,
@@ -34,6 +36,9 @@ export class LiveSession implements Session {
   input(event: AgentRunInput, options?: InputOptions): InputHandle {
     return this.scheduler.submit(normalizeInput(event), options);
   }
+  interrupt(event: MessageInput, options?: InputOptions): InputHandle {
+    return this.scheduler.submit(normalizeMessage("interrupt", event), options);
+  }
   stream(): AsyncIterable<SessionEvent> {
     return this.scheduler.events;
   }
@@ -45,6 +50,27 @@ export class LiveSession implements Session {
   }
 }
 
+function isInteractionReply(value: AgentRunInput): value is InteractionReply {
+  return (
+    typeof value === "object" &&
+    "kind" in value &&
+    (value.kind === "approve" || value.kind === "respond")
+  );
+}
+
+function normalizeMessage(kind: "user-message" | "interrupt", value: MessageInput): InputEvent {
+  if (typeof value === "string") return { kind, text: value };
+  return {
+    kind,
+    text: value.text,
+    ...(value.metadata === undefined
+      ? {}
+      : { metadata: copyJsonObject(value.metadata, "input metadata") }),
+  };
+}
+
 function normalizeInput(input: AgentRunInput): InputEvent {
-  return typeof input === "string" ? { kind: "user-message", text: input } : input;
+  if (typeof input === "string") return { kind: "user-message", text: input };
+  if (isInteractionReply(input)) return input;
+  return normalizeMessage("user-message", input);
 }

@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildAgent, watchAgent, __nyloBindAgent, __nyloUnboundAgent } from "../src/index.js";
-import type { BuiltAgent, RuntimeOptions } from "../src/index.js";
+import { buildAgent, watchAgent, __nyloBindAgent, __nyloUnboundAgent } from "../../src/local/runtime/index.js";
+import type { BuiltAgent, RuntimeOptions } from "../../src/local/runtime/index.js";
 import { pathToFileURL } from "node:url";
-import type { ModelGatewayAdapter, ModelGatewayChunk, WireSessionEvent } from "../src/index.js";
+import type { ModelGatewayAdapter, ModelGatewayChunk, WireSessionEvent } from "../../src/local/runtime/index.js";
 
 let imported = 0;
 
@@ -46,8 +46,8 @@ async function project(
   const root = await mkdtemp(join(tmpdir(), "nylo-runtime-"));
   await mkdir(join(root, "agent"), { recursive: true });
   await mkdir(join(root, "node_modules", "@nylorun"), { recursive: true });
-  const packageRoot = new URL("../", import.meta.url).pathname;
-  await symlink(packageRoot, join(root, "node_modules", "@nylorun", "runtime"), "dir");
+  const packageRoot = new URL("../../", import.meta.url).pathname;
+  await symlink(packageRoot, join(root, "node_modules", "@nylorun", "create-agent"), "dir");
   await symlink(join(packageRoot, "..", "harness"), join(root, "node_modules", "@nylorun", "harness"), "dir");
   // A real install hoists zod alongside the SDK, and a tool module imports it directly.
   await symlink(join(packageRoot, "..", "node_modules", "zod"), join(root, "node_modules", "zod"), "dir");
@@ -55,12 +55,12 @@ async function project(
   await writeFile(join(root, "package-lock.json"), "{}\n");
   await writeFile(
     join(root, "vite.config.ts"),
-    `import { nyloAgent } from "@nylorun/runtime";\nexport default {plugins:[nyloAgent()]};\n`
+    `import { nyloAgent } from "@nylorun/create-agent/local";\nexport default {plugins:[nyloAgent()]};\n`
   );
   await writeFile(
     join(root, "agent", "agent.ts"),
     agentSource ??
-      `import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((model,directive)=>Agent(model,directive),{name:"sample",model:"anthropic/example"});\n`
+      `import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/create-agent/local";\nexport default Run((model,directive)=>Agent(model,directive),{name:"sample",model:"anthropic/example"});\n`
   );
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n");
   for (const [path, contents] of Object.entries(files)) {
@@ -71,7 +71,7 @@ async function project(
 }
 
 const tool = (body: string, extra = "") =>
-  `import { tool } from "@nylorun/runtime/tool";\nimport { z } from "zod";\nexport default tool({description:"Echo a value.",input:z.object({value:z.string()}),${extra}run(input){${body}}});\n`;
+  `import { tool } from "@nylorun/create-agent/local";\nimport { z } from "zod";\nexport default tool({description:"Echo a value.",input:z.object({value:z.string()}),${extra}run(input){${body}}});\n`;
 
 describe("the built agent", () => {
   it("watches successful agent rebuilds after exposing the initial build", async () => {
@@ -83,7 +83,7 @@ describe("the built agent", () => {
       expect((await watcher.initial).ok).toBe(true);
       await new Promise<void>((done) => setTimeout(done, 100));
       const before = rebuilds.length;
-      await writeFile(join(root, "agent", "agent.ts"), `import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/runtime/agent";\nexport default Run((model,directive)=>Agent(model,directive),{name:"rebuilt",model:"anthropic/example"});\n`);
+      await writeFile(join(root, "agent", "agent.ts"), `import { Agent } from "@nylorun/harness";\nimport { Run } from "@nylorun/create-agent/local";\nexport default Run((model,directive)=>Agent(model,directive),{name:"rebuilt",model:"anthropic/example"});\n`);
       await expect.poll(() => rebuilds.length, { timeout: 10_000 }).toBeGreaterThan(before);
       expect(rebuilds.at(-1)).toBe(true);
     } finally {
@@ -289,7 +289,7 @@ describe("the built agent", () => {
   it("prefers OpenRouter over a direct provider credential, and reports which answered", async () => {
     const root = await project(
       {},
-      `import { AgentSpec } from "@nylorun/runtime/agent";\nexport default AgentSpec({name:"sample",model:"openai/gpt-4o"});\n`
+      `import { AgentSpec } from "@nylorun/create-agent/local";\nexport default AgentSpec({name:"sample",model:"openai/gpt-4o"});\n`
     );
     try {
       expect((await buildAgent(root)).ok).toBe(true);

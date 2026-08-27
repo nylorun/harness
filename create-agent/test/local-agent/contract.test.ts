@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_HARNESS, HARNESS_PROTOCOL, createAgentHarness, deriveAgentRequirements, isAgentHarness, isProtocolV1Description, parseAgentHarness, validateExecutionConformance, validateHarnessCompatibility, type AdapterDescription } from "../src/index.js";
+import { AGENT_HARNESS, HARNESS_PROTOCOL, createAgentHarness, deriveAgentRequirements, isAgentHarness, isProtocolV1Description, parseAgentHarness, validateExecutionConformance, validateHarnessCompatibility, type AdapterDescription } from "../../src/local/agent/index.js";
 
 const description: AdapterDescription = {
   protocol: HARNESS_PROTOCOL,

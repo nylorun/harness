@@ -2,21 +2,21 @@ import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import * as publicApi from "../src/index.js";
-import { Agent, AgentSpec, Run, buildAgent, validateAgent } from "../src/index.js";
+import * as publicApi from "../../src/local/runtime/index.js";
+import { Agent, AgentSpec, Run, buildAgent, validateAgent } from "../../src/local/runtime/index.js";
 import { Agent as HarnessAgent } from "@nylorun/harness";
 
 async function project(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "nylo-agents-"));
   await mkdir(join(root, "agent"), { recursive: true });
   await mkdir(join(root, "node_modules", "@nylorun"), { recursive: true });
-  await symlink(new URL("../", import.meta.url).pathname, join(root, "node_modules", "@nylorun", "runtime"), "dir");
-  await symlink(new URL("../../harness/", import.meta.url).pathname, join(root, "node_modules", "@nylorun", "harness"), "dir");
-  await symlink(new URL("../../node_modules/zod/", import.meta.url).pathname, join(root, "node_modules", "zod"), "dir");
+  await symlink(new URL("../../", import.meta.url).pathname, join(root, "node_modules", "@nylorun", "create-agent"), "dir");
+  await symlink(new URL("../../../harness/", import.meta.url).pathname, join(root, "node_modules", "@nylorun", "harness"), "dir");
+  await symlink(new URL("../../../node_modules/zod/", import.meta.url).pathname, join(root, "node_modules", "zod"), "dir");
   await writeFile(join(root, "package.json"), '{"name":"@fixtures/sample","type":"module"}\n');
   await writeFile(join(root, "package-lock.json"), "{}\n");
-  await writeFile(join(root, "vite.config.ts"), `import { nyloAgent } from "@nylorun/runtime";\nexport default {plugins:[nyloAgent()]};\n`);
-  await writeFile(join(root, "agent", "agent.ts"), `import { Run } from "@nylorun/runtime";\nimport { Agent } from "@nylorun/harness";\nexport default Run((model,directive)=>Agent(model,directive),{model:"anthropic/example"});\n`);
+  await writeFile(join(root, "vite.config.ts"), `import { nyloAgent } from "@nylorun/create-agent/local";\nexport default {plugins:[nyloAgent()]};\n`);
+  await writeFile(join(root, "agent", "agent.ts"), `import { Run } from "@nylorun/create-agent/local";\nimport { Agent } from "@nylorun/harness";\nexport default Run((model,directive)=>Agent(model,directive),{model:"anthropic/example"});\n`);
   await writeFile(join(root, "agent", "AGENT.md"), "You are helpful.\n");
   return root;
 }
@@ -114,8 +114,8 @@ describe("build", () => {
 
   it("derives tools, skills, and secret names without leaking values", async () => {
     const root = await project();
-    const sdk = JSON.stringify("@nylorun/runtime");
-    const zod = JSON.stringify(new URL("../../node_modules/zod/index.js", import.meta.url).pathname);
+    const sdk = JSON.stringify("@nylorun/create-agent/local");
+    const zod = JSON.stringify("zod");
     await mkdir(join(root, "agent", "tools"));
     await writeFile(join(root, "agent", "tools", "lookup.ts"), `import { z } from ${zod};\nimport { tool } from ${sdk};\nexport default tool({description:"Look up a record",input:z.object({id:z.string()}),run:({id})=>id});\n`);
     await mkdir(join(root, "agent", "skills", "review"), { recursive: true });
@@ -139,7 +139,7 @@ describe("build", () => {
     const absent = await buildAgent(root);
     expect(absent.diagnostics.map((item) => item.code), JSON.stringify(absent.diagnostics)).toContain("NYLO_BUILD_INSTRUCTIONS_ABSENT");
     await writeFile(join(root, "agent", "AGENT.md"), "File instructions.\n");
-    const sdk = JSON.stringify("@nylorun/runtime");
+    const sdk = JSON.stringify("@nylorun/create-agent/local");
     await writeFile(join(root, "agent", "agent.ts"), `import { AgentSpec } from ${sdk};\nexport default AgentSpec({name:"sample",model:"anthropic/example",instructions:"Inline"});\n`);
     expect((await buildAgent(root)).diagnostics.map((item) => item.code)).toContain("NYLO_BUILD_INSTRUCTIONS_AMBIGUOUS");
   });
@@ -148,7 +148,7 @@ describe("build", () => {
     const root = await project();
     await writeFile(join(root, "vite.config.ts"), "export default {};\n");
     expect((await buildAgent(root)).diagnostics.map((item) => item.code)).toContain("NYLO_BUILD_PLUGIN_MISSING");
-    const sdk = JSON.stringify("@nylorun/runtime");
+    const sdk = JSON.stringify("@nylorun/create-agent/local");
     await writeFile(join(root, "vite.config.ts"), `import { nyloAgent } from ${sdk};\nexport default {plugins:[nyloAgent(),{name:"override-nylo-output",configResolved(config){config.build.outDir="custom"}}]};\n`);
     const overridden = await buildAgent(root);
     expect(overridden.diagnostics.map((item) => item.code), JSON.stringify(overridden)).toContain("NYLO_BUILD_PLUGIN_OUTPUT_OVERRIDDEN");

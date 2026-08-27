@@ -2,6 +2,8 @@
 export const AGENT_HARNESS: unique symbol = Symbol.for("nylorun.agent.harness") as never;
 export const HARNESS_PROTOCOL = "nylorun.harness/v2" as const;
 
+export { mergeAgentFolderDefinition } from "./definition.js";
+
 export type SessionEventType =
   | "session.started" | "session.ended" | "session.episode.started" | "session.episode.ended"
   | "session.interrupted" | "session.resumed" | "session.run.started" | "session.run.ended" | "harness.message" | "model.call"
