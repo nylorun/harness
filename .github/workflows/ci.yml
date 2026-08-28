@@ -20,7 +20,7 @@ jobs:
         node: ["22.14.0", "24.x", "26.x"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
@@ -34,7 +34,7 @@ jobs:
   packed-integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           # Deliberately the floor rather than the Active LTS: the lowest supported line is where
@@ -70,7 +70,7 @@ jobs:
       matrix:
         package-manager: [npm, pnpm, yarn, bun]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 22.14.0
@@ -106,7 +106,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 22.14.0
