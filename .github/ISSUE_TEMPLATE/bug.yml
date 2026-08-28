@@ -1,0 +1,17 @@
+name: Bug report
+description: Report reproducible Harness behavior
+labels: [bug]
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the Harness version, Node.js version, operating system, package manager, and minimal steps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
