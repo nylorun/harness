@@ -39,28 +39,32 @@ export class ToolPlanRunner {
   private readonly resumes = new Map<string, ToolExecutionResume>();
   private phase: PlanPhase = "interaction";
   private index = 0;
-  private pending?: PendingBarrier;
+  private readonly pending: PendingBarrier[] = [];
+  private executeStarted = false;
+  private resumeExecute?: ExecutablePlanEntry;
 
   constructor(private readonly plan: InternalToolPlan) {
     this.results = new Map(plan.immediateResults.map((item) => [item.callId, item]));
   }
 
   get interactionId(): string | undefined {
-    return this.pending?.interaction.id;
+    return this.pending[0]?.interaction.id;
   }
   get interactionKind(): RequiredInteraction["kind"] | undefined {
-    return this.pending?.interaction.kind;
+    return this.pending[0]?.interaction.kind;
   }
   get interactionCallId(): string | undefined {
-    if (!this.pending) return undefined;
-    return this.plan.executable[this.pending.index]?.call.callId;
+    const pending = this.pending[0];
+    if (!pending) return undefined;
+    return this.plan.executable[pending.index]?.call.callId;
   }
   get interactionToolName(): string | undefined {
-    if (!this.pending) return undefined;
-    return this.plan.executable[this.pending.index]?.call.toolName;
+    const pending = this.pending[0];
+    if (!pending) return undefined;
+    return this.plan.executable[pending.index]?.call.toolName;
   }
   get interactionPhase(): PlanPhase | undefined {
-    return this.pending?.phase;
+    return this.pending[0]?.phase;
   }
 
   cancelledResults(reason: string): readonly ToolResult[] {
@@ -71,6 +75,7 @@ export class ToolPlanRunner {
     this.acceptResume(resume);
     while (true) {
       this.throwIfAborted(context.signal);
+      if (this.phase === "execute") return this.runExecute(context);
       if (this.index >= this.plan.executable.length) {
         if (this.phase === "interaction") {
           this.phase = "preflight";
@@ -107,25 +112,21 @@ export class ToolPlanRunner {
       if (this.phase === "preflight") {
         const progress = await this.preflight(entry, adapter, context);
         if (progress) return progress;
-      } else {
-        const progress = await this.execute(entry, adapter, context);
-        if (progress) return progress;
       }
       this.index += 1;
     }
   }
 
   private acceptResume(resume?: InputEvent): void {
-    if (!this.pending) return;
+    const pending = this.pending.shift();
+    if (!pending) return;
     if (!resume)
       throw new HarnessError(
         "interaction.missing-resume",
         "A pending tool plan requires a correlated interaction input",
       );
-    const pending = this.pending;
     const value = resumeValue(resume, pending);
     const entry = this.plan.executable[pending.index]!;
-    this.pending = undefined;
     if (value.kind === "approval" && value.approved === false) {
       this.results.set(
         entry.call.callId,
@@ -145,6 +146,24 @@ export class ToolPlanRunner {
       return;
     }
     this.resumes.set(`${pending.phase}:${entry.call.callId}`, value);
+    if (pending.phase === "execute") this.resumeExecute = entry;
+  }
+
+  private async runExecute(context: ToolPlanRunContext): Promise<ToolPlanProgress> {
+    if (this.resumeExecute) {
+      const entry = this.resumeExecute;
+      this.resumeExecute = undefined;
+      await this.executeBatch([entry], context);
+    } else if (!this.executeStarted) {
+      this.executeStarted = true;
+      await this.executeBatch(
+        this.plan.executable.filter((entry) => !this.results.has(entry.call.callId)),
+        context,
+      );
+    }
+    return this.pending.length
+      ? this.interactionRequired()
+      : { kind: "completed", results: this.orderedResults() };
   }
 
   private async preflight(
@@ -218,40 +237,55 @@ export class ToolPlanRunner {
     return undefined;
   }
 
+  private async executeBatch(
+    entries: readonly ExecutablePlanEntry[],
+    context: ToolPlanRunContext,
+  ): Promise<void> {
+    const settled = await Promise.allSettled(entries.map((entry) => this.execute(entry, context)));
+    if (context.signal.aborted) throw context.signal.reason;
+    for (const outcome of settled) {
+      if (outcome.status === "rejected") throw outcome.reason;
+      if (outcome.value) this.enqueueInteraction(outcome.value);
+    }
+  }
+
   private async execute(
     entry: ExecutablePlanEntry,
-    adapter: ReturnType<AdapterRegistry["require"]>,
     context: ToolPlanRunContext,
-  ): Promise<ToolPlanProgress | undefined> {
-    context.observe({
-      type: "adapter.started",
-      turnId: context.ids.turnId,
-      stepId: context.ids.stepId,
-      adapterId: adapter.id,
-      toolName: entry.call.toolName,
-      callId: entry.call.callId,
-      invocationId: entry.invocationId,
-      attributes: { args: copyJson(entry.call.args) },
-    });
+  ): Promise<PendingBarrier | undefined> {
+    const adapter = context.adapters.require(entry.call.executeWith);
     try {
-      const outcome = await adapter.execute(entry.call, {
-        invocationId: entry.invocationId,
-        signal: context.signal,
-        resume: this.takeResume("execute", entry.call.callId),
-      });
-      this.throwIfAborted(context.signal);
-      if (outcome.kind === "interaction-required")
-        return this.requireInteraction(interactionBarrier(this.phase, this.index, outcome));
-      this.results.set(entry.call.callId, resultFrom(entry, outcome));
-      context.observe({
-        type: "adapter.completed",
-        turnId: context.ids.turnId,
-        stepId: context.ids.stepId,
-        adapterId: adapter.id,
-        toolName: entry.call.toolName,
-        callId: entry.call.callId,
-        outcome: outcome.kind,
-        ...adapterCompleted(this.results.get(entry.call.callId)),
+      return await context.adapters.execute(adapter.id, context.signal, async () => {
+        context.observe({
+          type: "adapter.started",
+          turnId: context.ids.turnId,
+          stepId: context.ids.stepId,
+          adapterId: adapter.id,
+          toolName: entry.call.toolName,
+          callId: entry.call.callId,
+          invocationId: entry.invocationId,
+          attributes: { args: copyJson(entry.call.args) },
+        });
+        const outcome = await adapter.execute(entry.call, {
+          invocationId: entry.invocationId,
+          signal: context.signal,
+          resume: this.takeResume("execute", entry.call.callId),
+        });
+        this.throwIfAborted(context.signal);
+        if (outcome.kind === "interaction-required")
+          return interactionBarrier("execute", this.plan.executable.indexOf(entry), outcome);
+        this.results.set(entry.call.callId, resultFrom(entry, outcome));
+        context.observe({
+          type: "adapter.completed",
+          turnId: context.ids.turnId,
+          stepId: context.ids.stepId,
+          adapterId: adapter.id,
+          toolName: entry.call.toolName,
+          callId: entry.call.callId,
+          outcome: outcome.kind,
+          ...adapterCompleted(this.results.get(entry.call.callId)),
+        });
+        return undefined;
       });
     } catch (error) {
       this.throwIfAborted(context.signal);
@@ -286,7 +320,19 @@ export class ToolPlanRunner {
   }
 
   private requireInteraction(pending: PendingBarrier): ToolPlanProgress {
-    this.pending = pending;
+    this.enqueueInteraction(pending);
+    return this.interactionRequired();
+  }
+
+  private enqueueInteraction(pending: PendingBarrier): void {
+    const position = this.pending.findIndex((item) => item.index > pending.index);
+    if (position === -1) this.pending.push(pending);
+    else this.pending.splice(position, 0, pending);
+  }
+
+  private interactionRequired(): ToolPlanProgress {
+    const pending = this.pending[0];
+    if (!pending) throw new HarnessError("interaction.invalid", "Missing pending interaction");
     return { kind: "interaction-required", interaction: pending.interaction };
   }
 

@@ -14,7 +14,7 @@ describe("middleware", () => {
       .with(adapter())
       .use("one", async (request, next) => {
         order.push("enter-one");
-        request.prefix.instructions.set("extra", ["extra"]);
+        request.configuration.instructions.set("extra", ["extra"]);
         const response = await next();
         order.push("exit-one");
         return response;
@@ -54,18 +54,18 @@ describe("middleware", () => {
   it("tripwires conflicting model selection", async () => {
     const result = Agent(model(async () => "done"))
       .use("a", async (request, next) => {
-        request.prefix.model.select({ id: "haiku" });
+        request.configuration.model.select({ id: "haiku" });
         return next();
       })
       .use("b", async (request, next) => {
-        request.prefix.model.select({ id: "opus" });
+        request.configuration.model.select({ id: "opus" });
         return next();
       })
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "prefix.model-selection-conflict" } },
+      { type: "tripwire", tripwire: { code: "configuration.model-selection-conflict" } },
     ]);
   });
 
@@ -102,7 +102,7 @@ describe("middleware", () => {
         return response;
       })
       .use("restrictions", async (request, next) => {
-        request.prefix.tools.set("restrictions", [tool("echo")]);
+        request.configuration.tools.set("restrictions", [tool("echo")]);
         const response = await next();
         response.deny("deny", "policy");
         response.requireInteraction("deny", { kind: "approval", prompt: "approve" });
@@ -229,7 +229,7 @@ describe("middleware", () => {
       }),
     )
       .use("route", async (request, next) => {
-        request.prefix.model.select({
+        request.configuration.model.select({
           id: "test-model",
           controls: { temperature: 0.2, maxOutputTokens: 128 },
           config: { reasoning: "high" },
@@ -266,11 +266,11 @@ describe("middleware", () => {
       }),
     )
       .use("outer", async (request, next) => {
-        request.prefix.model.select({ id: undefined });
+        request.configuration.model.select({ id: undefined });
         return next();
       })
       .use("inner", async (request, next) => {
-        request.prefix.model.select({});
+        request.configuration.model.select({});
         return next();
       })
       .build();
@@ -281,22 +281,22 @@ describe("middleware", () => {
   it("tripwires a partial-merge select and invalid directives", async () => {
     const merge = Agent(model(async () => "done"))
       .use("id", async (request, next) => {
-        request.prefix.model.select({ id: "haiku" });
+        request.configuration.model.select({ id: "haiku" });
         return next();
       })
       .use("config", async (request, next) => {
-        request.prefix.model.select({ config: { reasoning: "high" } });
+        request.configuration.model.select({ config: { reasoning: "high" } });
         return next();
       })
       .build();
     expect((await turn(merge, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "prefix.model-selection-conflict" } },
+      { type: "tripwire", tripwire: { code: "configuration.model-selection-conflict" } },
     ]);
 
     const unknownKey = Agent(model(async () => "done"))
       .use("bad", async (request, next) => {
-        request.prefix.model.select({ id: "haiku", extra: true } as never);
+        request.configuration.model.select({ id: "haiku", extra: true } as never);
         return next();
       })
       .build();
@@ -307,7 +307,7 @@ describe("middleware", () => {
 
     const emptyId = Agent(model(async () => "done"))
       .use("empty", async (request, next) => {
-        request.prefix.model.select({ id: "" });
+        request.configuration.model.select({ id: "" });
         return next();
       })
       .build();
@@ -318,7 +318,7 @@ describe("middleware", () => {
 
     const unknownControl = Agent(model(async () => "done"))
       .use("bad-control", async (request, next) => {
-        request.prefix.model.select({ controls: { topP: 0.5 } } as never);
+        request.configuration.model.select({ controls: { topP: 0.5 } } as never);
         return next();
       })
       .build();
@@ -339,7 +339,7 @@ describe("middleware", () => {
       }),
     )
       .use("route", async (request, next) => {
-        request.prefix.model.select({ id: "test-model", config: source });
+        request.configuration.model.select({ id: "test-model", config: source });
         source.nested.n = 9;
         source.reasoning = "high";
         return next();
@@ -365,8 +365,8 @@ describe("middleware", () => {
         expect(() => {
           (request.transcript as { kind: string }[]).push({ kind: "forged" });
         }).toThrow();
-        if (request.stepNumber === 1) request.prefix.model.select({ id: "test-model" });
-        else request.prefix.model.clear({ reason: "Tool loop returned to default route." });
+        if (request.stepNumber === 1) request.configuration.model.select({ id: "test-model" });
+        else request.configuration.model.clear({ reason: "Tool loop returned to default route." });
         return next();
       })
       .use("test", offer(tool()))
@@ -385,7 +385,7 @@ describe("middleware", () => {
       .use("late", async (request, next) => {
         const response = await next();
         try {
-          request.prefix.model.select({ id: "test-model" });
+          request.configuration.model.select({ id: "test-model" });
         } catch (error) {
           lateError = error instanceof Error ? error.message : String(error);
         }
@@ -401,9 +401,9 @@ describe("middleware", () => {
     await session.stop();
   });
 
-  it("seeds the Session prefix from the Agent directive without a middleware owner", async () => {
+  it("seeds every step configuration from the Agent directive without a middleware owner", async () => {
     const seen: unknown[] = [];
-    const prefixes: unknown[] = [];
+    const configurations: unknown[] = [];
     const agent = Agent(
       model(async (_call, { request }) => {
         seen.push(request.model);
@@ -413,17 +413,39 @@ describe("middleware", () => {
     ).build();
     const session = agent.run();
     session.observe((event) => {
-      if (event.type === "model.prefix") prefixes.push(event.attributes);
+      if (event.type === "model.requested") configurations.push(event.attributes.configuration);
     });
     await session.input("go").completed;
     expect(seen).toEqual([{ id: "opus", controls: { temperature: 0.2 } }]);
-    expect(prefixes).toMatchObject([
+    expect(configurations).toMatchObject([
       {
-        status: "initial",
-        snapshot: { model: { id: "opus", controls: { temperature: 0.2 } }, contributors: [] },
+        model: { id: "opus", controls: { temperature: 0.2 } },
+        contributors: [],
       },
     ]);
     await session.stop();
+  });
+
+  it("exposes stable session and unique turn/step identities on the middleware lease", async () => {
+    const seen: Array<{ sessionId: string; turnId: string; stepId: string }> = [];
+    const session = Agent(model(async () => "done"))
+      .use("identity", async (request, next) => {
+        seen.push({
+          sessionId: request.sessionId,
+          turnId: request.turnId,
+          stepId: request.stepId,
+        });
+        return next();
+      })
+      .build()
+      .run({ id: "session-identity" });
+    await session.input("first").completed;
+    await session.input("second").completed;
+
+    expect(seen).toHaveLength(2);
+    expect(seen.map((item) => item.sessionId)).toEqual(["session-identity", "session-identity"]);
+    expect(seen[0]?.turnId).not.toBe(seen[1]?.turnId);
+    expect(seen[0]?.stepId).not.toBe(seen[1]?.stepId);
   });
 
   it("lets middleware replace or clear a seeded directive and rejects a conflicting select", async () => {
@@ -436,8 +458,8 @@ describe("middleware", () => {
       { id: "opus" },
     )
       .use("route", async (request, next) => {
-        request.prefix.model.select({ id: "opus" });
-        request.prefix.model.replace({ id: "haiku" });
+        request.configuration.model.select({ id: "opus" });
+        request.configuration.model.replace({ id: "haiku" });
         return next();
       })
       .build();
@@ -456,7 +478,7 @@ describe("middleware", () => {
     )
       .with(adapter())
       .use("route", async (request, next) => {
-        if (request.stepNumber === 2) request.prefix.model.clear();
+        if (request.stepNumber === 2) request.configuration.model.clear();
         return next();
       })
       .use("tools", offer(tool()))
@@ -469,13 +491,13 @@ describe("middleware", () => {
       { id: "opus" },
     )
       .use("route", async (request, next) => {
-        request.prefix.model.select({ id: "haiku" });
+        request.configuration.model.select({ id: "haiku" });
         return next();
       })
       .build();
     expect((await turn(conflict, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "prefix.model-selection-conflict" } },
+      { type: "tripwire", tripwire: { code: "configuration.model-selection-conflict" } },
     ]);
   });
 });

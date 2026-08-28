@@ -66,6 +66,30 @@ describe("build", () => {
     expect(error.diagnostics.some((item) => item.code === "adapter.duplicate-id")).toBe(true);
   });
 
+  it("records per-adapter concurrency limits and rejects invalid values", () => {
+    const agent = Agent(model(async () => "done"))
+      .with(adapter(), { maxConcurrentCalls: 2 })
+      .build();
+    expect(agent.manifest.adapters).toEqual([{ id: "local", maxConcurrentCalls: 2 }]);
+
+    for (const maxConcurrentCalls of [
+      0,
+      -1,
+      1.5,
+      Number.POSITIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      const error = expectBuildError(() =>
+        Agent(model(async () => "done"))
+          .with(adapter(), { maxConcurrentCalls })
+          .build(),
+      );
+      expect(
+        error.diagnostics.some((item) => item.code === "adapter.invalid-max-concurrent-calls"),
+      ).toBe(true);
+    }
+  });
+
   it("throws AgentBuildError when the model invoke callback is missing", () => {
     const error = expectBuildError(() => Agent({} as never).build());
     expect(error.diagnostics.some((item) => item.code === "harness.invalid-model")).toBe(true);

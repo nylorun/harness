@@ -24,7 +24,7 @@ describe("observation", () => {
     session.observe((event) => healthy.push(event.type));
     const completion = await session.input("go").completed;
     expect(completion.status).toBe("completed");
-    expect(types.indexOf("model.started")).toBeLessThan(types.indexOf("model.completed"));
+    expect(types.indexOf("model.requested")).toBeLessThan(types.indexOf("model.completed"));
     expect(healthy).toEqual(types);
   });
 
@@ -80,13 +80,13 @@ describe("observation", () => {
     const selected: unknown[] = [];
     const routed = Agent(model(async () => "done"))
       .use("route", async (request, next) => {
-        request.prefix.model.select({ id: "test-model" });
+        request.configuration.model.select({ id: "test-model" });
         return next();
       })
       .build();
     const routedSession = routed.run();
     routedSession.observe((event) => {
-      if (event.type === "model.started" || event.type === "model.completed")
+      if (event.type === "model.requested" || event.type === "model.completed")
         selected.push(event.requestedModelId);
     });
     await routedSession.input("go").completed;
@@ -97,7 +97,7 @@ describe("observation", () => {
     const plain = Agent(model(async () => "done")).build();
     const plainSession = plain.run();
     plainSession.observe((event) => {
-      if (event.type === "model.started" || event.type === "model.completed")
+      if (event.type === "model.requested" || event.type === "model.completed")
         omitted.push(event.requestedModelId);
     });
     await plainSession.input("go").completed;
@@ -105,7 +105,7 @@ describe("observation", () => {
     await plainSession.stop();
   });
 
-  it("projects the model.started prefix to plain JSON", async () => {
+  it("projects the model.requested prefix to plain JSON", async () => {
     const observed: ObserveEvent[] = [];
     const session = Agent(model(async () => "done"))
       .with(adapter())
@@ -116,8 +116,8 @@ describe("observation", () => {
 
     await session.input("go").completed;
 
-    const started = observed.find((event) => event.type === "model.started");
-    if (!started || started.type !== "model.started") throw new Error("missing model.started");
+    const started = observed.find((event) => event.type === "model.requested");
+    if (!started || started.type !== "model.requested") throw new Error("missing model.requested");
     expectPlainJson(started.attributes);
   });
 
@@ -141,7 +141,7 @@ describe("observation", () => {
     });
     session.observe((event) => {
       observed.push(event);
-      if (event.type === "model.started") markStarted();
+      if (event.type === "model.requested") markStarted();
     });
     const first = session.input("first");
     await started;
@@ -178,7 +178,7 @@ describe("observation", () => {
     });
     session.observe((event) => {
       observed.push(event);
-      if (event.type === "model.started") markStarted();
+      if (event.type === "model.requested") markStarted();
     });
     const controller = new AbortController();
     const handle = session.input("go", { signal: controller.signal });
@@ -227,7 +227,7 @@ describe("observation", () => {
     });
     expect(types.includes("tripwire")).toBe(false);
     expect(types.indexOf("turn.completed")).toBeGreaterThan(completed);
-    expect(types.indexOf("model.started", completed)).toBeGreaterThan(completed);
+    expect(types.indexOf("model.requested", completed)).toBeGreaterThan(completed);
   });
 
   it("stamps the active inputId on turn-scoped observe events across a queued second input", async () => {
@@ -252,7 +252,7 @@ describe("observation", () => {
     });
     session.observe((event) => {
       observed.push(event);
-      if (event.type === "model.started") markStarted();
+      if (event.type === "model.requested") markStarted();
     });
     const first = session.input("first");
     await started;
@@ -338,8 +338,8 @@ describe("observation", () => {
         adapter(async (call) => ({ kind: "completed" as const, output: { echoed: call.args } })),
       )
       .use("echo", async (request, next) => {
-        request.prefix.tools.set("capture", [tool()]);
-        request.prefix.instructions.set("capture", ["Echo the user text."]);
+        request.configuration.tools.set("capture", [tool()]);
+        request.configuration.instructions.set("capture", ["Echo the user text."]);
         return next();
       })
       .build()
@@ -377,14 +377,12 @@ describe("observation", () => {
     ]);
     expect(observed.indexOf(firstStep)).toBeLessThan(observed.indexOf(entered!));
 
-    const started = observed.find((event) => event.type === "model.started");
-    if (!started || started.type !== "model.started") throw new Error("missing model.started");
-    expect(started.attributes.instructions).toContain("Echo the user text.");
-    expect(started.attributes.tools.map((item) => item.name)).toEqual(["echo"]);
-    expect(started.attributes.arrivals[0]).toMatchObject({
-      kind: "user-message",
-      text: "Echo hello",
-    });
+    const started = observed.find((event) => event.type === "model.requested");
+    if (!started || started.type !== "model.requested") throw new Error("missing model.requested");
+    expect(started.attributes.configuration.instructions.map((item) => item.text)).toContain(
+      "Echo the user text.",
+    );
+    expect(started.attributes.call.tools.map((item) => item.name)).toEqual(["echo"]);
 
     const completed = observed.find((event) => event.type === "model.completed");
     if (!completed || completed.type !== "model.completed")
@@ -413,7 +411,7 @@ describe("observation", () => {
     expect(turn.attributes.output).toBe("Completed with echoed");
   });
 
-  it("emits step.started before an early middleware tripwire and skips model.started", async () => {
+  it("emits step.started before an early middleware tripwire and skips model.requested", async () => {
     const session = Agent(model(async () => "done"))
       .use("block", async (request) => request.tripwire({ code: "policy.block", message: "nope" }))
       .build()
@@ -430,7 +428,7 @@ describe("observation", () => {
         arrivals: [expect.objectContaining({ kind: "user-message", text: "go" })],
       },
     });
-    expect(observed.some((event) => event.type === "model.started")).toBe(false);
+    expect(observed.some((event) => event.type === "model.requested")).toBe(false);
     expect(observed.some((event) => event.type === "tripwire")).toBe(true);
   });
 
@@ -454,12 +452,16 @@ describe("observation", () => {
     });
   });
 
-  it("shares a frozen point-in-time transcript on step.started and model.started", async () => {
+  it("publishes the exact immutable ModelCall supplied to the adapter", async () => {
     let step = 0;
+    const calls: unknown[] = [];
     const session = Agent(
-      model(async () =>
-        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: { text: "hi" } }) : "done",
-      ),
+      model(async (call) => {
+        calls.push(call);
+        return ++step === 1
+          ? toolCalls({ id: "call", name: "echo", args: { text: "hi" } })
+          : "done";
+      }),
     )
       .with(adapter())
       .use("echo", offer(tool()))
@@ -470,20 +472,22 @@ describe("observation", () => {
     expect((await session.input("go").completed).status).toBe("completed");
 
     const firstStep = observed.find((event) => event.type === "step.started");
-    const firstStarted = observed.find((event) => event.type === "model.started");
+    const firstStarted = observed.find((event) => event.type === "model.requested");
     if (!firstStep || firstStep.type !== "step.started") throw new Error("missing step.started");
-    if (!firstStarted || firstStarted.type !== "model.started")
-      throw new Error("missing model.started");
+    if (!firstStarted || firstStarted.type !== "model.requested")
+      throw new Error("missing model.requested");
 
     expect(Object.isFrozen(firstStep.attributes.transcript)).toBe(true);
-    expect(Object.isFrozen(firstStarted.attributes.transcript)).toBe(true);
+    expect(firstStarted.attributes.call).toBe(calls[0]);
+    expect(Object.isFrozen(firstStarted.attributes.call)).toBe(true);
     expectPlainJson(firstStep.attributes.transcript);
-    expectPlainJson(firstStarted.attributes.transcript);
+    expectPlainJson(firstStarted.attributes.call);
 
     const firstLength = firstStep.attributes.transcript.length;
-    expect(firstStarted.attributes.transcript).toHaveLength(firstLength);
     expect(session.state.transcript.length).toBeGreaterThan(firstLength);
     expect(firstStep.attributes.transcript).toHaveLength(firstLength);
-    expect(firstStarted.attributes.transcript).toHaveLength(firstLength);
+    expect(() => {
+      (firstStarted.attributes.call.prompt as { kind: string }[]).push({ kind: "forged" });
+    }).toThrow();
   });
 });

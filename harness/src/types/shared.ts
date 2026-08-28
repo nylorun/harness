@@ -2,7 +2,8 @@ import type {
   ContextSnapshot,
   ModelCandidate,
   ModelDirective,
-  PromptPrefixSnapshot,
+  ModelCall,
+  ModelConfigurationSnapshot,
 } from "./model.js";
 import type { InputEvent, TranscriptEntry } from "./session.js";
 import type { RequiredInteraction, ToolResult } from "./tool.js";
@@ -37,8 +38,11 @@ export interface ObserveToolSnapshot {
   readonly parameters: { readonly jsonSchema: JsonObject };
 }
 
-/** JSON-only prompt-prefix view suitable for an observation stream. */
-export interface ObservePromptPrefixSnapshot extends Omit<PromptPrefixSnapshot, "tools"> {
+/** JSON-only model-configuration view suitable for an observation stream. */
+export interface ObserveModelConfigurationSnapshot extends Omit<
+  ModelConfigurationSnapshot,
+  "tools"
+> {
   readonly tools: readonly ObserveToolSnapshot[];
 }
 
@@ -52,15 +56,13 @@ export interface ObserveSealedCall {
   readonly interaction?: RequiredInteraction;
 }
 
-export interface ObserveModelRequest {
-  readonly model?: ModelDirective;
-  readonly prefix: ObservePromptPrefixSnapshot;
-  readonly instructions: readonly string[];
+export interface ObserveModelRequested {
+  /** The exact immutable logical input supplied to the ModelAdapter. */
+  readonly call: ModelCall;
+  /** Canonical configuration facts and attribution; hashes have no policy semantics. */
+  readonly configuration: ObserveModelConfigurationSnapshot;
+  /** Current-step runtime context and attribution. */
   readonly context: ContextSnapshot;
-  readonly arrivals: readonly InputEvent[];
-  readonly toolResults: readonly ToolResult[];
-  readonly transcript: readonly TranscriptEntry[];
-  readonly tools: readonly ObserveToolSnapshot[];
 }
 
 export type ObserveEvent =
@@ -70,23 +72,12 @@ export type ObserveEvent =
   | { readonly type: "input.rejected"; readonly inputId: string; readonly reason: string }
   | { readonly type: "input.cancelled"; readonly inputId: string; readonly reason: string }
   | {
-      readonly type: "model.prefix";
-      readonly turnId: string;
-      readonly stepId: string;
-      readonly inputId?: string;
-      readonly attributes: {
-        readonly status: "initial" | "unchanged" | "declared-change" | "drift";
-        readonly snapshot: PromptPrefixSnapshot;
-        readonly previous?: PromptPrefixSnapshot;
-      };
-    }
-  | {
-      readonly type: "model.started";
+      readonly type: "model.requested";
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;
       readonly requestedModelId?: string;
-      readonly attributes: ObserveModelRequest;
+      readonly attributes: ObserveModelRequested;
     }
   | {
       readonly type: "model.completed";

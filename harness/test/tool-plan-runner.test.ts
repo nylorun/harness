@@ -31,10 +31,47 @@ function plan(
   };
 }
 
-function context(adapters: Parameters<typeof createAdapterRegistry>[0]) {
+function multiPlan(
+  calls: readonly { readonly id: string; readonly name?: string; readonly executeWith?: string }[],
+): InternalToolPlan {
+  return {
+    candidate: {
+      output: calls.map((call) => ({
+        type: "tool-call" as const,
+        id: call.id,
+        name: call.name ?? "echo",
+        args: {},
+      })),
+    },
+    order: calls.map((call) => ({ callId: call.id, toolName: call.name ?? "echo" })),
+    executable: calls.map((call) => ({
+      call: {
+        callId: call.id,
+        toolName: call.name ?? "echo",
+        args: {},
+        executeWith: call.executeWith ?? "local",
+      },
+      invocationId: `invoke-${call.id}`,
+    })),
+    immediateResults: [],
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
+function context(
+  adapters: Parameters<typeof createAdapterRegistry>[0],
+  signal = new AbortController().signal,
+) {
   return {
     adapters: createAdapterRegistry(adapters),
-    signal: new AbortController().signal,
+    signal,
     observe: vi.fn(),
     ids: { sessionId: "session", turnId: "turn", stepId: "step" },
   };
@@ -126,5 +163,166 @@ describe("ToolPlanRunner", () => {
         attributes: expect.objectContaining({ kind: "failed", message: "boom" }),
       }),
     );
+  });
+
+  it("starts an unconfigured adapter's sibling calls in parallel and preserves result order", async () => {
+    const started: string[] = [];
+    const pending = new Map(
+      ["first", "second", "third"].map((id) => [
+        id,
+        deferred<{ kind: "completed"; output: string }>(),
+      ]),
+    );
+    const execute = vi.fn((call: { callId: string }) => {
+      started.push(call.callId);
+      return pending.get(call.callId)!.promise;
+    });
+    const runner = new ToolPlanRunner(
+      multiPlan(["first", "second", "third"].map((id) => ({ id }))),
+    );
+    const run = context([{ id: "local", execute }]);
+
+    const progress = runner.run(run);
+    await vi.waitFor(() => expect(started).toEqual(["first", "second", "third"]));
+    pending.get("third")!.resolve({ kind: "completed", output: "third" });
+    pending.get("second")!.resolve({ kind: "completed", output: "second" });
+    pending.get("first")!.resolve({ kind: "completed", output: "first" });
+
+    await expect(progress).resolves.toEqual({
+      kind: "completed",
+      results: [
+        expect.objectContaining({ callId: "first", output: "first" }),
+        expect.objectContaining({ callId: "second", output: "second" }),
+        expect.objectContaining({ callId: "third", output: "third" }),
+      ],
+    });
+  });
+
+  it("applies an adapter limit as a FIFO dispatch cap", async () => {
+    const started: string[] = [];
+    const pending = new Map(
+      ["first", "second", "third"].map((id) => [
+        id,
+        deferred<{ kind: "completed"; output: string }>(),
+      ]),
+    );
+    const execute = vi.fn((call: { callId: string }) => {
+      started.push(call.callId);
+      return pending.get(call.callId)!.promise;
+    });
+    const runner = new ToolPlanRunner(
+      multiPlan(["first", "second", "third"].map((id) => ({ id }))),
+    );
+    const run = context([
+      { adapter: { id: "local", execute }, options: { maxConcurrentCalls: 2 } },
+    ]);
+
+    const progress = runner.run(run);
+    await vi.waitFor(() => expect(started).toEqual(["first", "second"]));
+    pending.get("second")!.resolve({ kind: "completed", output: "second" });
+    await vi.waitFor(() => expect(started).toEqual(["first", "second", "third"]));
+    pending.get("first")!.resolve({ kind: "completed", output: "first" });
+    pending.get("third")!.resolve({ kind: "completed", output: "third" });
+    await expect(progress).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it("admits limited adapters independently", async () => {
+    const started: string[] = [];
+    const first = deferred<{ kind: "completed"; output: string }>();
+    const second = deferred<{ kind: "completed"; output: string }>();
+    const runner = new ToolPlanRunner(
+      multiPlan([
+        { id: "local-call", executeWith: "local" },
+        { id: "remote-call", executeWith: "remote" },
+      ]),
+    );
+    const run = context([
+      {
+        adapter: {
+          id: "local",
+          execute: async () => {
+            started.push("local");
+            return first.promise;
+          },
+        },
+        options: { maxConcurrentCalls: 1 },
+      },
+      {
+        adapter: {
+          id: "remote",
+          execute: async () => {
+            started.push("remote");
+            return second.promise;
+          },
+        },
+        options: { maxConcurrentCalls: 1 },
+      },
+    ]);
+
+    const progress = runner.run(run);
+    await vi.waitFor(() => expect(started).toEqual(["local", "remote"]));
+    first.resolve({ kind: "completed", output: "local" });
+    second.resolve({ kind: "completed", output: "remote" });
+    await expect(progress).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it("releases a running adapter permit after cancellation", async () => {
+    const controller = new AbortController();
+    const execute = vi.fn(
+      async (_call: unknown, value: { signal: AbortSignal }) =>
+        new Promise<{ kind: "completed"; output: string }>((resolve) => {
+          value.signal.addEventListener(
+            "abort",
+            () => resolve({ kind: "completed", output: "ignored" }),
+            { once: true },
+          );
+        }),
+    );
+    const runner = new ToolPlanRunner(multiPlan([{ id: "call" }]));
+    const run = context(
+      [{ adapter: { id: "local", execute }, options: { maxConcurrentCalls: 1 } }],
+      controller.signal,
+    );
+
+    const progress = runner.run(run);
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    controller.abort(new Error("stop"));
+    await expect(progress).rejects.toThrow("stop");
+    await expect(
+      run.adapters.execute("local", new AbortController().signal, async () => "later"),
+    ).resolves.toBe("later");
+  });
+
+  it("queues concurrent execution interactions in model order and resumes each call", async () => {
+    const execute = vi.fn(async (call: { callId: string }, value: { resume?: unknown }) => {
+      if (value.resume) return { kind: "completed" as const, output: `resumed-${call.callId}` };
+      return {
+        kind: "interaction-required" as const,
+        interaction: { id: `ask-${call.callId}`, kind: "response" as const, prompt: call.callId },
+        token: call.callId,
+      };
+    });
+    const runner = new ToolPlanRunner(multiPlan([{ id: "first" }, { id: "second" }]));
+    const run = context([{ id: "local", execute }]);
+
+    await expect(runner.run(run)).resolves.toMatchObject({
+      kind: "interaction-required",
+      interaction: { id: "ask-first" },
+    });
+    await expect(
+      runner.run(run, { kind: "respond", interactionId: "ask-first", value: "one" }),
+    ).resolves.toMatchObject({
+      kind: "interaction-required",
+      interaction: { id: "ask-second" },
+    });
+    await expect(
+      runner.run(run, { kind: "respond", interactionId: "ask-second", value: "two" }),
+    ).resolves.toEqual({
+      kind: "completed",
+      results: [
+        expect.objectContaining({ callId: "first", output: "resumed-first" }),
+        expect.objectContaining({ callId: "second", output: "resumed-second" }),
+      ],
+    });
   });
 });

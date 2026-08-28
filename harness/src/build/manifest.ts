@@ -10,8 +10,11 @@ export function createManifest(input: {
   adapters: AdapterRegistry;
 }): AgentManifest {
   const middleware = input.middleware.map(({ id }) => ({ id }));
-  const adapters = [...input.adapters.entries].map(([, adapter]) => ({
-    id: adapter.id,
+  const adapters = [...input.adapters.entries].map(([, entry]) => ({
+    id: entry.adapter.id,
+    ...(entry.options.maxConcurrentCalls === undefined
+      ? {}
+      : { maxConcurrentCalls: entry.options.maxConcurrentCalls }),
   }));
   return deepFreeze({
     middleware,

@@ -5,7 +5,7 @@ import type { BuildDiagnostic } from "./shared.js";
 export interface AgentManifest {
   readonly middleware: readonly { readonly id: string }[];
   readonly model?: ModelDirective;
-  readonly adapters: readonly { readonly id: string }[];
+  readonly adapters: readonly { readonly id: string; readonly maxConcurrentCalls?: number }[];
 }
 
 export type BuildResult<Agent> =

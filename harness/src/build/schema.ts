@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { output } from "zod";
 import { HarnessError } from "../errors.js";
-import type { ToolObjectSchema } from "../types/tool.js";
+import type { ToolDefinition, ToolObjectSchema } from "../types/tool.js";
 import { copyJsonObject } from "../utils/immutable.js";
 
 export type SchemaValidation<T> =
@@ -11,6 +11,23 @@ export type SchemaValidation<T> =
 export interface NormalizedToolSchema<T> {
   readonly jsonSchema: import("../types/shared.js").JsonObject;
   validate(value: unknown): SchemaValidation<T>;
+}
+
+const preparedSchemas = new WeakMap<object, NormalizedToolSchema<unknown>>();
+
+/** Eagerly prepares a definition authored through Harness's tool() helper. */
+export function prepareTool<T extends ToolDefinition>(definition: T): T {
+  normalizedSchemaFor(definition);
+  return definition;
+}
+
+/** Returns a cached normalized schema, preparing raw definitions on first bind. */
+export function normalizedSchemaFor(definition: ToolDefinition): NormalizedToolSchema<unknown> {
+  const cached = preparedSchemas.get(definition);
+  if (cached) return cached;
+  const normalized = normalizeSchema(definition.parameters) as NormalizedToolSchema<unknown>;
+  preparedSchemas.set(definition, normalized);
+  return normalized;
 }
 
 /** Converts a synchronous Zod object schema into Harness's immutable runtime representation. */

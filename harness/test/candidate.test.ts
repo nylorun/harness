@@ -158,7 +158,7 @@ describe("model candidate blocks", () => {
     )
       .with(adapter())
       .use("review", async (request, next) => {
-        request.prefix.tools.set("review", [tool()]);
+        request.configuration.tools.set("review", [tool()]);
         const response = await next();
         response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 1 } }));
         return response;
@@ -187,7 +187,7 @@ describe("model candidate blocks", () => {
     )
       .with(adapter())
       .use("typed", async (request, next) => {
-        request.prefix.tools.set("typed", [tool()]);
+        request.configuration.tools.set("typed", [tool()]);
         return next();
       })
       .build();

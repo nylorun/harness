@@ -1,9 +1,8 @@
 import type { StepInput } from "../types/middleware.js";
-import type { ModelCandidate, ModelRequest, PromptPrefixSnapshot } from "../types/model.js";
+import type { ModelCandidate, ModelConfigurationSnapshot } from "../types/model.js";
 import type {
   ObserveEvent,
-  ObserveModelRequest,
-  ObservePromptPrefixSnapshot,
+  ObserveModelConfigurationSnapshot,
   ObserveToolSnapshot,
 } from "../types/shared.js";
 import type { InputEvent, SessionSnapshot } from "../types/session.js";
@@ -14,12 +13,12 @@ import { HarnessError, isHarnessError } from "../errors.js";
 import { copyJson } from "../utils/immutable.js";
 import type { ObserveEmit } from "../utils/observe.js";
 import { runMiddleware } from "./compose.js";
-import { ContextState } from "./context-state.js";
+import { ContextDraft } from "./context-draft.js";
 import { StepContext } from "./step-context.js";
 import { projectModelCall } from "./project.js";
 import { resolveModelRequest } from "./resolve.js";
 import { sealStep, type SealedStepOutput } from "./seal.js";
-import { assertCanonicalPrefix, type PromptPrefixState } from "./prompt-prefix.js";
+import { ModelConfigurationDraft } from "./model-configuration.js";
 
 export interface StepRunResult {
   readonly stepId: string;
@@ -43,8 +42,6 @@ export async function runStep(input: {
     readonly userId?: string;
     readonly context?: import("../types/shared.js").JsonObject;
   }>;
-  prefixState: PromptPrefixState;
-  contextState: ContextState;
 }): Promise<StepRunResult> {
   const stepInput = Object.freeze({
     sessionId: input.sessionId,
@@ -57,9 +54,9 @@ export async function runStep(input: {
     toolResults: Object.freeze([...input.toolResults]),
     transcript: Object.freeze([...input.state.transcript]),
   });
-  const prefixTransaction = input.prefixState.begin(input.agent.adapters);
-  const contextTransaction = input.contextState.begin();
-  const context = new StepContext(stepInput, input.observe, prefixTransaction, contextTransaction);
+  const configuration = new ModelConfigurationDraft(input.agent.adapters, input.agent.directive);
+  const runtimeContext = new ContextDraft(input.session.context);
+  const context = new StepContext(stepInput, input.observe, configuration, runtimeContext);
   input.observe(() => ({
     type: "step.started",
     turnId: input.turnId,
@@ -73,17 +70,13 @@ export async function runStep(input: {
     context,
     async () => {
       if (context.currentTripwire) return context.tripwire(context.currentTripwire);
-      let ledger;
       try {
-        const prefix = prefixTransaction.snapshot();
-        ledger = input.prefixState.preview(prefixTransaction, prefix);
-        const contextSnapshot = contextTransaction.snapshot();
-        context.commitPrefix(ledger.snapshot);
-        context.commitContext(contextSnapshot);
+        context.sealConfiguration(configuration.snapshot());
+        context.sealContext(runtimeContext.snapshot());
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return context.tripwire({
-          code: isHarnessError(error) ? error.code : "prefix.invalid",
+          code: isHarnessError(error) ? error.code : "configuration.invalid",
           message,
         });
       }
@@ -92,54 +85,22 @@ export async function runStep(input: {
         arrivals: input.arrivals,
         toolResults: input.toolResults,
       });
-      try {
-        assertCanonicalPrefix(request.prefix);
-        if (
-          request.model !== request.prefix.model ||
-          request.instructions.join("\u0000") !==
-            request.prefix.instructions.map((item) => item.text).join("\u0000") ||
-          request.tools.length !== request.prefix.tools.length ||
-          request.tools.some((tool, index) => tool !== request.prefix.tools[index])
-        )
-          throw new HarnessError(
-            "request.prefix-drift",
-            "Resolved ModelRequest diverged from its prompt prefix snapshot",
-          );
-        input.prefixState.commit(prefixTransaction, ledger);
-        input.contextState.commit(contextTransaction, request.context);
-        input.observe({
-          type: "model.prefix",
-          turnId: input.turnId,
-          stepId: input.stepId,
-          attributes: ledger,
-        });
-      } catch (error) {
-        input.observe({
-          type: "model.prefix",
-          turnId: input.turnId,
-          stepId: input.stepId,
-          attributes: {
-            status: "drift",
-            snapshot: request.prefix,
-          },
-        });
-        return context.tripwire({
-          code: isHarnessError(error) ? error.code : "request.prefix-drift",
-          message: error instanceof Error ? error.message : String(error),
-          scope: "session",
-        });
-      }
+      const call = projectModelCall(request);
       input.observe(() => ({
-        type: "model.started",
+        type: "model.requested",
         turnId: input.turnId,
         stepId: input.stepId,
         ...(request.model?.id === undefined ? {} : { requestedModelId: request.model.id }),
-        attributes: snapshotModelRequest(request),
+        attributes: Object.freeze({
+          call,
+          configuration: snapshotConfiguration(request.configuration),
+          context: copyJson(request.context),
+        }),
       }));
       try {
         const minted = context.mintFromModel(
           normalizeCandidate(
-            await input.agent.invoke(projectModelCall(request), {
+            await input.agent.invoke(call, {
               request,
               signal: input.signal,
             }),
@@ -187,28 +148,17 @@ function snapshotStepStart(
   });
 }
 
-function snapshotModelRequest(request: ModelRequest): ObserveModelRequest {
+function snapshotConfiguration(
+  configuration: ModelConfigurationSnapshot,
+): ObserveModelConfigurationSnapshot {
   return Object.freeze({
-    ...(request.model === undefined ? {} : { model: copyJson(request.model) }),
-    prefix: snapshotPrefix(request.prefix),
-    instructions: Object.freeze([...request.instructions]),
-    context: copyJson(request.context),
-    arrivals: copyJson(request.arrivals),
-    toolResults: copyJson(request.toolResults),
-    transcript: request.transcript,
-    tools: snapshotTools(request.tools),
-  });
-}
-
-function snapshotPrefix(prefix: PromptPrefixSnapshot): ObservePromptPrefixSnapshot {
-  return Object.freeze({
-    version: prefix.version,
-    ...(prefix.model === undefined ? {} : { model: copyJson(prefix.model) }),
-    instructions: copyJson(prefix.instructions),
-    tools: snapshotTools(prefix.tools),
-    toolContracts: copyJson(prefix.toolContracts),
-    contributors: copyJson(prefix.contributors),
-    digests: copyJson(prefix.digests),
+    version: configuration.version,
+    ...(configuration.model === undefined ? {} : { model: copyJson(configuration.model) }),
+    instructions: copyJson(configuration.instructions),
+    tools: snapshotTools(configuration.tools),
+    toolContracts: copyJson(configuration.toolContracts),
+    contributors: copyJson(configuration.contributors),
+    digests: copyJson(configuration.digests),
   });
 }
 

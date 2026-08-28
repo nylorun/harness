@@ -69,6 +69,7 @@ try {
     path === "README.md" ||
     path === "CHANGELOG.md" ||
     path === "LICENSE" ||
+    /^docs\/.+\.md$/.test(path) ||
     /^dist\/.+\.(?:js|d\.ts)$/.test(path);
   const unexpected = files.filter((path) => !allowed(path));
   if (unexpected.length) throw new Error(`Unexpected tarball files: ${unexpected.join(", ")}`);
@@ -77,6 +78,9 @@ try {
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
+    "docs/loop.md",
+    "docs/model-call-projection.md",
+    "docs/reference.md",
     "dist/index.js",
     "dist/index.d.ts",
   ]) {

@@ -1,65 +1,66 @@
 import { describe, expect, it } from "vitest";
-import { Agent, type ObserveEvent, type PromptPrefixSnapshot } from "../src/index.js";
+import { Agent, type ModelConfigurationSnapshot } from "../src/index.js";
 import { adapter, model, tool, toolCalls, turn } from "./fixtures.js";
 
-describe("prompt prefix stability", () => {
-  it("persists named slots and reuses the canonical snapshot when unchanged", async () => {
-    const prefixes: PromptPrefixSnapshot[] = [];
+describe("model configuration", () => {
+  it("assembles named slots fresh for every model step", async () => {
+    const snapshots: ModelConfigurationSnapshot[] = [];
     let calls = 0;
     const agent = Agent(
       model(async (_call, { request }) => {
-        prefixes.push(request.prefix);
+        snapshots.push(request.configuration);
         return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
       .with(adapter())
       .use("baseline", async (request, next) => {
         if (request.stepNumber === 1) {
-          request.prefix.instructions.set("policy", ["Stable policy"], { order: 20 });
-          request.prefix.tools.set("tools", [tool()], { order: 20 });
+          request.configuration.instructions.set("policy", ["Discarded declaration"]);
+          request.configuration.instructions.set("policy", ["Step-one policy"], { order: 20 });
+          request.configuration.tools.set("tools", [tool("discarded")]);
+          request.configuration.tools.set("tools", [tool()], { order: 20 });
         }
         return next();
       })
       .build();
-    const observed: ObserveEvent[] = [];
-    const session = agent.run();
-    session.observe((event) => observed.push(event));
-    await session.input("go").completed;
 
-    expect(prefixes).toHaveLength(2);
-    expect(prefixes[1]).toBe(prefixes[0]);
-    expect(
-      observed
-        .filter((event) => event.type === "model.prefix")
-        .map((event) => (event.type === "model.prefix" ? event.attributes.status : undefined)),
-    ).toEqual(["initial", "unchanged"]);
+    await turn(agent).handle.completed;
+
+    expect(snapshots.map((snapshot) => snapshot.instructions.map((item) => item.text))).toEqual([
+      ["Step-one policy"],
+      [],
+    ]);
+    expect(snapshots.map((snapshot) => snapshot.tools.map((tool) => tool.name))).toEqual([
+      ["echo"],
+      [],
+    ]);
   });
 
-  it("orders slots canonically and attributes declared changes", async () => {
-    let prefix!: PromptPrefixSnapshot;
+  it("orders same-step slots canonically and attributes them", async () => {
+    let configuration!: ModelConfigurationSnapshot;
     const agent = Agent(
       model(async (_call, { request }) => {
-        prefix = request.prefix;
+        configuration = request.configuration;
         return "done";
       }),
     )
       .with(adapter())
       .use("later", async (request, next) => {
-        request.prefix.instructions.set("a", ["second"], { order: 20 });
-        request.prefix.tools.set("late", [tool("late")], { order: 20 });
+        request.configuration.instructions.set("a", ["second"], { order: 20 });
+        request.configuration.tools.set("late", [tool("late")], { order: 20 });
         return next();
       })
       .use("first", async (request, next) => {
-        request.prefix.instructions.set("z", ["first"], { order: 10 });
-        request.prefix.tools.set("first", [tool("first")], { order: 10 });
+        request.configuration.instructions.set("z", ["first"], { order: 10 });
+        request.configuration.tools.set("first", [tool("first")], { order: 10 });
         return next();
       })
       .build();
     await turn(agent).handle.completed;
 
-    expect(prefix.instructions.map((item) => item.text)).toEqual(["first", "second"]);
-    expect(prefix.tools.map((item) => item.name)).toEqual(["first", "late"]);
-    expect(prefix.contributors.map((item) => `${item.middlewareId}:${item.slot}`)).toEqual([
+    expect(configuration.instructions.map((item) => item.text)).toEqual(["first", "second"]);
+    expect(configuration.tools.map((item) => item.name)).toEqual(["first", "late"]);
+    expect(configuration.contributors.map((item) => `${item.middlewareId}:${item.slot}`)).toEqual([
       "first:z",
       "later:a",
       "first:first",
@@ -67,68 +68,44 @@ describe("prompt prefix stability", () => {
     ]);
   });
 
-  it("requires a reason for non-initial effective changes in strict mode", async () => {
+  it("uses the current tool route when an equivalent contract is re-declared", async () => {
+    const routes: string[] = [];
+    const observedRoutes: string[] = [];
     let calls = 0;
     const agent = Agent(
-      model(async () =>
-        ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
-      ),
+      model(async () => {
+        calls += 1;
+        return calls <= 2 ? toolCalls({ id: `call-${calls}`, name: "echo", args: {} }) : "done";
+      }),
     )
-      .with(adapter())
-      .use("policy", async (request, next) => {
-        request.prefix.tools.set("tools", [tool()]);
-        if (request.stepNumber === 2) request.prefix.instructions.set("changed", ["New policy"]);
+      .with(
+        adapter(async (call) => {
+          routes.push(call.executeWith);
+          return { kind: "completed", output: "ok" };
+        }),
+      )
+      .with({
+        id: "alternate",
+        execute: async (call) => {
+          routes.push(call.executeWith);
+          return { kind: "completed", output: "ok" };
+        },
+      })
+      .use("tools", async (request, next) => {
+        request.configuration.tools.set("echo", [
+          tool("echo", request.stepNumber === 1 ? "local" : "alternate"),
+        ]);
         return next();
       })
       .build();
-    const completion = await turn(agent, "go", { prefixPolicy: "strict" }).handle.completed;
-    expect(completion.events.at(-1)).toMatchObject({
-      type: "tripwire",
-      tripwire: { code: "prefix.strict-unreasoned-change" },
+    const session = agent.run();
+    session.observe((event) => {
+      if (event.type === "model.requested")
+        observedRoutes.push(event.attributes.configuration.tools[0]?.executeWith ?? "");
     });
-  });
+    await session.input("go").completed;
 
-  it("removes a middleware-owned tool slot through an explicit mutation", async () => {
-    const visible: string[][] = [];
-    let calls = 0;
-    const agent = Agent(
-      model(async (_call, { request }) => {
-        visible.push(request.prefix.tools.map((item) => item.name));
-        return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
-      }),
-    )
-      .with(adapter())
-      .use("capabilities", async (request, next) => {
-        if (request.stepNumber === 1) request.prefix.tools.set("tools", [tool("echo")]);
-        else request.prefix.tools.remove("tools", { reason: "Tool result completed." });
-        return next();
-      })
-      .build();
-    await turn(agent).handle.completed;
-    expect(visible).toEqual([["echo"], []]);
-  });
-
-  it("does not let a middleware remove another middleware's tool slot", async () => {
-    const visible: string[][] = [];
-    const agent = Agent(
-      model(async (_call, { request }) => {
-        visible.push(request.prefix.tools.map((item) => item.name));
-        return "done";
-      }),
-    )
-      .with(adapter())
-      .use("security", async (request, next) => {
-        request.prefix.tools.set("danger", [tool("danger")]);
-        return next();
-      })
-      .use("plugin", async (request, next) => {
-        request.prefix.tools.remove("danger");
-        return next();
-      })
-      .build();
-
-    await turn(agent).handle.completed;
-
-    expect(visible).toEqual([["danger"]]);
+    expect(observedRoutes).toEqual(["local", "alternate", "alternate"]);
+    expect(routes).toEqual(["local", "alternate"]);
   });
 });

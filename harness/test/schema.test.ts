@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 import { Agent, tool } from "../src/index.js";
+import { normalizedSchemaFor } from "../src/build/schema.js";
 import { adapter, model, toolCalls, turn } from "./fixtures.js";
 
 describe("Zod schemas", () => {
@@ -27,7 +28,7 @@ describe("Zod schemas", () => {
         }),
       )
       .use("parsed", async (request, next) => {
-        request.prefix.tools.set("parsed", [convert]);
+        request.configuration.tools.set("parsed", [convert]);
         return next();
       })
       .build();
@@ -50,7 +51,7 @@ describe("Zod schemas", () => {
     )
       .with(adapter())
       .use("zod", async (request, next) => {
-        request.prefix.tools.set("zod", [echo]);
+        request.configuration.tools.set("zod", [echo]);
         return next();
       })
       .build();
@@ -58,17 +59,55 @@ describe("Zod schemas", () => {
     await turn(result, "go").handle.completed;
   });
 
-  it("tripwires a non-object Zod root before the Model runs", async () => {
+  it("prepares authored and raw schemas once across repeated step declarations", async () => {
+    const prepared = tool({
+      name: "prepared",
+      parameters: z.object({ value: z.string() }),
+      executeWith: "local",
+    });
+    const raw = {
+      name: "raw",
+      parameters: z.object({ value: z.string() }),
+      executeWith: "local",
+    };
+    let calls = 0;
+    const result = Agent(
+      model(async () => {
+        calls += 1;
+        return calls === 1
+          ? toolCalls({ id: "prepared", name: "prepared", args: { value: "x" } })
+          : "done";
+      }),
+    )
+      .with(adapter())
+      .use("tools", async (request, next) => {
+        request.configuration.tools.set("tools", [prepared, raw]);
+        return next();
+      })
+      .build();
+
+    await turn(result, "go").handle.completed;
+    expect(normalizedSchemaFor(prepared)).toBe(normalizedSchemaFor(prepared));
+    expect(normalizedSchemaFor(raw)).toBe(normalizedSchemaFor(raw));
+  });
+
+  it("rejects invalid authored schemas when tool() defines them", () => {
+    expect(() =>
+      tool({ name: "bad", parameters: z.string() as never, executeWith: "local" }),
+    ).toThrow(/Zod object schema/);
+  });
+
+  it("tripwires an invalid raw tool literal when it is first bound", async () => {
     const invoke = vi.fn(async () => "done");
     const result = Agent(model(invoke))
       .with(adapter())
       .use("bad", async (request, next) => {
-        request.prefix.tools.set("bad", [
-          tool({
+        request.configuration.tools.set("bad", [
+          {
             name: "bad",
             parameters: z.string() as never,
             executeWith: "local",
-          }),
+          },
         ]);
         return next();
       })
@@ -87,7 +126,7 @@ describe("Zod schemas", () => {
     const result = Agent(model(invoke))
       .with(adapter())
       .use("async", async (request, next) => {
-        request.prefix.tools.set("async", [
+        request.configuration.tools.set("async", [
           tool({ name: "async", parameters, executeWith: "local" }),
         ]);
         return next();
@@ -106,7 +145,7 @@ describe("Zod schemas", () => {
     const result = Agent(model(invoke))
       .with(adapter())
       .use("unconvertible", async (request, next) => {
-        request.prefix.tools.set("unconvertible", [
+        request.configuration.tools.set("unconvertible", [
           tool({
             name: "bigint",
             parameters: z.object({ value: z.bigint() }),
@@ -134,7 +173,7 @@ describe("Zod schemas", () => {
     )
       .with(adapter())
       .use("typed", async (request, next) => {
-        request.prefix.tools.set("typed", [
+        request.configuration.tools.set("typed", [
           tool({
             name: "echo",
             parameters: z.object({ text: z.string() }),

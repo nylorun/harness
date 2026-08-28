@@ -87,6 +87,15 @@ export interface ToolAdapter {
   ): Promise<ToolOutcome>;
 }
 
+/** Scheduling policy for one adapter registration on an Agent. */
+export interface AdapterExecutionOptions {
+  /**
+   * Maximum concurrent execute() calls across all Sessions from the built Agent.
+   * Omit for unbounded parallel execution.
+   */
+  readonly maxConcurrentCalls?: number;
+}
+
 export interface ToolResult {
   readonly callId: string;
   readonly toolName: string;

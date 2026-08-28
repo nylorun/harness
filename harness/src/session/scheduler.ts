@@ -1,10 +1,4 @@
-import type {
-  InputEvent,
-  InputOptions,
-  PromptPrefixPolicy,
-  SessionEvent,
-  SessionSnapshot,
-} from "../types/session.js";
+import type { InputEvent, InputOptions, SessionEvent, SessionSnapshot } from "../types/session.js";
 import type { ObserveEvent, Observer } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
 import { createId } from "../utils/ids.js";
@@ -21,8 +15,6 @@ import { SubmissionStream } from "./submission-stream.js";
 import { commitToolResults, initialState, withStatus } from "./state.js";
 import { type LoopAgent } from "../build/agent.js";
 import { TurnRunner, type PendingTurn, type TurnProgress } from "../turn/runner.js";
-import { ContextState } from "../step/context-state.js";
-import { PromptPrefixState } from "../step/prompt-prefix.js";
 
 /** Coordinates one active turn at a time; TurnRunner owns the turn's internal state machine. */
 export class SessionScheduler {
@@ -41,8 +33,6 @@ export class SessionScheduler {
   private stopPromise?: Promise<void>;
   private readonly observers = createObserverRegistry();
   private readonly turns: TurnRunner;
-  private readonly prefixState: PromptPrefixState;
-  private readonly contextState: ContextState;
 
   constructor(
     readonly id: string,
@@ -51,12 +41,9 @@ export class SessionScheduler {
       readonly userId?: string;
       readonly context?: import("../types/shared.js").JsonObject;
     }>,
-    prefixPolicy: PromptPrefixPolicy = "observe",
   ) {
     this.snapshotValue = initialState(id);
-    this.prefixState = new PromptPrefixState(prefixPolicy, agent.directive);
-    this.contextState = new ContextState(session.context);
-    this.turns = new TurnRunner(agent, id, session, this.prefixState, this.contextState);
+    this.turns = new TurnRunner(agent, id, session);
   }
 
   get snapshot(): SessionSnapshot {

@@ -14,8 +14,6 @@ import { createId } from "../utils/ids.js";
 import { copyJson } from "../utils/immutable.js";
 import type { ObserveEmit } from "../utils/observe.js";
 import { ToolPlanRunner } from "./plan-runner.js";
-import { ContextState } from "../step/context-state.js";
-import { PromptPrefixState } from "../step/prompt-prefix.js";
 
 export interface PendingTurn {
   readonly plan: ToolPlanRunner;
@@ -62,8 +60,6 @@ export class TurnRunner {
     private readonly agent: LoopAgent,
     private readonly sessionId: string,
     private readonly session: Readonly<{ readonly userId?: string; readonly context?: JsonObject }>,
-    private readonly prefixState: PromptPrefixState = new PromptPrefixState(),
-    private readonly contextState: ContextState = new ContextState(),
   ) {}
 
   async start(
@@ -71,7 +67,6 @@ export class TurnRunner {
     event: InputEvent,
     context: TurnRunContext,
   ): Promise<TurnProgress> {
-    this.contextState.expireTurn();
     const turnId = createId("turn");
     const started = beginTurn(state, turnId, event);
     context.onState(started);
@@ -128,8 +123,6 @@ export class TurnRunner {
         toolResults,
         signal: context.signal,
         session: this.session,
-        prefixState: this.prefixState,
-        contextState: this.contextState,
       });
       context.assertCurrent();
       if (run.candidate) {

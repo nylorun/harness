@@ -3,8 +3,8 @@ import type {
   ContextSnapshot,
   ModelCandidate,
   ModelDirective,
-  PromptPrefixMutationOptions,
-  PromptPrefixSnapshot,
+  ModelConfigurationMutationOptions,
+  ModelConfigurationSnapshot,
 } from "../types/model.js";
 import type { StepInput, StepRequest, StepResponse } from "../types/middleware.js";
 import type { ContextItem, Tripwire } from "../types/shared.js";
@@ -19,8 +19,8 @@ import {
   type CanonicalCall,
 } from "./canonicalize.js";
 import { normalizeCandidate } from "../model-normalize.js";
-import { ContextTransaction, contextOwner } from "./context-state.js";
-import { owner, PromptPrefixTransaction } from "./prompt-prefix.js";
+import { ContextDraft } from "./context-draft.js";
+import { ModelConfigurationDraft } from "./model-configuration.js";
 
 const branded = new WeakSet<object>();
 
@@ -32,8 +32,8 @@ export function isBrandedResponse(value: unknown): value is StepResponse {
 export class StepContext {
   readonly input: Readonly<StepInput>;
   readonly #observe: ObserveEmit;
-  readonly #context: ContextTransaction;
-  readonly #prefix: PromptPrefixTransaction;
+  readonly #context: ContextDraft;
+  readonly #configuration: ModelConfigurationDraft;
   readonly #denials = new Map<string, string>();
   readonly #interactions = new Map<string, Interaction>();
   readonly #preflights = new Map<string, "sandbox" | "validation">();
@@ -43,18 +43,18 @@ export class StepContext {
   #tripwire?: Tripwire;
   #response?: StepResponse;
   #sealed = false;
-  #committedPrefix?: PromptPrefixSnapshot;
-  #committedContext?: ContextSnapshot;
+  #configurationSnapshot?: ModelConfigurationSnapshot;
+  #contextSnapshot?: ContextSnapshot;
 
   constructor(
     input: Readonly<StepInput>,
     observe: ObserveEmit,
-    prefix: PromptPrefixTransaction,
-    context: ContextTransaction,
+    configuration: ModelConfigurationDraft,
+    context: ContextDraft,
   ) {
     this.input = input;
     this.#observe = observe;
-    this.#prefix = prefix;
+    this.#configuration = configuration;
     this.#context = context;
   }
 
@@ -65,28 +65,28 @@ export class StepContext {
     return this.#candidate;
   }
   get selectedDirective(): ModelDirective | undefined {
-    return this.prefixSnapshot().model;
+    return this.configurationSnapshot().model;
   }
   get instructions(): readonly string[] {
-    return Object.freeze(this.prefixSnapshot().instructions.map((item) => item.text));
+    return Object.freeze(this.configurationSnapshot().instructions.map((item) => item.text));
   }
   contextSnapshot(): ContextSnapshot {
-    return this.#committedContext ?? this.#context.snapshot();
+    return this.#contextSnapshot ?? this.#context.snapshot();
   }
   get offeredTools(): readonly BoundToolDefinition[] {
-    return this.prefixSnapshot().tools;
+    return this.configurationSnapshot().tools;
   }
   get catalogByName(): ReadonlyMap<string, BoundToolDefinition> {
-    return this.#prefix.catalogByName();
+    return new Map(this.offeredTools.map((tool) => [tool.name, tool] as const));
   }
-  prefixSnapshot(): PromptPrefixSnapshot {
-    return this.#committedPrefix ?? this.#prefix.snapshot();
+  configurationSnapshot(): ModelConfigurationSnapshot {
+    return this.#configurationSnapshot ?? this.#configuration.snapshot();
   }
-  commitPrefix(snapshot: PromptPrefixSnapshot): void {
-    this.#committedPrefix = snapshot;
+  sealConfiguration(snapshot: ModelConfigurationSnapshot): void {
+    this.#configurationSnapshot = snapshot;
   }
-  commitContext(snapshot: ContextSnapshot): void {
-    this.#committedContext = snapshot;
+  sealContext(snapshot: ContextSnapshot): void {
+    this.#contextSnapshot = snapshot;
   }
   denialFor(callId: string): string | undefined {
     return this.#denials.get(callId);
@@ -144,7 +144,10 @@ export class StepContext {
       }
       action();
     };
-    const mutatePrefix = (kind: "instructions" | "tools" | "model", action: () => void): void =>
+    const mutateConfiguration = (
+      kind: "instructions" | "tools" | "model",
+      action: () => void,
+    ): void =>
       mutate(() => {
         try {
           action();
@@ -156,7 +159,7 @@ export class StepContext {
               ? "tool.invalid-schema"
               : kind === "model"
                 ? "model.invalid-directive"
-                : "prefix.invalid-instructions";
+                : "configuration.invalid-instructions";
           this.#tripwire ??= Object.freeze({ code, message });
         }
       });
@@ -174,6 +177,8 @@ export class StepContext {
       });
     const value: StepRequest = Object.freeze({
       sessionId: this.input.sessionId,
+      turnId: this.input.turnId,
+      stepId: this.input.stepId,
       session: this.input.session,
       turnNumber: this.input.turnNumber,
       stepNumber: this.input.stepNumber,
@@ -183,67 +188,53 @@ export class StepContext {
       context: Object.freeze({
         set: (slot: string, items: readonly ContextItem[], options?: ContextMutationOptions) =>
           mutateContext(() =>
-            this.#context.set(contextOwner(middlewareId, middlewareOrder, slot), items, options),
-          ),
-        remove: (slot: string, options?: Omit<ContextMutationOptions, "order" | "lifetime">) =>
-          mutateContext(() =>
-            this.#context.remove(contextOwner(middlewareId, middlewareOrder, slot), options),
+            this.#context.set(middlewareId, middlewareOrder, slot, items, options),
           ),
       }),
-      prefix: Object.freeze({
+      configuration: Object.freeze({
         instructions: Object.freeze({
-          set: (slot: string, items: readonly string[], options?: PromptPrefixMutationOptions) =>
-            mutatePrefix("instructions", () =>
-              this.#prefix.setInstructions(
-                owner(middlewareId, middlewareOrder, slot),
+          set: (
+            slot: string,
+            items: readonly string[],
+            options?: ModelConfigurationMutationOptions,
+          ) =>
+            mutateConfiguration("instructions", () =>
+              this.#configuration.setInstructions(
+                middlewareId,
+                middlewareOrder,
+                slot,
                 items,
                 options,
               ),
-            ),
-          remove: (slot: string, options?: Omit<PromptPrefixMutationOptions, "order">) =>
-            mutatePrefix("instructions", () =>
-              this.#prefix.removeInstructions(owner(middlewareId, middlewareOrder, slot), options),
             ),
         }),
         tools: Object.freeze({
           set: (
             slot: string,
             tools: readonly ToolDefinition[],
-            options?: PromptPrefixMutationOptions,
+            options?: ModelConfigurationMutationOptions,
           ) =>
-            mutatePrefix("tools", () =>
-              this.#prefix.setTools(owner(middlewareId, middlewareOrder, slot), tools, options),
-            ),
-          remove: (slot: string, options?: Omit<PromptPrefixMutationOptions, "order">) =>
-            mutatePrefix("tools", () =>
-              this.#prefix.removeTools(owner(middlewareId, middlewareOrder, slot), options),
+            mutateConfiguration("tools", () =>
+              this.#configuration.setTools(middlewareId, middlewareOrder, slot, tools, options),
             ),
         }),
         model: Object.freeze({
           select: (
             directive: ModelDirective,
-            options?: Omit<PromptPrefixMutationOptions, "order">,
+            options?: Omit<ModelConfigurationMutationOptions, "order">,
           ) =>
-            mutatePrefix("model", () =>
-              this.#prefix.select(
-                owner(middlewareId, middlewareOrder, "model"),
-                directive,
-                options,
-              ),
+            mutateConfiguration("model", () =>
+              this.#configuration.select(middlewareId, middlewareOrder, directive, options),
             ),
           replace: (
             directive: ModelDirective,
-            options?: Omit<PromptPrefixMutationOptions, "order">,
+            options?: Omit<ModelConfigurationMutationOptions, "order">,
           ) =>
-            mutatePrefix("model", () =>
-              this.#prefix.replace(
-                owner(middlewareId, middlewareOrder, "model"),
-                directive,
-                options,
-              ),
+            mutateConfiguration("model", () =>
+              this.#configuration.replace(middlewareId, middlewareOrder, directive, options),
             ),
-          clear: (options?: Omit<PromptPrefixMutationOptions, "order">) =>
-            mutatePrefix("model", () => this.#prefix.clearModel(options)),
+          clear: (options?: Omit<ModelConfigurationMutationOptions, "order">) =>
+            mutateConfiguration("model", () => this.#configuration.clear(options)),
         }),
       }),
       tripwire: (error: Tripwire) => {

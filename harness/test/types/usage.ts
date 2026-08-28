@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   Agent,
+  type AdapterExecutionOptions,
   HarnessError,
   type HarnessErrorCode,
   adapter,
@@ -13,7 +14,7 @@ import {
   type ModelCandidate,
   type ModelDirective,
   type ModelRequest,
-  type PromptPrefixSnapshot,
+  type ModelConfigurationSnapshot,
   type Session,
   type SessionInput,
   type SessionOptions,
@@ -43,8 +44,11 @@ const local = adapter({
   },
 });
 
+const adapterExecutionOptions: AdapterExecutionOptions = { maxConcurrentCalls: 1 };
+void adapterExecutionOptions;
+
 Agent(async () => "done")
-  .with(local)
+  .with(local, { maxConcurrentCalls: 1 })
   .use("echo", async (_request, next) => next())
   .build()
   .run();
@@ -84,24 +88,28 @@ agent.run("hello");
 const sessionOptions: SessionOptions = { model: "opus" };
 
 declare const request: StepRequest;
+request.context.set("note", [{ type: "note", value: 1 }]);
+// @ts-expect-error context lifetime belongs to application state, not Harness.
 request.context.set("note", [{ type: "note", value: 1 }], { lifetime: "step" });
+// @ts-expect-error Context declarations are scoped to this step and cannot be removed.
 request.context.remove("note");
 // @ts-expect-error context.add was replaced by context.set
 request.context.add({ value: 1 });
 const sessionId: string = request.sessionId;
-void sessionId;
+const turnId: string = request.turnId;
+const stepId: string = request.stepId;
+void [sessionId, turnId, stepId];
 // @ts-expect-error sessionId is immutable
 request.sessionId = "other-session";
 // @ts-expect-error selectModel was replaced by request.model.select
 request.selectModel("opus");
-// @ts-expect-error Tool visibility is controlled by the contributing middleware slot.
-request.prefix.tools.withhold("echo");
-// @ts-expect-error Tool visibility is controlled by the contributing middleware slot.
-request.prefix.tools.restore("echo");
+// @ts-expect-error prefix was renamed to configuration.
+request.prefix;
 
-declare const prefix: PromptPrefixSnapshot;
-// @ts-expect-error Prompt prefixes no longer expose globally withheld tools.
-prefix.withheldTools;
+declare const configuration: ModelConfigurationSnapshot;
+void configuration.digests.request;
+// @ts-expect-error Model configuration no longer exposes globally withheld tools.
+configuration.withheldTools;
 
 const candidate: ModelCandidate = {
   output: [{ type: "text", text: "ok" }],
@@ -147,7 +155,7 @@ declare const response: StepResponse;
 const tripped: StepResponse = response.tripwire({ code: "policy.block", message: "Blocked" });
 void tripped;
 
-const harnessCode: HarnessErrorCode = "prefix.duplicate-tool-name";
+const harnessCode: HarnessErrorCode = "configuration.duplicate-tool-name";
 const harnessError = new HarnessError(harnessCode, "Duplicate tool");
 void harnessError;
 

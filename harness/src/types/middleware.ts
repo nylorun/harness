@@ -3,7 +3,7 @@ import type {
   ModelCandidate,
   ModelDirective,
   ModelToolCall,
-  PromptPrefixMutationOptions,
+  ModelConfigurationMutationOptions,
 } from "./model.js";
 import type { InputEvent, TranscriptEntry } from "./session.js";
 import type { ContextItem, JsonObject, Tripwire } from "./shared.js";
@@ -29,6 +29,10 @@ export interface StepInput {
 export interface StepRequest {
   /** Opaque identity of the Session that owns this Step. */
   readonly sessionId: string;
+  /** Opaque identity of the Turn that owns this Step. */
+  readonly turnId: string;
+  /** Opaque identity of this Model Step. */
+  readonly stepId: string;
   readonly session: StepInput["session"];
   readonly turnNumber: number;
   readonly stepNumber: number;
@@ -37,28 +41,32 @@ export interface StepRequest {
   readonly transcript: readonly TranscriptEntry[];
   readonly context: {
     set(slot: string, items: readonly ContextItem[], options?: ContextMutationOptions): void;
-    remove(slot: string, options?: Omit<ContextMutationOptions, "order" | "lifetime">): void;
   };
-  readonly prefix: {
+  readonly configuration: {
     readonly instructions: {
-      set(slot: string, items: readonly string[], options?: PromptPrefixMutationOptions): void;
-      remove(slot: string, options?: Omit<PromptPrefixMutationOptions, "order">): void;
+      set(
+        slot: string,
+        items: readonly string[],
+        options?: ModelConfigurationMutationOptions,
+      ): void;
     };
     readonly tools: {
       set(
         slot: string,
         tools: readonly ToolDefinition[],
-        options?: PromptPrefixMutationOptions,
+        options?: ModelConfigurationMutationOptions,
       ): void;
-      remove(slot: string, options?: Omit<PromptPrefixMutationOptions, "order">): void;
     };
     readonly model: {
-      select(directive: ModelDirective, options?: Omit<PromptPrefixMutationOptions, "order">): void;
+      select(
+        directive: ModelDirective,
+        options?: Omit<ModelConfigurationMutationOptions, "order">,
+      ): void;
       replace(
         directive: ModelDirective,
-        options?: Omit<PromptPrefixMutationOptions, "order">,
+        options?: Omit<ModelConfigurationMutationOptions, "order">,
       ): void;
-      clear(options?: Omit<PromptPrefixMutationOptions, "order">): void;
+      clear(options?: Omit<ModelConfigurationMutationOptions, "order">): void;
     };
   };
   tripwire(error: Tripwire): StepResponse;

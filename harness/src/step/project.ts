@@ -12,14 +12,14 @@ import type { ToolResult } from "../types/tool.js";
 import { copyJson } from "../utils/immutable.js";
 
 export function projectModelCall(request: ModelRequest): ModelCall {
-  return Object.freeze({
+  return freezeGraph({
     prompt: Object.freeze([
       ...projectInstructions(request.instructions),
       ...request.transcript.flatMap(projectEntry),
       ...projectContext(request.context),
     ]),
     tools: Object.freeze(
-      request.prefix.tools.map((tool): ModelCallTool =>
+      request.configuration.tools.map((tool): ModelCallTool =>
         Object.freeze({
           name: tool.name,
           ...(tool.description === undefined ? {} : { description: tool.description }),
@@ -27,7 +27,7 @@ export function projectModelCall(request: ModelRequest): ModelCall {
         }),
       ),
     ),
-    ...(request.model === undefined ? {} : { model: request.model }),
+    ...(request.model === undefined ? {} : { model: copyJson(request.model) }),
     sessionId: request.sessionId,
   });
 }
@@ -113,4 +113,11 @@ function freezeItem(item: PromptItem): PromptItem {
     ...item,
     content: Object.freeze(item.content.map((part) => Object.freeze(part))),
   });
+}
+
+function freezeGraph<T>(value: T, seen = new WeakSet<object>()): T {
+  if (!value || typeof value !== "object" || seen.has(value)) return value;
+  seen.add(value);
+  for (const item of Object.values(value as Record<string, unknown>)) freezeGraph(item, seen);
+  return Object.freeze(value);
 }

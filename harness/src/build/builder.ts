@@ -1,7 +1,7 @@
 import type { BoundMiddleware, StepMiddleware } from "../types/middleware.js";
 import type { ModelAdapter, ModelDirective } from "../types/model.js";
 import type { BuildDiagnostic } from "../types/shared.js";
-import type { ToolAdapter } from "../types/tool.js";
+import type { AdapterExecutionOptions, ToolAdapter } from "../types/tool.js";
 import { HarnessError } from "../errors.js";
 import type { BuiltAgent } from "./agent.js";
 import { assembleAgent } from "./assemble.js";
@@ -29,7 +29,10 @@ export function Agent(model: ModelAdapter, directive?: ModelDirective): AgentBui
 
 export class AgentBuilder {
   private readonly middleware: BoundMiddleware[] = [];
-  private readonly adapters: ToolAdapter[] = [];
+  private readonly adapters: {
+    readonly adapter: ToolAdapter;
+    readonly options?: AdapterExecutionOptions;
+  }[] = [];
   private sealed = false;
   private agent?: BuiltAgent;
   private error?: AgentBuildError;
@@ -40,9 +43,9 @@ export class AgentBuilder {
     private readonly directive?: ModelDirective,
   ) {}
 
-  with(adapter: ToolAdapter): this {
+  with(adapter: ToolAdapter, options?: AdapterExecutionOptions): this {
     if (this.sealed) throw new AgentLifecycleError("AgentBuilder cannot be changed after build()");
-    this.adapters.push(adapter);
+    this.adapters.push({ adapter, ...(options === undefined ? {} : { options }) });
     return this;
   }
 

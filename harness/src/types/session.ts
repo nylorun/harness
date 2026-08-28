@@ -39,13 +39,10 @@ export interface InputHandle {
   readonly completed: Promise<InputCompletion>;
 }
 
-export type PromptPrefixPolicy = "observe" | "strict";
-
 export interface SessionOptions {
   readonly id?: string;
   readonly userId?: string;
   readonly context?: JsonObject;
-  readonly prefixPolicy?: PromptPrefixPolicy;
 }
 
 export interface InputOptions {

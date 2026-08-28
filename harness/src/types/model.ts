@@ -55,13 +55,13 @@ export interface ModelDirective {
   readonly config?: JsonObject;
 }
 
-/** A middleware-owned change to the model-visible prefix. */
-export interface PromptPrefixMutationOptions {
+/** A middleware-owned declaration for the model-visible configuration. */
+export interface ModelConfigurationMutationOptions {
   readonly order?: number;
   readonly reason?: string;
 }
 
-export interface PromptPrefixContributor {
+export interface ModelConfigurationContributor {
   readonly middlewareId: string;
   readonly slot: string;
   readonly order: number;
@@ -69,28 +69,28 @@ export interface PromptPrefixContributor {
   readonly reason?: string;
 }
 
-export interface PromptPrefixTool {
+export interface ModelConfigurationTool {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema: JsonObject;
   readonly digest: string;
-  readonly contributor: PromptPrefixContributor;
+  readonly contributor: ModelConfigurationContributor;
 }
 
-export interface PromptPrefixInstruction {
+export interface ModelConfigurationInstruction {
   readonly text: string;
   readonly digest: string;
-  readonly contributor: PromptPrefixContributor;
+  readonly contributor: ModelConfigurationContributor;
 }
 
-export interface PromptPrefixSnapshot {
+export interface ModelConfigurationSnapshot {
   readonly version: 1;
   readonly model?: ModelDirective;
-  readonly instructions: readonly PromptPrefixInstruction[];
+  readonly instructions: readonly ModelConfigurationInstruction[];
   /** Bound tools are retained for execution; their digest covers only their provider-visible contract. */
   readonly tools: readonly BoundToolDefinition[];
-  readonly toolContracts: readonly PromptPrefixTool[];
-  readonly contributors: readonly PromptPrefixContributor[];
+  readonly toolContracts: readonly ModelConfigurationTool[];
+  readonly contributors: readonly ModelConfigurationContributor[];
   readonly digests: Readonly<{
     readonly logical: string;
     readonly model: string;
@@ -98,25 +98,21 @@ export interface PromptPrefixSnapshot {
   }>;
 }
 
-export type ContextLifetime = "step" | "turn" | "session";
-
-/** A middleware-owned change to the model-visible context ledger. */
+/** A middleware-owned declaration for this model call's runtime context. */
 export interface ContextMutationOptions {
   readonly order?: number;
   readonly reason?: string;
-  readonly lifetime?: ContextLifetime;
 }
 
 export interface ContextContributor {
   readonly middlewareId: string;
   readonly slot: string;
   readonly order: number;
-  readonly lifetime: ContextLifetime;
   readonly digest: string;
   readonly reason?: string;
 }
 
-/** Committed context ledger for one model call. Not part of the prefix digest. */
+/** Canonical runtime context for one model call. Not part of the configuration digest. */
 export interface ContextSnapshot {
   readonly items: readonly ContextItem[];
   readonly contributors: readonly ContextContributor[];
@@ -128,8 +124,8 @@ export interface ModelRequest {
   readonly turnId: string;
   readonly stepId: string;
   readonly model?: ModelDirective;
-  /** Canonical, immutable Harness-owned model prefix for this call. */
-  readonly prefix: PromptPrefixSnapshot;
+  /** Canonical, immutable Harness-owned model configuration for this call. */
+  readonly configuration: ModelConfigurationSnapshot;
   readonly instructions: readonly string[];
   readonly context: ContextSnapshot;
   readonly transcript: readonly TranscriptEntry[];

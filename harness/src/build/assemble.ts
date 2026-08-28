@@ -6,7 +6,7 @@ import type { BuildDiagnostic } from "../types/shared.js";
 import type { ToolAdapter } from "../types/tool.js";
 import { isHarnessError } from "../errors.js";
 import { bindAgent, type BuiltAgent } from "./agent.js";
-import { createAdapterRegistry } from "./adapters.js";
+import { createAdapterRegistry, type BoundAdapterRegistration } from "./adapters.js";
 import { createManifest } from "./manifest.js";
 
 const diagnostic = (
@@ -18,14 +18,18 @@ const diagnostic = (
 export function assembleAgent(
   middleware: readonly BoundMiddleware[],
   invoke: ModelAdapter,
-  adapters: readonly ToolAdapter[],
+  adapters: readonly {
+    readonly adapter: ToolAdapter;
+    readonly options?: import("../types/tool.js").AdapterExecutionOptions;
+  }[],
   directive?: ModelDirective,
 ): BuildResult<BuiltAgent> {
   const diagnostics: BuildDiagnostic[] = [];
 
   const adapterIds = new Set<string>();
-  const validAdapters: ToolAdapter[] = [];
-  for (const adapter of adapters) {
+  const validAdapters: BoundAdapterRegistration[] = [];
+  for (const entry of adapters) {
+    const adapter = entry?.adapter;
     const id = adapter?.id;
     if (!id) diagnostics.push(diagnostic("adapter.invalid-id", "Adapter id must not be empty"));
     else if (adapterIds.has(id))
@@ -33,8 +37,26 @@ export function assembleAgent(
     else if (typeof adapter.execute !== "function")
       diagnostics.push(diagnostic("adapter.invalid", `Adapter '${id}' must provide execute()`));
     else {
+      const limit = entry.options?.maxConcurrentCalls;
+      if (
+        limit !== undefined &&
+        (!Number.isSafeInteger(limit) || !Number.isFinite(limit) || limit < 1)
+      ) {
+        diagnostics.push(
+          diagnostic(
+            "adapter.invalid-max-concurrent-calls",
+            `Adapter '${id}' maxConcurrentCalls must be a positive safe integer`,
+          ),
+        );
+        continue;
+      }
       adapterIds.add(id);
-      validAdapters.push(adapter);
+      validAdapters.push(
+        Object.freeze({
+          adapter,
+          options: Object.freeze(limit === undefined ? {} : { maxConcurrentCalls: limit }),
+        }),
+      );
     }
   }
 

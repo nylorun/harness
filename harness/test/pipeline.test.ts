@@ -22,7 +22,7 @@ describe("step pipeline", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("retains a named tool slot on the next Step until middleware removes it", async () => {
+  it("does not retain a named tool slot on the next Step", async () => {
     let step = 0;
     const seen: string[][] = [];
     const result = Agent(
@@ -33,12 +33,12 @@ describe("step pipeline", () => {
     )
       .with(adapter())
       .use("once", async (request, next) => {
-        if (request.stepNumber === 1) request.prefix.tools.set("once", [tool()]);
+        if (request.stepNumber === 1) request.configuration.tools.set("once", [tool()]);
         return next();
       })
       .build();
     await turn(result, "go").handle.completed;
-    expect(seen).toEqual([["echo"], ["echo"]]);
+    expect(seen).toEqual([["echo"], []]);
   });
 
   it("tripwires duplicate dynamic tools before the Model runs", async () => {
@@ -46,14 +46,14 @@ describe("step pipeline", () => {
     const result = Agent(model(invoke))
       .with(adapter())
       .use("dup", async (request, next) => {
-        request.prefix.tools.set("dup", [tool("echo"), tool("echo")]);
+        request.configuration.tools.set("dup", [tool("echo"), tool("echo")]);
         return next();
       })
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "prefix.duplicate-tool-name" } },
+      { type: "tripwire", tripwire: { code: "configuration.duplicate-tool-name" } },
     ]);
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -77,7 +77,7 @@ describe("step pipeline", () => {
         return response;
       })
       .use("inner", async (request, next) => {
-        request.prefix.tools.set("inner", [tool()]);
+        request.configuration.tools.set("inner", [tool()]);
         const response = await next();
         expect(response.toolCalls().map((call) => call.id)).toEqual(["keep", "drop"]);
         response.deny("keep", "blocked");
@@ -105,7 +105,7 @@ describe("step pipeline", () => {
     )
       .with(adapter())
       .use("rewrite", async (request, next) => {
-        request.prefix.tools.set("rewrite", [tool()]);
+        request.configuration.tools.set("rewrite", [tool()]);
         const response = await next();
         response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 99 } }));
         return response;
@@ -126,7 +126,7 @@ describe("step pipeline", () => {
       .use("late", async (request, next) => {
         setTimeout(() => {
           try {
-            request.prefix.tools.set("late", [tool()]);
+            request.configuration.tools.set("late", [tool()]);
           } catch (error) {
             lateError = error instanceof Error ? error.message : String(error);
           }
@@ -160,7 +160,7 @@ describe("step pipeline", () => {
     )
       .with(adapter())
       .use("snapshot", async (request, next) => {
-        request.prefix.tools.set("snapshot", [definition]);
+        request.configuration.tools.set("snapshot", [definition]);
         (definition as { parameters: unknown }).parameters = z.object({ admin: z.string() });
         return next();
       })
@@ -169,7 +169,7 @@ describe("step pipeline", () => {
     expect(schemas).toMatchObject([{ type: "object", properties: { text: { type: "string" } } }]);
   });
 
-  it("emits step.started before middleware and model.started, and tool.sealed after the onion", async () => {
+  it("emits step.started before middleware and model.requested, and tool.sealed after the onion", async () => {
     const types: string[] = [];
     let step = 0;
     const result = Agent(
@@ -185,8 +185,8 @@ describe("step pipeline", () => {
     const handle = session.input("go");
     await handle.completed;
     expect(types.indexOf("step.started")).toBeLessThan(types.indexOf("middleware.entered"));
-    expect(types.indexOf("middleware.entered")).toBeLessThan(types.indexOf("model.started"));
-    expect(types.indexOf("model.started")).toBeLessThan(types.indexOf("tool.sealed"));
+    expect(types.indexOf("middleware.entered")).toBeLessThan(types.indexOf("model.requested"));
+    expect(types.indexOf("model.requested")).toBeLessThan(types.indexOf("tool.sealed"));
     expect(types.filter((type) => type === "step.started").length).toBeGreaterThan(0);
   });
 
@@ -224,8 +224,8 @@ describe("step pipeline", () => {
 
   it("lets host-level assembly decide whether a folder tool is contributed", async () => {
     const folder = (enabled: boolean) => async (request, next) => {
-      if (enabled) request.prefix.tools.set("folder", [tool("folder")]);
-      request.prefix.instructions.set("folder", ["from folder"]);
+      if (enabled) request.configuration.tools.set("folder", [tool("folder")]);
+      request.configuration.instructions.set("folder", ["from folder"]);
       return next();
     };
     const seen: string[][] = [];
