@@ -46,7 +46,7 @@
     "siginfo": "^2.0.0",
     "source-map-js": "^1.2.1",
     "stackback": "^0.0.2",
-    "std-env": "^3.10.0",
+    "std-env": "^4.2.0",
     "strip-literal": "^3.1.0",
     "tinybench": "^2.9.0",
     "tinyexec": "^0.3.2",
