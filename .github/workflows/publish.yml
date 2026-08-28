@@ -21,7 +21,9 @@ jobs:
           package-manager-cache: false
       - run: npm install --global npm@^11.15.0
       - run: npm ci
+        working-directory: harness
       - run: npm run check
+        working-directory: harness
       - name: Verify release version and choose dist-tag
         id: release
         shell: bash
