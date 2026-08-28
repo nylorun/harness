@@ -1,6 +1,8 @@
-export { Agent, AgentBuilder, AgentBuildError, AgentLifecycleError } from "./builder.js";
-export { BuiltAgent } from "./agent.js";
-export { adapter, middleware, model, tool } from "./helpers.js";
+export { Agent, AgentBuilder, AgentBuildError, AgentLifecycleError } from "./build/builder.js";
+export { HarnessError, isHarnessError } from "./errors.js";
+export type { HarnessErrorCode, HarnessErrorDetails, HarnessErrorOptions } from "./errors.js";
+export { BuiltAgent } from "./build/agent.js";
+export { adapter, middleware, model, tool } from "./build/helpers.js";
 
 export type { AgentManifest } from "./types/manifest.js";
 export type {
@@ -10,7 +12,16 @@ export type {
   ModelEvidence,
   ModelFinishReason,
   ModelAdapter,
+  ModelAdapterContext,
+  ContextContributor,
+  ContextLifetime,
+  ContextMutationOptions,
+  ContextSnapshot,
+  ModelCall,
+  ModelCallTool,
   ModelOutputBlock,
+  PromptContentPart,
+  PromptItem,
   PromptPrefixContributor,
   PromptPrefixInstruction,
   PromptPrefixMutationOptions,
@@ -35,26 +46,29 @@ export type {
   JsonValue,
   ObserveEvent,
   ObserveModelRequest,
+  ObservePromptPrefixSnapshot,
   ObserveSealedCall,
   ObserveToolSnapshot,
   Observer,
   Tripwire,
 } from "./types/shared.js";
 export type {
-  AgentRunInput,
   InteractionReply,
   InputCompletion,
   InputEvent,
   InputHandle,
   InputOptions,
   MessageInput,
+  PromptPrefixPolicy,
   Session,
+  SessionInput,
   SessionEvent,
   SessionOptions,
   SessionSnapshot,
   TranscriptEntry,
 } from "./types/session.js";
 export type {
+  BoundToolSchema,
   BoundToolDefinition,
   Interaction,
   PreflightOutcome,

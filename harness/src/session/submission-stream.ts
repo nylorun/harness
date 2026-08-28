@@ -30,10 +30,6 @@ export class SubmissionStream implements InputHandle {
     );
   }
 
-  consume(): Promise<InputCompletion> {
-    return this.completed;
-  }
-
   onFinish(cleanup: () => void): void {
     if (this.done) cleanup();
     else this.cleanups.push(cleanup);

@@ -7,7 +7,7 @@ describe("prompt prefix stability", () => {
     const prefixes: PromptPrefixSnapshot[] = [];
     let calls = 0;
     const agent = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         prefixes.push(request.prefix);
         return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
@@ -38,7 +38,7 @@ describe("prompt prefix stability", () => {
   it("orders slots canonically and attributes declared changes", async () => {
     let prefix!: PromptPrefixSnapshot;
     const agent = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         prefix = request.prefix;
         return "done";
       }),
@@ -84,28 +84,51 @@ describe("prompt prefix stability", () => {
     const completion = await turn(agent, "go", { prefixPolicy: "strict" }).handle.completed;
     expect(completion.events.at(-1)).toMatchObject({
       type: "tripwire",
-      tripwire: { code: "prefix.invalid" },
+      tripwire: { code: "prefix.strict-unreasoned-change" },
     });
   });
 
-  it("withholds and restores named tools through explicit mutations", async () => {
+  it("removes a middleware-owned tool slot through an explicit mutation", async () => {
     const visible: string[][] = [];
     let calls = 0;
     const agent = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         visible.push(request.prefix.tools.map((item) => item.name));
         return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
       .with(adapter())
       .use("capabilities", async (request, next) => {
-        request.prefix.tools.set("tools", [tool("echo")]);
-        if (request.stepNumber === 1) request.prefix.tools.withhold("echo");
-        else request.prefix.tools.restore("echo", { reason: "Tool result completed." });
+        if (request.stepNumber === 1) request.prefix.tools.set("tools", [tool("echo")]);
+        else request.prefix.tools.remove("tools", { reason: "Tool result completed." });
         return next();
       })
       .build();
     await turn(agent).handle.completed;
-    expect(visible).toEqual([[], ["echo"]]);
+    expect(visible).toEqual([["echo"], []]);
+  });
+
+  it("does not let a middleware remove another middleware's tool slot", async () => {
+    const visible: string[][] = [];
+    const agent = Agent(
+      model(async (_call, { request }) => {
+        visible.push(request.prefix.tools.map((item) => item.name));
+        return "done";
+      }),
+    )
+      .with(adapter())
+      .use("security", async (request, next) => {
+        request.prefix.tools.set("danger", [tool("danger")]);
+        return next();
+      })
+      .use("plugin", async (request, next) => {
+        request.prefix.tools.remove("danger");
+        return next();
+      })
+      .build();
+
+    await turn(agent).handle.completed;
+
+    expect(visible).toEqual([["danger"]]);
   });
 });

@@ -20,17 +20,12 @@ export function bridgeTools(modules: readonly ToolModule[]): { tools: HarnessToo
     return harnessTool({
       name: descriptor.name,
       description: descriptor.description,
-      input: (definition as ToolDefinition).input,
+      parameters: (definition as ToolDefinition).input,
       executeWith: "runtime-local",
-      route: { tool: descriptor.name }
     });
   });
   const localAdapter = adapter({
     id: "runtime-local",
-    validateRoute(route) {
-      const name = route && typeof route === "object" && !Array.isArray(route) ? (route as Readonly<Record<string, JsonValue>>).tool : undefined;
-      if (typeof name !== "string" || !definitions.has(name)) throw new TypeError("Unknown local tool route");
-    },
     async execute(call, context) {
       const definition = definitions.get(call.toolName);
       if (definition === undefined) return { kind: "failed" as const, code: "tool_missing", message: `Tool ${call.toolName} is unavailable.` };

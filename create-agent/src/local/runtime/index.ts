@@ -60,14 +60,14 @@ export { Fetchable } from "./runtime/fetchable.js";
 export type { CorsOptions, FetchableOptions, FetchHandler } from "./runtime/fetchable.js";
 export { createMemorySessionStore } from "./runtime/session-store.js";
 export type { LiveSession, SessionRecord, SessionStore } from "./runtime/session-store.js";
-export { createFileRecorder, redactRecord, RECORDS_DIRECTORY } from "./runtime/record-store.js";
+export { createSessionJournal, redactRecord, NYLO_DIRECTORY } from "./runtime/record-store.js";
 export type {
-  FileRecorderOptions,
-  RecorderContext,
+  DurableRecord,
+  DurableStep,
+  ObserveLine,
   RecordSummary,
-  RecordTerminal,
-  RecordWriter,
-  SessionRecorder
+  SessionJournal,
+  SessionJournalOptions
 } from "./runtime/record-store.js";
 export { createAuthoringArchive, EXCLUDED as ARCHIVE_EXCLUSIONS } from "./publish/archive.js";
 export type { Archive, ArchiveEntry } from "./publish/archive.js";

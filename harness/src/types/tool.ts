@@ -5,31 +5,25 @@ type SchemaValidationSuccess<T> = { readonly ok: true; readonly value: T };
 type SchemaValidationFailure = { readonly ok: false; readonly issues: readonly string[] };
 type SchemaValidation<T> = SchemaValidationSuccess<T> | SchemaValidationFailure;
 
-/** Harness tool inputs are synchronous Zod object schemas. */
+/** Harness tool parameters are synchronous Zod object schemas. */
 export type ToolObjectSchema = ZodObject;
 
-interface BoundToolSchema<T> {
+export interface BoundToolSchema<T> {
   readonly jsonSchema: JsonObject;
   validate(value: unknown): SchemaValidation<T>;
 }
 
-export interface ToolDefinition<
-  Input extends ToolObjectSchema = ToolObjectSchema,
-  Route extends JsonValue = JsonValue,
-> {
+export interface ToolDefinition<Parameters extends ToolObjectSchema = ToolObjectSchema> {
   readonly name: string;
   readonly description?: string;
-  readonly input: Input;
+  readonly parameters: Parameters;
   readonly executeWith: string;
-  readonly route: Route;
-  readonly metadata?: JsonObject;
 }
 
 export interface BoundToolDefinition<
-  Input extends ToolObjectSchema = ToolObjectSchema,
-  Route extends JsonValue = JsonValue,
-> extends Omit<ToolDefinition<Input, Route>, "input"> {
-  readonly input: BoundToolSchema<output<Input>>;
+  Parameters extends ToolObjectSchema = ToolObjectSchema,
+> extends Omit<ToolDefinition<Parameters>, "parameters"> {
+  readonly parameters: BoundToolSchema<output<Parameters>>;
 }
 
 export interface Interaction {
@@ -51,12 +45,11 @@ export interface ToolExecutionResume {
   readonly token?: JsonValue;
 }
 
-export interface SealedToolCall<Route extends JsonValue = JsonValue> {
+export interface SealedToolCall {
   readonly callId: string;
   readonly toolName: string;
   readonly args: JsonValue;
   readonly executeWith: string;
-  readonly route: Route;
 }
 
 export type ToolContent = JsonValue;
@@ -73,11 +66,10 @@ export type ToolOutcome =
 export type PreflightOutcome =
   { readonly kind: "completed" } | Exclude<ToolOutcome, { readonly kind: "completed" }>;
 
-export interface ToolAdapter<Route extends JsonValue = JsonValue> {
+export interface ToolAdapter {
   readonly id: string;
-  validateRoute(route: Route): void;
   preflight?(
-    call: SealedToolCall<Route>,
+    call: SealedToolCall,
     context: {
       readonly kind: "sandbox" | "validation";
       readonly invocationId: string;
@@ -86,7 +78,7 @@ export interface ToolAdapter<Route extends JsonValue = JsonValue> {
     },
   ): Promise<PreflightOutcome>;
   execute(
-    call: SealedToolCall<Route>,
+    call: SealedToolCall,
     context: {
       readonly invocationId: string;
       readonly signal: AbortSignal;

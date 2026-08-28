@@ -2,15 +2,16 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { WireSessionEvent } from "../../src/local/runtime/index.js";
-import { createFileRecorder, redactRecord, RECORDS_DIRECTORY } from "../../src/local/runtime/runtime/record-store.js";
+import { createSessionJournal, redactRecord, NYLO_DIRECTORY } from "../../src/local/runtime/runtime/record-store.js";
 import { createAuthoringArchive, EXCLUDED } from "../../src/local/runtime/publish/archive.js";
 
-const CONTEXT = { agent: "sample", model: "openai/gpt-4o-mini", bundleDigest: "bbb", manifestDigest: "mmm" };
-
-function event(seq: number, type: string, payload: unknown = {}): WireSessionEvent {
-  return { session: "s1", seq, ts: new Date(1000 + seq).toISOString(), type, payload } as WireSessionEvent;
-}
+const STEP = {
+  sessionId: "s1",
+  turnNumber: 1,
+  stepNumber: 1,
+  transcript: [],
+  toolCalls: []
+};
 
 async function scratch(): Promise<string> {
   return mkdtemp(join(tmpdir(), "nylo-records-"));
@@ -34,39 +35,40 @@ describe("redaction", () => {
   });
 });
 
-describe("the file recorder", () => {
-  it("writes one event per line and closes with a terminal summary", async () => {
+describe("the session journal", () => {
+  it("writes one record line per append under the session directory", async () => {
     const root = await scratch();
     try {
-      const recorder = createFileRecorder({ projectRoot: root });
-      const writer = await recorder.open("s1", CONTEXT);
-      writer.append(event(0, "session.started"));
-      writer.append(event(1, "session.ended"));
-      await writer.close({ status: "completed" } as never);
+      const journal = createSessionJournal({ projectRoot: root });
+      await journal.appendRecord("s1", STEP);
+      await journal.appendRecord("s1", { ...STEP, stepNumber: 2 });
 
-      const raw = await readFile(join(root, RECORDS_DIRECTORY, "s1.jsonl"), "utf8");
+      const raw = await readFile(join(root, NYLO_DIRECTORY, "s1", "record.jsonl"), "utf8");
       const lines = raw.trim().split("\n");
-      expect(lines).toHaveLength(3);
+      expect(lines).toHaveLength(2);
+      expect(JSON.parse(lines[0]!)).toMatchObject({ sessionId: "s1", turnNumber: 1, stepNumber: 1 });
 
-      const summary = await recorder.summary("s1");
-      expect(summary).toMatchObject({ session: "s1", status: "completed", events: 2, bundleDigest: "bbb" });
-      expect(await recorder.read("s1")).toHaveLength(2);
-      expect(await recorder.list()).toHaveLength(1);
+      const summary = await journal.summary("s1");
+      expect(summary).toMatchObject({ session: "s1", status: "incomplete", events: 0 });
+      expect(await journal.readRecords("s1")).toHaveLength(2);
+      expect(await journal.list()).toHaveLength(1);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("never writes a declared secret value", async () => {
+  it("writes observe events to a sibling jsonl and never writes a declared secret", async () => {
     const root = await scratch();
     try {
-      const recorder = createFileRecorder({ projectRoot: root, redact: ["super-secret-value"] });
-      const writer = await recorder.open("s2", CONTEXT);
-      writer.append(event(0, "tool.call", { output: "used super-secret-value to authenticate" }));
-      await writer.close({ status: "completed" } as never);
-      const raw = await readFile(join(root, RECORDS_DIRECTORY, "s2.jsonl"), "utf8");
+      const journal = createSessionJournal({ projectRoot: root, redact: ["super-secret-value"] });
+      await journal.appendObserve("s2", { type: "input.received", inputId: "i1", kind: "user-message" });
+      await journal.appendObserve("s2", { type: "tripwire", turnId: "t1", code: "used super-secret-value", scope: "step", attributes: { message: "used super-secret-value to authenticate" } });
+
+      const raw = await readFile(join(root, NYLO_DIRECTORY, "s2", "observe.jsonl"), "utf8");
       expect(raw).not.toContain("super-secret-value");
       expect(raw).toContain("[redacted]");
+      expect(await journal.readObserve("s2")).toHaveLength(2);
+      expect(await journal.summary("s2")).toMatchObject({ session: "s2", status: "failed", events: 2 });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -74,26 +76,23 @@ describe("the file recorder", () => {
 
   it("reports a record it cannot write and lets the run continue", async () => {
     const errors: Error[] = [];
-    // A path whose parent is a file cannot become a directory, which is the cheapest real failure.
     const root = await scratch();
     try {
       await writeFile(join(root, ".nylo"), "not a directory");
-      const recorder = createFileRecorder({ projectRoot: root, onError: (error) => errors.push(error) });
-      const writer = await recorder.open("s3", CONTEXT);
-      expect(() => writer.append(event(0, "session.started"))).not.toThrow();
-      await expect(writer.close({ status: "completed" } as never)).resolves.toBeUndefined();
+      const journal = createSessionJournal({ projectRoot: root, onError: (error) => errors.push(error) });
+      await expect(journal.appendRecord("s3", { ...STEP, sessionId: "s3" })).resolves.toBeUndefined();
       expect(errors.length).toBeGreaterThan(0);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("calls an unfinished record incomplete rather than inventing an ending", async () => {
+  it("calls a session without a stop event incomplete rather than inventing an ending", async () => {
     const root = await scratch();
     try {
-      await mkdir(join(root, RECORDS_DIRECTORY), { recursive: true });
-      await writeFile(join(root, RECORDS_DIRECTORY, "s4.jsonl"), `${JSON.stringify(event(0, "session.started"))}\n`);
-      expect(await recorderSummary(root, "s4")).toMatchObject({ status: "incomplete", events: 1 });
+      await mkdir(join(root, NYLO_DIRECTORY, "s4"), { recursive: true });
+      await writeFile(join(root, NYLO_DIRECTORY, "s4", "observe.jsonl"), `${JSON.stringify({ type: "input.received", inputId: "i1", kind: "user-message", ts: "2026-01-01T00:00:00.000Z" })}\n`);
+      expect(await journalSummary(root, "s4")).toMatchObject({ status: "incomplete", events: 1 });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -102,29 +101,28 @@ describe("the file recorder", () => {
   it("refuses a session id that is path-shaped", async () => {
     const root = await scratch();
     try {
-      const recorder = createFileRecorder({ projectRoot: root });
-      await expect(recorder.open("../escape", CONTEXT)).rejects.toThrow(/plain name/);
+      const journal = createSessionJournal({ projectRoot: root });
+      await expect(journal.appendRecord("../escape", STEP)).rejects.toThrow(/plain name/);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("deletes a record and says so when there was none", async () => {
+  it("deletes a session directory and says so when there was none", async () => {
     const root = await scratch();
     try {
-      const recorder = createFileRecorder({ projectRoot: root });
-      const writer = await recorder.open("s5", CONTEXT);
-      await writer.close(undefined);
-      expect(await recorder.remove("s5")).toBe(true);
-      expect(await recorder.remove("s5")).toBe(false);
+      const journal = createSessionJournal({ projectRoot: root });
+      await journal.appendRecord("s5", { ...STEP, sessionId: "s5" });
+      expect(await journal.remove("s5")).toBe(true);
+      expect(await journal.remove("s5")).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 });
 
-async function recorderSummary(root: string, id: string): Promise<unknown> {
-  return createFileRecorder({ projectRoot: root }).summary(id);
+async function journalSummary(root: string, id: string): Promise<unknown> {
+  return createSessionJournal({ projectRoot: root }).summary(id);
 }
 
 describe("the authoring archive", () => {
@@ -162,7 +160,6 @@ describe("the authoring archive", () => {
     const two = await fixture();
     try {
       const a = await createAuthoringArchive(one);
-      // A second directory, created later, with different inode times and a different path.
       const b = await createAuthoringArchive(two);
       expect(a.digest).toBe(b.digest);
     } finally {

@@ -1,3 +1,4 @@
+import type { TranscriptEntry } from "@nylorun/harness";
 import type { WireSessionEvent } from "./contracts.js";
 
 /** The intentionally small AG-UI subset Nylo v1 can truthfully support. */
@@ -102,5 +103,18 @@ export function agUiHistory(events: readonly WireSessionEvent[]): readonly Reado
     else if (event.type === "model.call") commit();
   }
   commit();
+  return Object.freeze(messages);
+}
+
+/** Rebuilds AG-UI history from a durable step transcript after the process that ran it is gone. */
+export function agUiHistoryFromTranscript(transcript: readonly TranscriptEntry[]): readonly Readonly<Record<string, unknown>>[] {
+  const messages: Array<Readonly<Record<string, unknown>>> = [];
+  for (const entry of transcript) {
+    if (entry.kind === "input" && (entry.event.kind === "user-message" || entry.event.kind === "interrupt") && entry.event.text.trim() !== "") {
+      messages.push({ id: `nylo-history-${messages.length}`, role: "user", content: entry.event.text });
+    } else if (entry.kind === "final" && entry.output !== "") {
+      messages.push({ id: `nylo-history-${messages.length}`, role: "assistant", content: entry.output });
+    }
+  }
   return Object.freeze(messages);
 }

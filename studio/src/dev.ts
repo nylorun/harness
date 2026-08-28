@@ -1,5 +1,5 @@
 import { startLocalRuntime, type LocalRuntimeHost } from "@nylorun/create-agent/local/runtime-host";
-import { createFileRecorder, watchAgent, type BuildResult, type AgentBuildWatcher } from "@nylorun/create-agent/local";
+import { watchAgent, type BuildResult, type AgentBuildWatcher } from "@nylorun/create-agent/local";
 import { resolve } from "node:path";
 import { loadLocalAgent, startStaticStudio, type StudioHost } from "./host.js";
 
@@ -17,10 +17,6 @@ function portFailure(port: number, error: unknown): Error {
   }
   return error instanceof Error ? error : new Error(String(error));
 }
-function recordSecrets(): string[] {
-  return Object.entries(process.env).flatMap(([name, value]) => value !== undefined && value.length >= 8 && /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(name) ? [value] : []);
-}
-
 /** Coordinates a watched local Agent Server and, when requested, its static Studio companion. */
 export async function startDevelopment(options: DevOptions): Promise<DevHost> {
   const project = resolve(options.project);
@@ -30,9 +26,7 @@ export async function startDevelopment(options: DevOptions): Promise<DevHost> {
   let generation = 0;
 
   const startRuntime = async (): Promise<LocalRuntimeHost> => {
-    const agent = (await loadLocalAgent(project, String(++generation))).withHost({
-      recorder: createFileRecorder({ projectRoot: project, redact: recordSecrets() })
-    });
+    const agent = await loadLocalAgent(project, String(++generation));
     try {
       return await startLocalRuntime(agent, {
         port: options.port,

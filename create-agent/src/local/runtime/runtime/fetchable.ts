@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventEncoder } from "@ag-ui/encoder";
 import type { WireSessionEvent } from "./contracts.js";
 import type { BuiltAgent } from "./bind.js";
-import { AgUiEventMapper, agUiHistory, latestUserMessage, parseAgUiRun } from "./ag-ui.js";
+import { AgUiEventMapper, agUiHistory, agUiHistoryFromTranscript, latestUserMessage, parseAgUiRun } from "./ag-ui.js";
 
 export type CorsOptions = Readonly<{ allowedOrigins: readonly string[] }>;
 export type FetchableOptions = Readonly<{ basePath?: string; cors?: CorsOptions }>;
@@ -108,7 +108,7 @@ export function Fetchable(agent: BuiltAgent, options: FetchableOptions = {}): Fe
         manifest: inspection.manifest,
         harness: readiness.harness,
         agUiUrl: route("/v1/ag-ui"),
-        ...(agent.records === undefined ? {} : { sessionRecords: { path: ".nylo/runs" } })
+        ...(agent.records === undefined ? {} : { sessionRecords: { path: ".nylo" } })
       });
     }
     if (segments.length === 2 && segments[0] === "v1" && segments[1] === "ag-ui") {
@@ -124,6 +124,10 @@ export function Fetchable(agent: BuiltAgent, options: FetchableOptions = {}): Fe
     }
     if (segments.length === 4 && segments[0] === "v1" && segments[1] === "ag-ui" && segments[2] === "sessions") {
       if (method !== "GET") return refuse(methodRefusal(method, path, "GET"));
+      const records = await agent.records?.readRecords(segments[3]!);
+      if (records !== undefined && records.length > 0) {
+        return json(200, { session_id: segments[3], messages: agUiHistoryFromTranscript(records.at(-1)!.transcript), state: {} });
+      }
       const events = await agent.session.events(segments[3]!);
       if (events === undefined) return refuse(unknownSession(segments[3]!));
       return json(200, { session_id: segments[3], messages: agUiHistory(events), state: {} });
@@ -146,8 +150,16 @@ export function Fetchable(agent: BuiltAgent, options: FetchableOptions = {}): Fe
     }
     if (segments.length >= 3 && segments[0] === "v1" && segments[1] === "sessions") {
       const id = segments[2]!; const tail = segments[3]; const record = await agent.session.get(id);
-      if (record === undefined) return refuse(unknownSession(id));
-      if (tail === undefined && method === "GET") { const events = await agent.session.events(id); const pending = pendingInteraction(events ?? []); return json(200, { id: record.id, state: record.status, started_at: new Date(record.startedAt).toISOString(), ...(record.endedAt === undefined ? {} : { ended_at: new Date(record.endedAt).toISOString() }), latest_event_cursor: events?.at(-1)?.seq ?? 0, ...(pending === undefined ? {} : { pending_interaction: pending }) }); }
+      const recorded = record === undefined ? await agent.records?.summary(id) : undefined;
+      if (record === undefined && recorded === undefined) return refuse(unknownSession(id));
+      if (tail === undefined && method === "GET") {
+        const events = await agent.session.events(id);
+        const pending = pendingInteraction(events ?? []);
+        if (record !== undefined) {
+          return json(200, { id: record.id, state: record.status, started_at: new Date(record.startedAt).toISOString(), ...(record.endedAt === undefined ? {} : { ended_at: new Date(record.endedAt).toISOString() }), latest_event_cursor: events?.at(-1)?.seq ?? 0, ...(pending === undefined ? {} : { pending_interaction: pending }) });
+        }
+        return json(200, { id: recorded!.session, state: recorded!.status, started_at: new Date(recorded!.startedAt).toISOString(), ...(recorded!.endedAt === undefined ? {} : { ended_at: new Date(recorded!.endedAt).toISOString() }), latest_event_cursor: events?.at(-1)?.seq ?? 0, ...(pending === undefined ? {} : { pending_interaction: pending }) });
+      }
       if (tail === undefined && method === "POST") {
         const payload = await body(request);
         if (payload === undefined || Object.keys(payload).length !== 1) return refuse({ status: 400, code: "NYLO_HTTP_INPUT_INVALID", message: "Submit either { message } or { interaction }.", hint: "Send exactly one input field." });
@@ -168,7 +180,12 @@ export function Fetchable(agent: BuiltAgent, options: FetchableOptions = {}): Fe
         return json(200, { session_id: id, events: page, next_cursor: page.at(-1)?.seq ?? after });
       }
       if (tail === "stream" && method === "GET") { const after = cursor(request.headers.get("last-event-id")); if (after === undefined) return refuse({ status: 400, code: "NYLO_HTTP_LAST_EVENT_ID_INVALID", message: "Last-Event-ID must be a non-negative integer.", hint: "Use the id from the last SSE event." }); const following = agent.session.follow(id, after); return following === undefined ? refuse(unknownSession(id)) : stream(id, after, following); }
-      if (tail === "cancel" && method === "POST") { if (record.status === "completed" || record.status === "failed") return json(200, { session_id: id, state: record.status }); await agent.session.cancel(id, "cancelled"); return json(202, { session_id: id, state: "cancelling" }); }
+      if (tail === "cancel" && method === "POST") {
+        if (record === undefined) return json(200, { session_id: id, state: recorded!.status });
+        if (record.status === "completed" || record.status === "failed") return json(200, { session_id: id, state: record.status });
+        await agent.session.cancel(id, "cancelled");
+        return json(202, { session_id: id, state: "cancelling" });
+      }
       return refuse(methodRefusal(method, path, tail === "events" || tail === "stream" ? "GET" : "POST"));
     }
     return refuse(unknownRoute(path));

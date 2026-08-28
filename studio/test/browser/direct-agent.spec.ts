@@ -18,7 +18,7 @@ test("a Studio page can fetch its configured cross-origin Agent Server", async (
     if (request.headers.origin !== studioOrigin) { response.writeHead(403); response.end(); return; }
     response.writeHead(200, { "access-control-allow-origin": studioOrigin, "content-type": "application/json" });
     if (request.url === "/v1/agent") {
-      response.end(JSON.stringify({ protocolVersion: 1, agentServerVersion: "test", capabilities: ["ag-ui"], agUiUrl: "/v1/ag-ui", harness: { model: { id: "local/gemma4:e2b-mlx" }, middleware: [{ id: "nylorun-folder" }], adapters: [{ id: "runtime-local" }] }, manifest: { sdkVersion: "test", agent: { name: "browser-fixture", model: "local/gemma4:e2b-mlx" }, harness: { name: "@nylorun/harness", version: "0.4.0-rc.1", capabilities: ["sessions", "isolation"] }, requirements: {}, tools: [], skills: [], mcp: [], bundleDigest: "bundle", digest: "manifest" } }));
+      response.end(JSON.stringify({ protocolVersion: 1, agentServerVersion: "test", capabilities: ["ag-ui"], agUiUrl: "/v1/ag-ui", harness: { model: { id: "local/gemma4:e2b-mlx" }, middleware: [{ id: "nylorun-durable" }, { id: "nylorun-folder" }], adapters: [{ id: "runtime-local" }] }, manifest: { sdkVersion: "test", agent: { name: "browser-fixture", model: "local/gemma4:e2b-mlx" }, harness: { name: "@nylorun/harness", version: "0.5.0-beta.1", capabilities: ["sessions", "isolation"] }, requirements: {}, tools: [], skills: [], mcp: [], bundleDigest: "bundle", digest: "manifest" } }));
     } else if (request.url === "/v1/sessions") response.end('{"sessions":[]}\n');
     else response.end('{"ok":true}\n');
   });
@@ -50,7 +50,7 @@ test("a Studio page tolerates an Agent Server that does not report a bound Harne
     if (request.headers.origin !== studioOrigin) { response.writeHead(403); response.end(); return; }
     response.writeHead(200, { "access-control-allow-origin": studioOrigin, "content-type": "application/json" });
     if (request.url === "/v1/agent") {
-      response.end(JSON.stringify({ protocolVersion: 1, agentServerVersion: "legacy-test", capabilities: ["ag-ui"], agUiUrl: "/v1/ag-ui", manifest: { sdkVersion: "test", agent: { name: "legacy-browser-fixture", model: "local/gemma4:e2b-mlx" }, harness: { name: "@nylorun/harness", version: "0.4.0-rc.1", capabilities: [] }, requirements: {}, tools: [], skills: [], mcp: [], bundleDigest: "bundle", digest: "manifest" } }));
+      response.end(JSON.stringify({ protocolVersion: 1, agentServerVersion: "legacy-test", capabilities: ["ag-ui"], agUiUrl: "/v1/ag-ui", manifest: { sdkVersion: "test", agent: { name: "legacy-browser-fixture", model: "local/gemma4:e2b-mlx" }, harness: { name: "@nylorun/harness", version: "0.5.0-beta.1", capabilities: [] }, requirements: {}, tools: [], skills: [], mcp: [], bundleDigest: "bundle", digest: "manifest" } }));
     } else if (request.url === "/v1/sessions") response.end('{"sessions":[]}\n');
     else response.end('{"ok":true}\n');
   });

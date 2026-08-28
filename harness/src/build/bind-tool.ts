@@ -1,25 +1,17 @@
 import type { BoundToolDefinition, ToolDefinition } from "../types/tool.js";
-import { copyJson, copyJsonObject } from "../utils/immutable.js";
+import { HarnessError } from "../errors.js";
 import type { AdapterRegistry } from "./adapters.js";
 import { normalizeSchema } from "./schema.js";
 
-/** Binds one Tool definition against the Agent's adapter registry. Copies route and metadata. */
+/** Binds one Tool definition against the Agent's adapter registry. */
 export function bindTool(item: ToolDefinition, adapters: AdapterRegistry): BoundToolDefinition {
-  if (!item.name) throw new TypeError("Tool name must not be empty");
-  const adapter = adapters.require(item.executeWith);
-  const route = copyJson(item.route);
-  adapter.validateRoute(route);
-  const input = normalizeSchema(item.input);
-  const metadata =
-    item.metadata === undefined
-      ? undefined
-      : copyJsonObject(item.metadata, `tool '${item.name}' metadata`);
+  if (!item.name) throw new HarnessError("tool.invalid-name", "Tool name must not be empty");
+  adapters.require(item.executeWith);
+  const parameters = normalizeSchema(item.parameters);
   return Object.freeze({
     name: item.name,
     ...(item.description ? { description: item.description } : {}),
-    input,
+    parameters,
     executeWith: item.executeWith,
-    route,
-    ...(metadata ? { metadata } : {}),
   });
 }

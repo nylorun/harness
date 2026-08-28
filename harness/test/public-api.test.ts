@@ -20,6 +20,6 @@ describe("public API", () => {
     expect(api).not.toHaveProperty("bindAgent");
     expect(manifest.exports).toHaveProperty(".");
     expect(Object.keys(manifest.exports)).toEqual(["."]);
-    expect(manifest).not.toHaveProperty("dependencies");
+    expect(manifest.dependencies).toEqual({ "@noble/hashes": "^2.3.0" });
   });
 });

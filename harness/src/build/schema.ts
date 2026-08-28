@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { output } from "zod";
+import { HarnessError } from "../errors.js";
 import type { ToolObjectSchema } from "../types/tool.js";
 import { copyJsonObject } from "../utils/immutable.js";
 
@@ -13,34 +14,44 @@ export interface NormalizedToolSchema<T> {
 }
 
 /** Converts a synchronous Zod object schema into Harness's immutable runtime representation. */
-export function normalizeSchema<Input extends ToolObjectSchema>(
-  input: Input,
-): NormalizedToolSchema<output<Input>> {
-  if (!(input instanceof z.ZodObject)) {
-    throw new TypeError("Tool input schema must be a Zod object schema");
+export function normalizeSchema<Parameters extends ToolObjectSchema>(
+  parameters: Parameters,
+): NormalizedToolSchema<output<Parameters>> {
+  if (!(parameters instanceof z.ZodObject)) {
+    throw new HarnessError(
+      "tool.invalid-schema",
+      "Tool parameters schema must be a Zod object schema",
+    );
   }
-  if (hasDeclaredAsyncWork(input)) {
-    throw new TypeError("Tool input schema must validate synchronously");
+  if (hasDeclaredAsyncWork(parameters)) {
+    throw new HarnessError(
+      "tool.invalid-schema",
+      "Tool parameters schema must validate synchronously",
+    );
   }
 
   let jsonSchema: import("../types/shared.js").JsonObject;
   try {
     jsonSchema = copyJsonObject(
-      z.toJSONSchema(input, { target: "draft-07" }),
-      "tool.input.jsonSchema",
+      z.toJSONSchema(parameters, { target: "draft-07" }),
+      "tool.parameters.jsonSchema",
     );
   } catch (error) {
-    throw new TypeError(`Tool input schema must convert to JSON Schema: ${message(error)}`);
+    throw new HarnessError(
+      "tool.invalid-schema",
+      `Tool parameters schema must convert to JSON Schema: ${message(error)}`,
+      { cause: error },
+    );
   }
   if (jsonSchema.type !== "object") {
-    throw new TypeError("Tool JSON Schema root type must be object");
+    throw new HarnessError("tool.invalid-schema", "Tool JSON Schema root type must be object");
   }
 
   return Object.freeze({
     jsonSchema,
-    validate(value: unknown): SchemaValidation<output<Input>> {
+    validate(value: unknown): SchemaValidation<output<Parameters>> {
       try {
-        const result = input.safeParse(value);
+        const result = parameters.safeParse(value);
         if (result.success) return { ok: true, value: result.data };
         return {
           ok: false,

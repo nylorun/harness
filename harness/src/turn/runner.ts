@@ -8,10 +8,13 @@ import {
   commitInput,
   commitToolResults,
 } from "../session/state.js";
-import { runStep, type LoopAgent } from "../step/run.js";
+import type { LoopAgent } from "../build/agent.js";
+import { runStep } from "../step/run.js";
 import { createId } from "../utils/ids.js";
 import { copyJson } from "../utils/immutable.js";
+import type { ObserveEmit } from "../utils/observe.js";
 import { ToolPlanRunner } from "./plan-runner.js";
+import { ContextState } from "../step/context-state.js";
 import { PromptPrefixState } from "../step/prompt-prefix.js";
 
 export interface PendingTurn {
@@ -45,7 +48,7 @@ export type TurnProgress =
 
 export interface TurnRunContext {
   readonly signal: AbortSignal;
-  readonly observe: (event: import("../types/shared.js").ObserveEvent) => void;
+  readonly observe: ObserveEmit;
   readonly assertCurrent: () => void;
   readonly onPlanActive: (pending: PendingTurn | undefined) => void;
   readonly onState: (state: SessionSnapshot) => void;
@@ -60,6 +63,7 @@ export class TurnRunner {
     private readonly sessionId: string,
     private readonly session: Readonly<{ readonly userId?: string; readonly context?: JsonObject }>,
     private readonly prefixState: PromptPrefixState = new PromptPrefixState(),
+    private readonly contextState: ContextState = new ContextState(),
   ) {}
 
   async start(
@@ -67,6 +71,7 @@ export class TurnRunner {
     event: InputEvent,
     context: TurnRunContext,
   ): Promise<TurnProgress> {
+    this.contextState.expireTurn();
     const turnId = createId("turn");
     const started = beginTurn(state, turnId, event);
     context.onState(started);
@@ -124,6 +129,7 @@ export class TurnRunner {
         signal: context.signal,
         session: this.session,
         prefixState: this.prefixState,
+        contextState: this.contextState,
       });
       context.assertCurrent();
       if (run.candidate) {
@@ -143,19 +149,19 @@ export class TurnRunner {
           output: run.output.output,
         };
 
-      context.observe({
+      const plan = run.output.plan;
+      context.observe(() => ({
         type: "tool.sealed",
         turnId,
         stepId,
         attributes: {
           executable: Object.freeze(
-            run.output.plan.executable.map((entry) =>
+            plan.executable.map((entry) =>
               Object.freeze({
                 callId: entry.call.callId,
                 toolName: entry.call.toolName,
                 args: copyJson(entry.call.args),
                 executeWith: entry.call.executeWith,
-                route: copyJson(entry.call.route),
                 invocationId: entry.invocationId,
                 ...(entry.preflight === undefined ? {} : { preflight: entry.preflight }),
                 ...(entry.interaction === undefined
@@ -164,9 +170,9 @@ export class TurnRunner {
               }),
             ),
           ),
-          immediate: copyJson(run.output.plan.immediateResults),
+          immediate: copyJson(plan.immediateResults),
         },
-      });
+      }));
       const pending: PendingTurn = {
         plan: new ToolPlanRunner(run.output.plan),
         turnId,

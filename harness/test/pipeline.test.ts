@@ -26,7 +26,7 @@ describe("step pipeline", () => {
     let step = 0;
     const seen: string[][] = [];
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         seen.push(request.tools.map((item) => item.name));
         return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
@@ -53,7 +53,7 @@ describe("step pipeline", () => {
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "tool.duplicate-name" } },
+      { type: "tripwire", tripwire: { code: "prefix.duplicate-tool-name" } },
     ]);
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -115,7 +115,7 @@ describe("step pipeline", () => {
     expect(output).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "candidate" },
-      { type: "tripwire", tripwire: { code: "response.replace-invalid" } },
+      { type: "tripwire", tripwire: { code: "response.invalid-replacement" } },
     ]);
   });
 
@@ -145,29 +145,28 @@ describe("step pipeline", () => {
     expect(session.state.status).toBe("idle");
   });
 
-  it("freezes the tool snapshot so later mutations do not change the bound route", async () => {
+  it("freezes the tool snapshot so later mutations do not change the bound parameters", async () => {
     const definition = authoredTool({
       name: "echo",
-      input: z.object({}).passthrough(),
+      parameters: z.object({ text: z.string() }),
       executeWith: "local",
-      route: { path: "/v1" },
     });
-    const routes: unknown[] = [];
+    const schemas: unknown[] = [];
     const result = Agent(
-      model(async (request) => {
-        routes.push(request.tools[0]?.route);
+      model(async (_call, { request }) => {
+        schemas.push(request.tools[0]?.parameters.jsonSchema);
         return "done";
       }),
     )
       .with(adapter())
       .use("snapshot", async (request, next) => {
         request.prefix.tools.set("snapshot", [definition]);
-        (definition as { route: unknown }).route = { path: "/admin" };
+        (definition as { parameters: unknown }).parameters = z.object({ admin: z.string() });
         return next();
       })
       .build();
     await turn(result, "go").handle.completed;
-    expect(routes).toEqual([{ path: "/v1" }]);
+    expect(schemas).toMatchObject([{ type: "object", properties: { text: { type: "string" } } }]);
   });
 
   it("emits step.started before middleware and model.started, and tool.sealed after the onion", async () => {
@@ -223,30 +222,23 @@ describe("step pipeline", () => {
     expect(b.session.state.status).toBe("idle");
   });
 
-  it("lets application middleware hide a host tool on the same Step", async () => {
-    const folder = async (request, next) => {
-      request.prefix.tools.set("folder", [tool("folder")]);
+  it("lets host-level assembly decide whether a folder tool is contributed", async () => {
+    const folder = (enabled: boolean) => async (request, next) => {
+      if (enabled) request.prefix.tools.set("folder", [tool("folder")]);
       request.prefix.instructions.set("folder", ["from folder"]);
       return next();
     };
     const seen: string[][] = [];
     const builder = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         seen.push(request.tools.map((item) => item.name));
         return "done";
       }),
     )
       .with(adapter())
-      .use("app", async (request, next) => {
-        request.prefix.tools.withhold("folder");
-        return next();
-      })
-      .use("nylorun-folder", folder);
+      .use("nylorun-folder", folder(false));
     await turn(builder.build(), "go").handle.completed;
     expect(seen).toEqual([[]]);
-    expect(builder.build().manifest.middleware.map((item) => item.id)).toEqual([
-      "app",
-      "nylorun-folder",
-    ]);
+    expect(builder.build().manifest.middleware.map((item) => item.id)).toEqual(["nylorun-folder"]);
   });
 });

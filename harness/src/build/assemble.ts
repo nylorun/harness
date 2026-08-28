@@ -1,9 +1,11 @@
 import type { BuildResult } from "../types/manifest.js";
 import type { BoundMiddleware } from "../types/middleware.js";
-import { normalizeDirective, type ModelAdapter, type ModelDirective } from "../types/model.js";
+import type { ModelAdapter, ModelDirective } from "../types/model.js";
+import { normalizeDirective } from "../model-normalize.js";
 import type { BuildDiagnostic } from "../types/shared.js";
 import type { ToolAdapter } from "../types/tool.js";
-import { bindAgent, type BuiltAgent } from "../agent.js";
+import { isHarnessError } from "../errors.js";
+import { bindAgent, type BuiltAgent } from "./agent.js";
 import { createAdapterRegistry } from "./adapters.js";
 import { createManifest } from "./manifest.js";
 
@@ -28,10 +30,8 @@ export function assembleAgent(
     if (!id) diagnostics.push(diagnostic("adapter.invalid-id", "Adapter id must not be empty"));
     else if (adapterIds.has(id))
       diagnostics.push(diagnostic("adapter.duplicate-id", `Duplicate adapter id '${id}'`));
-    else if (typeof adapter.validateRoute !== "function" || typeof adapter.execute !== "function")
-      diagnostics.push(
-        diagnostic("adapter.invalid", `Adapter '${id}' must provide validateRoute() and execute()`),
-      );
+    else if (typeof adapter.execute !== "function")
+      diagnostics.push(diagnostic("adapter.invalid", `Adapter '${id}' must provide execute()`));
     else {
       adapterIds.add(id);
       validAdapters.push(adapter);
@@ -45,8 +45,13 @@ export function assembleAgent(
   let frozenDirective: ModelDirective | undefined;
   if (directive !== undefined) {
     const normalized = normalizeDirective(directive);
-    if (normalized instanceof Error)
-      diagnostics.push(diagnostic("harness.invalid-directive", normalized.message));
+    if (isHarnessError(normalized))
+      diagnostics.push(
+        diagnostic(normalized.code, normalized.message, {
+          ...(Object.keys(normalized.details).length ? { details: normalized.details } : {}),
+          ...(normalized.cause === undefined ? {} : { cause: normalized.cause }),
+        }),
+      );
     else frozenDirective = normalized;
   }
 

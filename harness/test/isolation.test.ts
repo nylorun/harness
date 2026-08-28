@@ -5,7 +5,7 @@ import { model, turn } from "./fixtures.js";
 describe("Session isolation", () => {
   it("keeps parallel transcripts, queues, IDs, and outputs isolated", async () => {
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         await Promise.resolve();
         return `${request.sessionId}:${request.arrivals[0]?.kind === "user-message" ? request.arrivals[0].text : ""}`;
       }),

@@ -11,7 +11,7 @@ import type { ModelGatewayAdapter, RuntimeSessionState, WireSessionEvent } from 
 import { resolveModel, type ResolvedModel } from "./model.js";
 import { GatewayModelAdapter } from "./model-adapter.js";
 import { PiModelGatewayAdapter, type RetryPolicy } from "./pi-model-gateway.js";
-import type { RecordWriter, SessionRecorder } from "./record-store.js";
+import { createSessionJournal, type SessionJournal } from "./record-store.js";
 import { createMemorySessionStore, type SessionRecord, type SessionStore } from "./session-store.js";
 import { loadSkills } from "./skills.js";
 import { bridgeTools, type ToolModule } from "./tools.js";
@@ -22,7 +22,8 @@ export type RuntimeOptions = Readonly<{
   env?: Readonly<Record<string, string | undefined>>;
   strict?: boolean;
   store?: SessionStore;
-  recorder?: SessionRecorder;
+  redact?: readonly string[];
+  onError?: (error: Error) => void;
 }>;
 
 export type StartOptions = Readonly<{ signal?: AbortSignal; sessionId?: string }>;
@@ -49,7 +50,7 @@ export type BuiltAgent = Readonly<{
   bound: boolean;
   withHost(options: RuntimeOptions): BuiltAgent;
   close(): Promise<void>;
-  readonly records?: SessionRecorder;
+  readonly records?: SessionJournal;
 }>;
 export type BindInput = Readonly<{ moduleUrl: string; config: AgentConfig; toolModules: readonly ToolModule[] }>;
 
@@ -69,6 +70,11 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
   const sharedStore = createMemorySessionStore();
   const build = (host: RuntimeOptions): BuiltAgent => {
     const store = host.store ?? sharedStore;
+    const journal = createSessionJournal({
+      projectRoot: root,
+      ...(host.redact === undefined ? {} : { redact: host.redact }),
+      ...(host.onError === undefined ? {} : { onError: host.onError })
+    });
     const live = new Map<string, Live>();
     let readiness: Promise<AgentReadiness> | undefined;
     let closed = false;
@@ -129,6 +135,18 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
         const builder = input.config.harness(modelAdapter.invoke.bind(modelAdapter), { id: input.config.model });
         builder.with(bridged.adapter);
         const instructions = [input.config.instructions ?? "", ...loaded.skills.map((skill) => `Skill: ${skill.name}\n${skill.body}`)].filter(Boolean);
+        builder.use("nylorun-durable", async (request, next) => {
+          const response = await next();
+          await journal.appendRecord(request.sessionId, {
+            sessionId: request.sessionId,
+            turnNumber: request.turnNumber,
+            stepNumber: request.stepNumber,
+            transcript: request.transcript,
+            ...(response.candidate() === undefined ? {} : { candidate: response.candidate() }),
+            toolCalls: response.toolCalls()
+          });
+          return response;
+        });
         builder.use("nylorun-folder", async (request, next) => {
           request.prefix.tools.set("folder-tools", bridged.tools, { order: 0 });
           request.prefix.instructions.set("folder-instructions", instructions, { order: 0 });
@@ -153,11 +171,11 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
       found.running = true;
       let cancel = (reason?: string): void => { live.get(id)?.activeAbort?.abort(new Error(reason ?? "cancelled")); };
       const result = (async (): Promise<RunResult> => {
-        const ready = await prepare();
+        await prepare();
         const found = live.get(id)!;
         if (found.session === undefined) {
           found.session = boundAgent.run({ id });
-          found.session.observe((event) => projectObservation(event, id, append));
+          found.session.observe((event) => { void journal.appendObserve(id, event); });
           void (async () => {
             for await (const harnessEvent of found.session!.stream()) appendHarnessEvent(id, harnessEvent, append);
           })();
@@ -174,8 +192,6 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
             : found.session.input(event, { signal });
         append(id, "session.run.started", event.kind === "user-message" || event.kind === "interrupt" ? { input: event.text, input_kind: event.kind } : { input_kind: event.kind, interaction_id: event.interactionId });
         await store.setStatus(id, "running");
-        const writer = await openWriter(host.recorder, id, input.config, ready.manifest);
-        const writeFrom = found.events.length - 1;
         found.active = run;
         cancel = (reason?: string) => abort.abort(new Error(reason ?? "cancelled"));
         const completion = await run.completed;
@@ -188,10 +204,7 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
         found.state = runtimeState(id, found.session, found.events.length, finalOutput(found.events));
         const status = found.state.status;
         await store.setStatus(id, status);
-        if (writer !== undefined) {
-          for (const item of found.events.slice(writeFrom)) writer.append(item);
-          await writer.close(found.state);
-        }
+        await journal.flush();
         return Object.freeze({ state: found.state, output: found.state.output });
       })();
       const settled = result.then(() => undefined, () => undefined).then(() => { const found = live.get(id); if (found) { found.running = false; for (const waiter of found.waiters) waiter(); found.waiters.clear(); } });
@@ -206,7 +219,12 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
       async interact(id, event) { const found = live.get(id); if (found?.session === undefined || found.running || found.session.state.status !== "waiting") return false; startInput(id, event); return true; },
       async cancel(id, reason) { const found = live.get(id); if (found === undefined) return false; found.activeAbort?.abort(new Error(reason ?? "cancelled")); return true; },
       get: (id) => store.get(id), list: () => store.list(), claim: (key, id) => store.claim(key, id),
-      async events(id, cursor = 0) { const found = live.get(id); if (found !== undefined) return Object.freeze(found.events.filter((event) => event.seq > cursor)); const recorded = await host.recorder?.read(id); return recorded === undefined ? undefined : Object.freeze(recorded.filter((event) => event.seq > cursor)); },
+      async events(id, cursor = 0) {
+        const found = live.get(id);
+        if (found !== undefined) return Object.freeze(found.events.filter((event) => event.seq > cursor));
+        const observed = await journal.readObserve(id);
+        return observed === undefined ? undefined : Object.freeze(observed.map((event, index) => observeToWire(id, index + 1, event)).filter((event) => event.seq > cursor));
+      },
       follow(id, cursor = 0) { return live.has(id) ? followFrom(id, cursor, live) : undefined; },
       settled(id) { return live.get(id)?.settled; }
     });
@@ -225,8 +243,9 @@ export function __nyloBindAgent(input: BindInput): BuiltAgent {
         await Promise.allSettled([...live.values()].flatMap((found) => found.settled === undefined ? [] : [found.settled]));
         for (const found of live.values()) await found.session?.stop("Runtime closing");
         if (readiness !== undefined) await readiness;
+        await journal.flush();
       },
-      ...(host.recorder === undefined ? {} : { records: host.recorder })
+      records: journal
     });
   };
   return build({});
@@ -253,14 +272,9 @@ function sameConversationEvent(wire: WireSessionEvent, event: SessionEvent): boo
   const { type: _type, ...payload } = event;
   return JSON.stringify(wire.payload) === JSON.stringify(jsonRecord(payload));
 }
-function projectObservation(event: ObserveEvent, id: string, append: (id: string, type: string, payload: Record<string, unknown>) => unknown): void {
-  append(id, "harness.observe", {
-    observation: event.type,
-    ...("turnId" in event && event.turnId !== undefined ? { turn_id: event.turnId } : {}),
-    ...("stepId" in event && event.stepId !== undefined ? { step_id: event.stepId } : {}),
-    ...("adapterId" in event && event.adapterId !== undefined ? { adapter_id: event.adapterId } : {}),
-    ...("attributes" in event && event.attributes !== undefined ? { attributes: event.attributes } : {})
-  });
+function observeToWire(id: string, seq: number, event: ObserveEvent & { readonly ts: string }): WireSessionEvent {
+  const { type, ts, ...payload } = event;
+  return Object.freeze({ session: id, seq, ts, type, payload: jsonRecord(payload as Record<string, unknown>) });
 }
 function runtimeState(id: string, session: Session, seq: number, output: string): RuntimeSessionState {
   const status = session.state.status === "idle" ? "paused" : session.state.status === "stopped" ? "completed" : session.state.status;
@@ -269,5 +283,4 @@ function runtimeState(id: string, session: Session, seq: number, output: string)
 function finalOutput(events: readonly WireSessionEvent[]): string { for (let index = events.length - 1; index >= 0; index -= 1) { const event = events[index]!; if (event.type === "final" && typeof event.payload.output === "string") return event.payload.output; } return ""; }
 function followFrom(id: string, cursor: number, live: Map<string, Live>): AsyncIterable<WireSessionEvent> { return { async *[Symbol.asyncIterator]() { let at = cursor; while (true) { const found = live.get(id); if (found === undefined) return; while (at < found.events.length) yield found.events[at++]!; if (!found.running) return; await new Promise<void>((resume) => found.waiters.add(resume)); } } }; }
 function jsonRecord(value: Record<string, unknown>): Record<string, import("@nylorun/harness").JsonValue> { try { return JSON.parse(JSON.stringify(value)) as Record<string, import("@nylorun/harness").JsonValue>; } catch { return { error: "unserializable runtime event" }; } }
-async function openWriter(recorder: SessionRecorder | undefined, id: string, config: AgentConfig, manifest: CapabilityManifest): Promise<RecordWriter | undefined> { try { return await recorder?.open(id, { agent: config.name, model: config.model, bundleDigest: manifest.bundleDigest, manifestDigest: manifest.digest }); } catch { return undefined; } }
 function missing(file: string): NyloBuildError { return new NyloBuildError(diagnostic("NYLO_RUN_ARTIFACT_MISSING", "run", "error", file, `The built artifact ${file} is missing or unreadable.`, "Run the project build.")); }

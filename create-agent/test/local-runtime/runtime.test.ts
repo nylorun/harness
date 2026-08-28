@@ -20,6 +20,11 @@ async function built(root: string, host: RuntimeOptions = {}): Promise<BuiltAgen
   return module.agent.withHost(host);
 }
 
+async function cleanup(root: string, agent?: BuiltAgent): Promise<void> {
+  await agent?.close();
+  await rm(root, { recursive: true, force: true, maxRetries: 10 });
+}
+
 /**
  * A provider that replays a fixed script. Everything here runs offline: the point is the bridge
  * between a built artifact and a session, not the transport, which has its own coverage.
@@ -88,7 +93,7 @@ describe("the built agent", () => {
       expect(rebuilds.at(-1)).toBe(true);
     } finally {
       await watcher?.close();
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   }, 20_000);
 
@@ -111,7 +116,7 @@ describe("the built agent", () => {
         diagnostic: { code: "NYLO_RUN_ARTIFACT_MISSING" }
       });
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 
@@ -131,8 +136,10 @@ describe("the built agent", () => {
       expect(result.output).toBe("Hello.");
       expect(result.state.status).toBe("paused");
       expect(events.map((event) => event.type)).toContain("session.run.ended");
+      expect(await agent.records?.readRecords(run.id)).toEqual(expect.arrayContaining([expect.objectContaining({ sessionId: run.id, turnNumber: 1, stepNumber: 1 })]));
+      expect((await agent.records?.readObserve(run.id))?.some((event) => event.type === "model.completed")).toBe(true);
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 
@@ -170,7 +177,7 @@ describe("the built agent", () => {
         attempts: 1
       });
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 
@@ -180,11 +187,11 @@ describe("the built agent", () => {
       expect((await buildAgent(root)).ok).toBe(true);
       const agent = await built(root, { modelGatewayAdapter: scripted([{ type: "text", text: "unused" }, done("stop")]) });
       expect((await agent.ready()).harness).toMatchObject({
-        middleware: [{ id: "nylorun-folder" }],
+        middleware: [{ id: "nylorun-durable" }, { id: "nylorun-folder" }],
         model: { id: "anthropic/example" },
       });
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 
@@ -206,10 +213,11 @@ describe("the built agent", () => {
       for await (const event of run.events) events.push(event);
       await run.result;
 
-      expect(events).toContainEqual(expect.objectContaining({ type: "harness.observe", payload: expect.objectContaining({ observation: "adapter.completed" }) }));
+      const observed = await agent.records?.readObserve(run.id);
+      expect(observed?.some((event) => event.type === "adapter.completed")).toBe(true);
       expect((await run.result).output).toBe("Done.");
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 
@@ -233,7 +241,7 @@ describe("the built agent", () => {
       expect(result.state.status).toBe("paused");
       expect(result.output).toBe("Recovered.");
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 
@@ -248,7 +256,7 @@ describe("the built agent", () => {
         diagnostic: { code: "NYLO_RUN_TOOL_OPTION_UNSUPPORTED" }
       });
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 
@@ -270,7 +278,7 @@ describe("the built agent", () => {
         diagnostic: { code: "NYLO_RUN_SKILL_STALE" }
       });
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 
@@ -282,7 +290,7 @@ describe("the built agent", () => {
         diagnostic: { code: "NYLO_RUN_MODEL_GATEWAY_UNRESOLVED" }
       });
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 
@@ -302,7 +310,7 @@ describe("the built agent", () => {
       expect((await direct.ready()).model?.route).toBe("direct");
       expect((await direct.ready()).model?.upstreamModel).toBe("gpt-4o");
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await cleanup(root);
     }
   });
 });

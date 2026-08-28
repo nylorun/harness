@@ -12,6 +12,12 @@ on:
         description: Exact package version to stage
         required: true
         type: string
+      dist_tag:
+        description: npm dist-tag for this staged release
+        required: true
+        default: beta
+        type: choice
+        options: [beta, latest]
       confirm:
         description: Publication has explicit maintainer approval
         required: true
@@ -40,11 +46,16 @@ jobs:
         working-directory: ${{ inputs.package }}
       - run: npm run check
         working-directory: ${{ inputs.package }}
-      - name: Verify tag version
+      - name: Verify version and dist-tag
         working-directory: ${{ inputs.package }}
         shell: bash
         run: |
           version=$(node -p "require('./package.json').version")
           test "$version" = "${{ inputs.version }}"
-      - run: npm stage publish --access public
+          if [[ "$version" == *-* ]]; then
+            test "${{ inputs.dist_tag }}" = "beta"
+          else
+            test "${{ inputs.dist_tag }}" = "latest"
+          fi
+      - run: npm stage publish --access public --tag "${{ inputs.dist_tag }}"
         working-directory: ${{ inputs.package }}

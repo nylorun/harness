@@ -6,7 +6,7 @@ describe("middleware", () => {
   it("runs as an outward-to-inward request onion and inward-to-outward response onion", async () => {
     const order: string[] = [];
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         order.push(`model:${request.instructions.at(-1)}`);
         return "done";
       }),
@@ -30,6 +30,27 @@ describe("middleware", () => {
     expect(order).toEqual(["enter-one", "enter-two", "model:extra", "exit-two", "exit-one"]);
   });
 
+  it("exposes the same Session identity to middleware across a tool loop", async () => {
+    const sessionIds: string[] = [];
+    let calls = 0;
+    const result = Agent(
+      model(async () =>
+        ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
+      ),
+    )
+      .with(adapter())
+      .use("durability", async (request, next) => {
+        sessionIds.push(request.sessionId);
+        return next();
+      })
+      .use("tools", offer(tool()))
+      .build();
+
+    await turn(result, "go", { id: "durable-session" }).handle.completed;
+
+    expect(sessionIds).toEqual(["durable-session", "durable-session"]);
+  });
+
   it("tripwires conflicting model selection", async () => {
     const result = Agent(model(async () => "done"))
       .use("a", async (request, next) => {
@@ -44,7 +65,7 @@ describe("middleware", () => {
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "model.selection-conflict" } },
+      { type: "tripwire", tripwire: { code: "prefix.model-selection-conflict" } },
     ]);
   });
 
@@ -53,7 +74,7 @@ describe("middleware", () => {
     const facadeChecks: boolean[] = [];
     let step = 0;
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         if (++step > 1) return "done";
         expect(request.tools.map((item) => item.name)).toEqual(["echo"]);
         return toolCalls(
@@ -81,8 +102,7 @@ describe("middleware", () => {
         return response;
       })
       .use("restrictions", async (request, next) => {
-        request.prefix.tools.set("restrictions", [tool("hidden"), tool("echo")]);
-        request.prefix.tools.withhold("hidden");
+        request.prefix.tools.set("restrictions", [tool("echo")]);
         const response = await next();
         response.deny("deny", "policy");
         response.requireInteraction("deny", { kind: "approval", prompt: "approve" });
@@ -99,14 +119,14 @@ describe("middleware", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(toolEntry).toMatchObject({
       results: [
-        { kind: "failed", code: "tool.hidden", callId: "hidden" },
+        { kind: "failed", code: "tool.unknown", callId: "hidden" },
         { kind: "denied", reason: "policy", callId: "deny" },
       ],
     });
     expect(output.at(-1)).toMatchObject({ type: "final", output: "done" });
   });
 
-  it("rejects omitted, double, and forged next returns as session tripwires", async () => {
+  it("rejects missing, double, and forged middleware responses", async () => {
     const invoke = vi.fn(async () => "done");
     const omitted = Agent(model(invoke))
       .use("omitted", async () => undefined as never)
@@ -115,6 +135,22 @@ describe("middleware", () => {
       { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "middleware.invalid-response" } },
     ]);
+
+    const omittedNextReturn = Agent(model(invoke))
+      .use("omitted-next-return", async (_request, next) => {
+        await next();
+      })
+      .build();
+    const omittedNextReturnTurn = turn(omittedNextReturn, "go");
+    expect((await omittedNextReturnTurn.handle.completed).events).toMatchObject([
+      { type: "input", event: { kind: "user-message", text: "go" } },
+      { type: "candidate" },
+      {
+        type: "tripwire",
+        tripwire: { code: "middleware.invalid-response", scope: "step" },
+      },
+    ]);
+    expect(omittedNextReturnTurn.session.state.status).toBe("idle");
 
     const doubled = Agent(model(invoke))
       .use("double", async (_request, next) => {
@@ -147,16 +183,18 @@ describe("middleware", () => {
   it("copies context contributions before their source can mutate", async () => {
     const source = { type: "fixture", value: { nested: { value: 1 } } };
     const result = Agent(
-      model(async (request) => {
-        expect(request.context).toEqual([{ type: "fixture", value: { nested: { value: 1 } } }]);
-        expect(Object.isFrozen((request.context[0]?.value as { nested: object }).nested)).toBe(
-          true,
-        );
+      model(async (_call, { request }) => {
+        expect(request.context.items).toEqual([
+          { type: "fixture", value: { nested: { value: 1 } } },
+        ]);
+        expect(
+          Object.isFrozen((request.context.items[0]?.value as { nested: object }).nested),
+        ).toBe(true);
         return "done";
       }),
     )
       .use("context", async (request, next) => {
-        request.context.add(source);
+        request.context.set("fixture", [source]);
         queueMicrotask(() => {
           source.value.nested.value = 9;
         });
@@ -170,7 +208,7 @@ describe("middleware", () => {
     let step = 0;
     const seen: string[][] = [];
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         seen.push(request.tools.map((item) => item.name));
         return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
@@ -185,7 +223,7 @@ describe("middleware", () => {
   it("forwards a selected model directive and omits it when nobody selects", async () => {
     const seen: unknown[] = [];
     const selected = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         seen.push(request.model);
         return "done";
       }),
@@ -210,7 +248,7 @@ describe("middleware", () => {
 
     seen.length = 0;
     const omitted = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         seen.push(request.model);
         return "done";
       }),
@@ -222,7 +260,7 @@ describe("middleware", () => {
   it("treats select({}) as an explicit empty directive and allows an identical select", async () => {
     const seen: unknown[] = [];
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         seen.push(request.model);
         return "done";
       }),
@@ -253,7 +291,7 @@ describe("middleware", () => {
       .build();
     expect((await turn(merge, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "model.selection-conflict" } },
+      { type: "tripwire", tripwire: { code: "prefix.model-selection-conflict" } },
     ]);
 
     const unknownKey = Agent(model(async () => "done"))
@@ -293,7 +331,7 @@ describe("middleware", () => {
   it("deep-copies and freezes directive config so source mutation cannot leak in", async () => {
     const source = { reasoning: "low", nested: { n: 1 } };
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         expect(request.model?.config).toEqual({ reasoning: "low", nested: { n: 1 } });
         expect(Object.isFrozen(request.model?.config)).toBe(true);
         expect(Object.isFrozen((request.model?.config as { nested: object }).nested)).toBe(true);
@@ -313,7 +351,7 @@ describe("middleware", () => {
   it("exposes a frozen pre-call transcript and starts the next Step without a prior directive", async () => {
     const seen: Array<{ model?: unknown; transcriptKinds: string[] }> = [];
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         seen.push({
           model: request.model,
           transcriptKinds: request.transcript.map((entry) => entry.kind),
@@ -367,7 +405,7 @@ describe("middleware", () => {
     const seen: unknown[] = [];
     const prefixes: unknown[] = [];
     const agent = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         seen.push(request.model);
         return "done";
       }),
@@ -391,7 +429,7 @@ describe("middleware", () => {
   it("lets middleware replace or clear a seeded directive and rejects a conflicting select", async () => {
     const replaced: unknown[] = [];
     const replaceAgent = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         replaced.push(request.model);
         return "done";
       }),
@@ -408,7 +446,7 @@ describe("middleware", () => {
 
     const cleared: unknown[] = [];
     const clearAgent = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         cleared.push(request.model);
         return request.toolResults.length === 0
           ? toolCalls({ id: "call", name: "echo", args: {} })
@@ -437,7 +475,7 @@ describe("middleware", () => {
       .build();
     expect((await turn(conflict, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "model.selection-conflict" } },
+      { type: "tripwire", tripwire: { code: "prefix.model-selection-conflict" } },
     ]);
   });
 });

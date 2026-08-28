@@ -1,5 +1,6 @@
 import type { AdapterRegistry } from "../build/adapters.js";
-import type { ObserveEvent } from "../types/shared.js";
+import { HarnessError, isHarnessError } from "../errors.js";
+import type { ObserveEmit } from "../utils/observe.js";
 import type { InputEvent } from "../types/session.js";
 import type {
   Interaction,
@@ -28,7 +29,7 @@ export type ToolPlanProgress =
 export interface ToolPlanRunContext {
   readonly adapters: AdapterRegistry;
   readonly signal: AbortSignal;
-  readonly observe: (event: ObserveEvent) => void;
+  readonly observe: ObserveEmit;
   readonly ids: { readonly sessionId: string; readonly turnId: string; readonly stepId: string };
 }
 
@@ -116,7 +117,11 @@ export class ToolPlanRunner {
 
   private acceptResume(resume?: InputEvent): void {
     if (!this.pending) return;
-    if (!resume) throw new TypeError("A pending tool plan requires a correlated interaction input");
+    if (!resume)
+      throw new HarnessError(
+        "interaction.missing-resume",
+        "A pending tool plan requires a correlated interaction input",
+      );
     const pending = this.pending;
     const value = resumeValue(resume, pending);
     const entry = this.plan.executable[pending.index]!;
@@ -193,7 +198,11 @@ export class ToolPlanRunner {
       });
     } catch (error) {
       this.throwIfAborted(context.signal);
-      const result = failed(entry, "tool.preflight-failed", error);
+      const result = failed(
+        entry,
+        isHarnessError(error) ? error.code : "tool.preflight-failed",
+        error,
+      );
       this.results.set(entry.call.callId, result);
       context.observe({
         type: "adapter.preflight.completed",
@@ -246,7 +255,11 @@ export class ToolPlanRunner {
       });
     } catch (error) {
       this.throwIfAborted(context.signal);
-      const result = failed(entry, "tool.execution-failed", error);
+      const result = failed(
+        entry,
+        isHarnessError(error) ? error.code : "tool.execution-failed",
+        error,
+      );
       this.results.set(entry.call.callId, result);
       context.observe({
         type: "adapter.completed",
@@ -316,12 +329,14 @@ function interactionBarrier(
 }
 
 function normalizeInteraction(value: Interaction): RequiredInteraction {
-  if (!value || typeof value !== "object") throw new TypeError("Interaction must be an object");
+  if (!value || typeof value !== "object")
+    throw new HarnessError("interaction.invalid", "Interaction must be an object");
   if (value.kind !== "approval" && value.kind !== "response")
-    throw new TypeError("Interaction kind must be approval or response");
-  if (typeof value.prompt !== "string") throw new TypeError("Interaction prompt must be a string");
+    throw new HarnessError("interaction.invalid", "Interaction kind must be approval or response");
+  if (typeof value.prompt !== "string")
+    throw new HarnessError("interaction.invalid", "Interaction prompt must be a string");
   if (value.id !== undefined && (typeof value.id !== "string" || !value.id))
-    throw new TypeError("Interaction id must be a non-empty string");
+    throw new HarnessError("interaction.invalid", "Interaction id must be a non-empty string");
   return Object.freeze({
     id: value.id ?? createId("interaction"),
     kind: value.kind,
@@ -347,7 +362,10 @@ function resumeValue(event: InputEvent, pending: PendingBarrier): ToolExecutionR
       value: event.value,
       ...(pending.token === undefined ? {} : { token: pending.token }),
     });
-  throw new TypeError("Only correlated interaction input can resume a plan");
+  throw new HarnessError(
+    "interaction.uncorrelated-resume",
+    "Only correlated interaction input can resume a plan",
+  );
 }
 
 function resultFrom(
@@ -360,11 +378,14 @@ function resultFrom(
       return Object.freeze({ ...base, kind: "completed", output: copyJson(outcome.output) });
     case "denied":
       if (typeof outcome.reason !== "string")
-        throw new TypeError("Tool denial reason must be a string");
+        throw new HarnessError("tool.invalid-tool-result", "Tool denial reason must be a string");
       return Object.freeze({ ...base, kind: "denied", reason: outcome.reason });
     case "failed":
       if (typeof outcome.code !== "string" || typeof outcome.message !== "string")
-        throw new TypeError("Tool failure code and message must be strings");
+        throw new HarnessError(
+          "tool.invalid-tool-result",
+          "Tool failure code and message must be strings",
+        );
       return Object.freeze({
         ...base,
         kind: "failed",
@@ -372,7 +393,7 @@ function resultFrom(
         message: outcome.message,
       });
     default:
-      throw new TypeError("Tool adapter returned an invalid outcome");
+      throw new HarnessError("adapter.invalid-outcome", "Tool adapter returned an invalid outcome");
   }
 }
 

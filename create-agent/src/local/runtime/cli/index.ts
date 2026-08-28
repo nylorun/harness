@@ -6,7 +6,6 @@ import { SDK_VERSION } from "../manifest.js";
 import { diagnostic, NyloBuildError } from "../diagnostics.js";
 import { buildAgent } from "../build.js";
 import { validateAgent } from "../validate.js";
-import { createFileRecorder } from "../runtime/record-store.js";
 import { renderDiagnostic, styleFor } from "../runtime/render.js";
 import type { BuiltAgent } from "../runtime/bind.js";
 import type { CapabilityManifest, FolderDiagnostic } from "../types.js";
@@ -67,14 +66,11 @@ export async function importAgent(args: Args): Promise<BuiltAgent> {
 
   return agent.withHost({
     strict: args.strict,
-    recorder: createFileRecorder({
-      projectRoot: project,
-      redact: collectSecrets(),
-      onError: (error) =>
-        process.stderr.write(
-          `${styleFor(process.stderr.isTTY === true).dim(`recording unavailable: ${error.message}`)}\n`
-        )
-    })
+    redact: collectSecrets(),
+    onError: (error) =>
+      process.stderr.write(
+        `${styleFor(process.stderr.isTTY === true).dim(`recording unavailable: ${error.message}`)}\n`
+      )
   });
 }
 

@@ -1,5 +1,5 @@
 import type { ModelCandidate } from "../types/model.js";
-import { textFromOutput } from "../types/model.js";
+import { textFromOutput } from "../model-normalize.js";
 import type { Tripwire } from "../types/shared.js";
 import type {
   BoundToolDefinition,
@@ -8,9 +8,10 @@ import type {
   ToolResult,
 } from "../types/tool.js";
 import { createId } from "../utils/ids.js";
+import { HarnessError, isHarnessError } from "../errors.js";
 import { assertJson, copyJson } from "../utils/immutable.js";
 import type { CanonicalCall } from "./canonicalize.js";
-import type { StepContext } from "./context.js";
+import type { StepContext } from "./step-context.js";
 
 export interface ExecutablePlanEntry {
   readonly call: SealedToolCall;
@@ -117,24 +118,12 @@ function sealCall(
         `Unknown Tool '${candidate.name}'`,
       ),
     };
-  if (context.isToolHidden(candidate.name))
-    return {
-      order,
-      canonical,
-      immediate: failed(
-        candidate.id,
-        candidate.name,
-        "tool.hidden",
-        `Tool '${candidate.name}' is not visible in this Step`,
-      ),
-    };
-
   const args = validatedArguments(tool, candidate);
-  if (args instanceof Error)
+  if (isHarnessError(args))
     return {
       order,
       canonical,
-      immediate: failed(candidate.id, candidate.name, "tool.invalid-arguments", args.message),
+      immediate: failed(candidate.id, candidate.name, args.code, args.message),
     };
   const denial = context.denialFor(candidate.id);
   if (denial)
@@ -163,7 +152,6 @@ function sealCall(
         toolName: candidate.name,
         args,
         executeWith: tool.executeWith,
-        route: tool.route,
       }),
       invocationId: createId("invocation"),
       ...(interaction ? { interaction } : {}),
@@ -175,13 +163,16 @@ function sealCall(
 function validatedArguments(
   tool: BoundToolDefinition,
   candidate: CanonicalCall,
-): import("../types/shared.js").JsonValue | Error {
-  const validation = tool.input.validate(candidate.args);
-  if (!validation.ok) return new Error(validation.issues.join("; "));
+): import("../types/shared.js").JsonValue | HarnessError {
+  const validation = tool.parameters.validate(candidate.args);
+  if (!validation.ok)
+    return new HarnessError("tool.invalid-arguments", validation.issues.join("; "));
   try {
     assertJson(validation.value, `arguments for '${candidate.name}'`);
     return copyJson(validation.value);
   } catch (error) {
-    return error instanceof Error ? error : new Error(String(error));
+    return isHarnessError(error)
+      ? error
+      : new HarnessError("tool.invalid-arguments", String(error), { cause: error });
   }
 }

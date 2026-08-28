@@ -34,7 +34,7 @@ describe("Agent", () => {
       "resolveCredential", "resolveModel",
       // Local execution: the door, the record store, and what the build calls to bind an agent
       "Fetchable", "__nyloBindAgent", "__nyloUnboundAgent",
-      "RECORDS_DIRECTORY", "createFileRecorder", "createMemorySessionStore", "redactRecord",
+      "NYLO_DIRECTORY", "createSessionJournal", "createMemorySessionStore", "redactRecord",
       // Publishing, client side
       "ARCHIVE_EXCLUSIONS", "checkPublish", "createAuthoringArchive", "watchAgent"
     ].sort());
@@ -100,8 +100,8 @@ describe("build", () => {
     expect(await readFile(join(root, "dist", "agent.mjs"))).toEqual(bundle1);
     expect((await readdir(join(root, "dist"))).sort()).toEqual(["agent.mjs", "nylo.manifest.json"]);
     expect(first.manifest?.agent.name).toBe("sample");
-    expect(first.manifest?.harness).toMatchObject({ name: "@nylorun/harness", version: "0.4.0-rc.1" });
-    expect(JSON.parse(manifest1).harness).toMatchObject({ name: "@nylorun/harness", version: "0.4.0-rc.1" });
+    expect(first.manifest?.harness).toMatchObject({ name: "@nylorun/harness", version: "0.5.0-beta.1" });
+    expect(JSON.parse(manifest1).harness).toMatchObject({ name: "@nylorun/harness", version: "0.5.0-beta.1" });
     expect(Object.keys(first.manifest ?? {}).sort()).toEqual(["agent", "bundleDigest", "digest", "formatVersion", "harness", "instructionsDigest", "mcp", "requirements", "sdkVersion", "skills", "tools"]);
   });
 

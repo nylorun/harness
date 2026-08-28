@@ -1,11 +1,17 @@
-import type { AgentManifest } from "./types/manifest.js";
-import type { BoundMiddleware } from "./types/middleware.js";
-import type { ModelAdapter, ModelDirective } from "./types/model.js";
-import type { Session, SessionOptions } from "./types/session.js";
-import type { AdapterRegistry } from "./build/adapters.js";
-import { LiveSession } from "./session/session.js";
-import type { LoopAgent } from "./step/run.js";
-import { createId } from "./utils/ids.js";
+import type { AgentManifest } from "../types/manifest.js";
+import type { BoundMiddleware } from "../types/middleware.js";
+import type { ModelAdapter, ModelDirective } from "../types/model.js";
+import type { Session, SessionOptions } from "../types/session.js";
+import { LiveSession } from "../session/session.js";
+import { createId } from "../utils/ids.js";
+import type { AdapterRegistry } from "./adapters.js";
+
+export interface LoopAgent {
+  readonly middleware: readonly BoundMiddleware[];
+  readonly invoke: ModelAdapter;
+  readonly directive?: ModelDirective;
+  readonly adapters: AdapterRegistry;
+}
 
 let createBoundAgent: (
   middleware: readonly BoundMiddleware[],

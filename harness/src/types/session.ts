@@ -37,14 +37,15 @@ export interface InputCompletion {
 export interface InputHandle {
   readonly inputId: string;
   readonly completed: Promise<InputCompletion>;
-  consume(): Promise<InputCompletion>;
 }
+
+export type PromptPrefixPolicy = "observe" | "strict";
 
 export interface SessionOptions {
   readonly id?: string;
   readonly userId?: string;
   readonly context?: JsonObject;
-  readonly prefixPolicy?: "observe" | "strict";
+  readonly prefixPolicy?: PromptPrefixPolicy;
 }
 
 export interface InputOptions {
@@ -54,7 +55,7 @@ export interface InputOptions {
 export type MessageInput = string | { readonly text: string; readonly metadata?: JsonObject };
 export type InteractionReply = Extract<InputEvent, { kind: "approve" | "respond" }>;
 /** Ordinary user text or an interaction reply. Use `Session.interrupt()` for barge-in text. */
-export type AgentRunInput = MessageInput | InteractionReply;
+export type SessionInput = MessageInput | InteractionReply;
 
 export interface TranscriptInputEntry {
   readonly kind: "input";
@@ -93,9 +94,9 @@ export interface SessionSnapshot {
 export interface Session {
   readonly id: string;
   readonly state: SessionSnapshot;
-  input(event: AgentRunInput, options?: InputOptions): InputHandle;
+  input(event: SessionInput, options?: InputOptions): InputHandle;
   interrupt(event: MessageInput, options?: InputOptions): InputHandle;
   stream(): AsyncIterable<SessionEvent>;
-  observe(listener: Observer): void;
+  observe(listener: Observer): () => void;
   stop(reason?: string): Promise<void>;
 }

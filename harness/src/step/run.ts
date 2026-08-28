@@ -1,23 +1,25 @@
-import type { BoundMiddleware, StepInput } from "../types/middleware.js";
-import type { ModelAdapter, ModelCandidate, ModelDirective, ModelRequest } from "../types/model.js";
-import type { ObserveEvent, ObserveModelRequest, ObserveToolSnapshot } from "../types/shared.js";
+import type { StepInput } from "../types/middleware.js";
+import type { ModelCandidate, ModelRequest, PromptPrefixSnapshot } from "../types/model.js";
+import type {
+  ObserveEvent,
+  ObserveModelRequest,
+  ObservePromptPrefixSnapshot,
+  ObserveToolSnapshot,
+} from "../types/shared.js";
 import type { InputEvent, SessionSnapshot } from "../types/session.js";
 import type { BoundToolDefinition } from "../types/tool.js";
-import type { AdapterRegistry } from "../build/adapters.js";
-import { normalizeCandidate } from "../types/model.js";
+import type { LoopAgent } from "../build/agent.js";
+import { normalizeCandidate } from "../model-normalize.js";
+import { HarnessError, isHarnessError } from "../errors.js";
 import { copyJson } from "../utils/immutable.js";
+import type { ObserveEmit } from "../utils/observe.js";
 import { runMiddleware } from "./compose.js";
-import { StepContext } from "./context.js";
+import { ContextState } from "./context-state.js";
+import { StepContext } from "./step-context.js";
+import { projectModelCall } from "./project.js";
 import { resolveModelRequest } from "./resolve.js";
 import { sealStep, type SealedStepOutput } from "./seal.js";
 import { assertCanonicalPrefix, type PromptPrefixState } from "./prompt-prefix.js";
-
-export interface LoopAgent {
-  readonly middleware: readonly BoundMiddleware[];
-  readonly invoke: ModelAdapter;
-  readonly directive?: ModelDirective;
-  readonly adapters: AdapterRegistry;
-}
 
 export interface StepRunResult {
   readonly stepId: string;
@@ -27,7 +29,7 @@ export interface StepRunResult {
 
 export async function runStep(input: {
   agent: LoopAgent;
-  observe: (event: ObserveEvent) => void;
+  observe: ObserveEmit;
   state: SessionSnapshot;
   sessionId: string;
   turnId: string;
@@ -42,6 +44,7 @@ export async function runStep(input: {
     readonly context?: import("../types/shared.js").JsonObject;
   }>;
   prefixState: PromptPrefixState;
+  contextState: ContextState;
 }): Promise<StepRunResult> {
   const stepInput = Object.freeze({
     sessionId: input.sessionId,
@@ -55,15 +58,16 @@ export async function runStep(input: {
     transcript: Object.freeze([...input.state.transcript]),
   });
   const prefixTransaction = input.prefixState.begin(input.agent.adapters);
-  const context = new StepContext(stepInput, input.observe, prefixTransaction);
-  input.observe({
+  const contextTransaction = input.contextState.begin();
+  const context = new StepContext(stepInput, input.observe, prefixTransaction, contextTransaction);
+  input.observe(() => ({
     type: "step.started",
     turnId: input.turnId,
     stepId: input.stepId,
     turnNumber: input.turnNumber,
     stepNumber: input.stepNumber,
     attributes: snapshotStepStart(stepInput),
-  });
+  }));
   await runMiddleware(
     input.agent.middleware,
     context,
@@ -73,11 +77,13 @@ export async function runStep(input: {
       try {
         const prefix = prefixTransaction.snapshot();
         ledger = input.prefixState.preview(prefixTransaction, prefix);
+        const contextSnapshot = contextTransaction.snapshot();
         context.commitPrefix(ledger.snapshot);
+        context.commitContext(contextSnapshot);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return context.tripwire({
-          code: message.startsWith("Duplicate Tool '") ? "tool.duplicate-name" : "prefix.invalid",
+          code: isHarnessError(error) ? error.code : "prefix.invalid",
           message,
         });
       }
@@ -85,7 +91,6 @@ export async function runStep(input: {
         context,
         arrivals: input.arrivals,
         toolResults: input.toolResults,
-        sessionContext: input.session.context,
       });
       try {
         assertCanonicalPrefix(request.prefix);
@@ -96,8 +101,12 @@ export async function runStep(input: {
           request.tools.length !== request.prefix.tools.length ||
           request.tools.some((tool, index) => tool !== request.prefix.tools[index])
         )
-          throw new Error("Resolved ModelRequest diverged from its prompt prefix snapshot");
+          throw new HarnessError(
+            "request.prefix-drift",
+            "Resolved ModelRequest diverged from its prompt prefix snapshot",
+          );
         input.prefixState.commit(prefixTransaction, ledger);
+        input.contextState.commit(contextTransaction, request.context);
         input.observe({
           type: "model.prefix",
           turnId: input.turnId,
@@ -115,37 +124,43 @@ export async function runStep(input: {
           },
         });
         return context.tripwire({
-          code: "prefix.drift",
+          code: isHarnessError(error) ? error.code : "request.prefix-drift",
           message: error instanceof Error ? error.message : String(error),
           scope: "session",
         });
       }
-      input.observe({
+      input.observe(() => ({
         type: "model.started",
         turnId: input.turnId,
         stepId: input.stepId,
         ...(request.model?.id === undefined ? {} : { requestedModelId: request.model.id }),
         attributes: snapshotModelRequest(request),
-      });
+      }));
       try {
         const minted = context.mintFromModel(
-          normalizeCandidate(await input.agent.invoke(request, input.signal)),
+          normalizeCandidate(
+            await input.agent.invoke(projectModelCall(request), {
+              request,
+              signal: input.signal,
+            }),
+          ),
         );
         if (input.signal.aborted) throw input.signal.reason;
         const candidate = context.currentCandidate;
-        if (!candidate) throw new TypeError("Model candidate missing after mint");
-        input.observe({
+        if (!candidate)
+          throw new HarnessError("model.candidate-missing", "Model candidate missing after mint");
+        input.observe(() => ({
           type: "model.completed",
           turnId: input.turnId,
           stepId: input.stepId,
           ...(request.model?.id === undefined ? {} : { requestedModelId: request.model.id }),
-          attributes: copyJson(candidate),
-        });
+          attributes: candidate,
+        }));
         return minted;
       } catch (error) {
         if (input.signal.aborted) throw input.signal.reason;
         return context.tripwire({
-          code: "model.failed",
+          code: isHarnessError(error) ? error.code : "model.failed",
           message: error instanceof Error ? error.message : String(error),
         });
       }
@@ -168,20 +183,32 @@ function snapshotStepStart(
     ...(Object.keys(session).length === 0 ? {} : { session }),
     arrivals: copyJson(input.arrivals),
     toolResults: copyJson(input.toolResults),
-    transcript: copyJson(input.transcript),
+    transcript: input.transcript,
   });
 }
 
 function snapshotModelRequest(request: ModelRequest): ObserveModelRequest {
   return Object.freeze({
     ...(request.model === undefined ? {} : { model: copyJson(request.model) }),
-    prefix: request.prefix,
+    prefix: snapshotPrefix(request.prefix),
     instructions: Object.freeze([...request.instructions]),
     context: copyJson(request.context),
     arrivals: copyJson(request.arrivals),
     toolResults: copyJson(request.toolResults),
-    transcript: copyJson(request.transcript),
+    transcript: request.transcript,
     tools: snapshotTools(request.tools),
+  });
+}
+
+function snapshotPrefix(prefix: PromptPrefixSnapshot): ObservePromptPrefixSnapshot {
+  return Object.freeze({
+    version: prefix.version,
+    ...(prefix.model === undefined ? {} : { model: copyJson(prefix.model) }),
+    instructions: copyJson(prefix.instructions),
+    tools: snapshotTools(prefix.tools),
+    toolContracts: copyJson(prefix.toolContracts),
+    contributors: copyJson(prefix.contributors),
+    digests: copyJson(prefix.digests),
   });
 }
 
@@ -192,9 +219,7 @@ function snapshotTools(tools: readonly BoundToolDefinition[]): readonly ObserveT
         name: tool.name,
         ...(tool.description === undefined ? {} : { description: tool.description }),
         executeWith: tool.executeWith,
-        route: copyJson(tool.route),
-        ...(tool.metadata === undefined ? {} : { metadata: copyJson(tool.metadata) }),
-        input: Object.freeze({ jsonSchema: copyJson(tool.input.jsonSchema) }),
+        parameters: Object.freeze({ jsonSchema: copyJson(tool.parameters.jsonSchema) }),
       }),
     ),
   );

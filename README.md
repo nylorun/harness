@@ -1,6 +1,6 @@
 # Nylo Agents
 
-Nylo's agent-authoring packages. Harness is prepared for a separate public source repository; Create Agent and Studio are distributed as npm packages while their source remains in this repository.
+Nylo's agent-authoring packages. Harness, Create Agent, and Studio are developed in this repository and distributed as npm packages.
 
 This repository contains three independently versioned packages:
 

@@ -7,7 +7,7 @@ describe("sealing", () => {
     const execute = vi.fn(async (call) => ({ kind: "completed" as const, output: call.args }));
     let calls = 0;
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         calls += 1;
         return calls === 1
           ? toolCalls(
@@ -36,7 +36,7 @@ describe("sealing", () => {
     const adapterOutput = { nested: { value: 1 } };
     let step = 0;
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         if (++step > 1) return "done";
         return toolCalls(
           { id: "", name: "echo", args: candidateArgs },
@@ -84,7 +84,7 @@ describe("sealing", () => {
     const modelCompletion = await turn(malformedModel, "go").handle.completed;
     expect(modelCompletion.events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "model.failed" } },
+      { type: "tripwire", tripwire: { code: "model.invalid-candidate" } },
     ]);
 
     let step = 0;
@@ -104,7 +104,7 @@ describe("sealing", () => {
       expect(results.results).toEqual([
         expect.objectContaining({
           kind: "failed",
-          code: "tool.execution-failed",
+          code: "tool.invalid-tool-result",
           message: "Tool denial reason must be a string",
         }),
       ]);

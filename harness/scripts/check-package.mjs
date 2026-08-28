@@ -2,9 +2,29 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import ts from "typescript";
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+const canonicalLicense = readFileSync("../LICENSE", "utf8");
 const forbidden = ["@nylorun/runtime", "@nylorun/agent"];
+if (manifest.description !== "A provider-neutral, in-memory agent loop for TypeScript.")
+  throw new Error("Harness package description must describe the current provider-neutral loop.");
+if (!Array.isArray(manifest.keywords) || manifest.keywords.length === 0)
+  throw new Error("Harness package must declare npm keywords.");
+if (manifest.author !== "Nylo") throw new Error("Harness package must identify its author.");
+if (manifest.homepage !== "https://github.com/nylorun/agents/tree/main/harness#readme")
+  throw new Error("Harness package homepage must point to its canonical README.");
+if (manifest.bugs !== "https://github.com/nylorun/agents/issues")
+  throw new Error("Harness package bugs field must point to the canonical issue tracker.");
+if (
+  manifest.repository?.url !== "git+https://github.com/nylorun/agents.git" ||
+  manifest.repository?.directory !== "harness"
+)
+  throw new Error(
+    "Harness package repository metadata must point to the canonical source directory.",
+  );
+if (readFileSync("LICENSE", "utf8") !== canonicalLicense)
+  throw new Error("Harness package LICENSE must contain the complete canonical Apache-2.0 text.");
 const production = { ...(manifest.dependencies ?? {}), ...(manifest.optionalDependencies ?? {}) };
 for (const name of forbidden) {
   if (name in production) throw new Error(`Forbidden production dependency: ${name}`);
@@ -20,6 +40,19 @@ for (const file of sourceFiles("src").filter((path) => path.endsWith(".ts"))) {
     if (source.includes(name))
       throw new Error(`Forbidden source import reference ${name} in ${file}`);
   }
+  if (source.includes("message.startsWith("))
+    throw new Error(`Message text must not classify a Harness outcome in ${file}`);
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const visit = (node) => {
+    if (
+      ts.isNewExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      ["Error", "TypeError", "RangeError"].includes(node.expression.text)
+    )
+      throw new Error(`Unstructured ${node.expression.text} construction in ${file}`);
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
 }
 
 const cache = mkdtempSync(join(tmpdir(), "nylo-harness-pack-"));
@@ -34,6 +67,7 @@ try {
   const allowed = (path) =>
     path === "package.json" ||
     path === "README.md" ||
+    path === "CHANGELOG.md" ||
     path === "LICENSE" ||
     /^dist\/.+\.(?:js|d\.ts)$/.test(path);
   const unexpected = files.filter((path) => !allowed(path));
@@ -41,6 +75,7 @@ try {
   for (const required of [
     "package.json",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "dist/index.js",
     "dist/index.d.ts",
@@ -52,6 +87,8 @@ try {
     "AgentBuilder",
     "AgentBuildError",
     "AgentLifecycleError",
+    "HarnessError",
+    "isHarnessError",
     "Agent",
     "BuiltAgent",
     "tool",

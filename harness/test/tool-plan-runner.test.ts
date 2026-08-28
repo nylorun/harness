@@ -21,7 +21,6 @@ function plan(
           toolName: "echo",
           args: { text: "hello" },
           executeWith: "local",
-          route: { operation: "echo" },
         },
         invocationId: "invoke",
         ...(options.interaction ? { interaction: options.interaction } : {}),
@@ -47,7 +46,7 @@ describe("ToolPlanRunner", () => {
     const runner = new ToolPlanRunner(
       plan({ interaction: { id: "approval", kind: "approval", prompt: "Approve?" } }),
     );
-    const run = context([{ id: "local", validateRoute() {}, execute }]);
+    const run = context([{ id: "local", execute }]);
 
     await expect(runner.run(run)).resolves.toMatchObject({
       kind: "interaction-required",
@@ -76,7 +75,7 @@ describe("ToolPlanRunner", () => {
     );
     const execute = vi.fn(async () => ({ kind: "completed" as const, output: "ok" }));
     const runner = new ToolPlanRunner(plan({ preflight: "validation" }));
-    const run = context([{ id: "local", validateRoute() {}, preflight, execute }]);
+    const run = context([{ id: "local", preflight, execute }]);
 
     await expect(runner.run(run)).resolves.toMatchObject({
       kind: "interaction-required",
@@ -97,7 +96,7 @@ describe("ToolPlanRunner", () => {
       throw new Error("boom");
     });
     const runner = new ToolPlanRunner(plan());
-    const run = context([{ id: "local", validateRoute() {}, execute }]);
+    const run = context([{ id: "local", execute }]);
     await expect(runner.run(run)).resolves.toEqual({
       kind: "completed",
       results: [

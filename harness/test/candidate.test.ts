@@ -96,7 +96,7 @@ describe("model candidate blocks", () => {
     ).build();
     expect((await turn(nonObject, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "model.failed" } },
+      { type: "tripwire", tripwire: { code: "model.invalid-candidate" } },
     ]);
 
     const aborted = Agent(
@@ -104,7 +104,7 @@ describe("model candidate blocks", () => {
     ).build();
     expect((await turn(aborted, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "model.failed" } },
+      { type: "tripwire", tripwire: { code: "model.invalid-candidate" } },
     ]);
 
     const errored = Agent(
@@ -112,7 +112,7 @@ describe("model candidate blocks", () => {
     ).build();
     expect((await turn(errored, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "model.failed" } },
+      { type: "tripwire", tripwire: { code: "model.invalid-candidate" } },
     ]);
   });
 
@@ -125,7 +125,7 @@ describe("model candidate blocks", () => {
     ).build();
     expect((await turn(tokens, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "model.failed" } },
+      { type: "tripwire", tripwire: { code: "model.invalid-candidate" } },
     ]);
 
     const thrown = Agent(

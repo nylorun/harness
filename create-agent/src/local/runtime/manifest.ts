@@ -116,7 +116,7 @@ export function createManifest(
     mcp: config.mcp,
     harness: Object.freeze({
       name: "@nylorun/harness" as const,
-      version: "0.4.0-rc.1",
+      version: "0.5.0-beta.1",
       capabilities: Object.freeze(["sessions", "tools", "middleware", "interactions", "isolation"])
     }),
     requirements,

@@ -9,9 +9,8 @@ describe("Zod schemas", () => {
     let executed: unknown;
     const convert = tool({
       name: "convert",
-      input: z.object({ count: z.coerce.number() }),
+      parameters: z.object({ count: z.coerce.number() }),
       executeWith: "local",
-      route: {},
     });
     const result = Agent(
       model(async () => {
@@ -38,11 +37,11 @@ describe("Zod schemas", () => {
   });
 
   it("binds a Zod object onto the offered Model request", async () => {
-    const input = z.object({ text: z.string() });
-    const echo = tool({ name: "echo", input, executeWith: "local", route: {} });
+    const parameters = z.object({ text: z.string() });
+    const echo = tool({ name: "echo", parameters, executeWith: "local" });
     const result = Agent(
-      model(async (request) => {
-        expect(request.tools[0]?.input.jsonSchema).toMatchObject({
+      model(async (_call, { request }) => {
+        expect(request.tools[0]?.parameters.jsonSchema).toMatchObject({
           type: "object",
           properties: { text: { type: "string" } },
         });
@@ -67,9 +66,8 @@ describe("Zod schemas", () => {
         request.prefix.tools.set("bad", [
           tool({
             name: "bad",
-            input: z.string() as never,
+            parameters: z.string() as never,
             executeWith: "local",
-            route: {},
           }),
         ]);
         return next();
@@ -78,19 +76,19 @@ describe("Zod schemas", () => {
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "tool.invalid" } },
+      { type: "tripwire", tripwire: { code: "tool.invalid-schema" } },
     ]);
     expect(invoke).not.toHaveBeenCalled();
   });
 
   it("tripwires declared asynchronous Zod checks before the Model runs", async () => {
     const invoke = vi.fn(async () => "done");
-    const input = z.object({ text: z.string() }).refine(async () => true);
+    const parameters = z.object({ text: z.string() }).refine(async () => true);
     const result = Agent(model(invoke))
       .with(adapter())
       .use("async", async (request, next) => {
         request.prefix.tools.set("async", [
-          tool({ name: "async", input, executeWith: "local", route: {} }),
+          tool({ name: "async", parameters, executeWith: "local" }),
         ]);
         return next();
       })
@@ -98,7 +96,7 @@ describe("Zod schemas", () => {
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "tool.invalid" } },
+      { type: "tripwire", tripwire: { code: "tool.invalid-schema" } },
     ]);
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -111,9 +109,8 @@ describe("Zod schemas", () => {
         request.prefix.tools.set("unconvertible", [
           tool({
             name: "bigint",
-            input: z.object({ value: z.bigint() }),
+            parameters: z.object({ value: z.bigint() }),
             executeWith: "local",
-            route: {},
           }),
         ]);
         return next();
@@ -122,7 +119,7 @@ describe("Zod schemas", () => {
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "tool.invalid" } },
+      { type: "tripwire", tripwire: { code: "tool.invalid-schema" } },
     ]);
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -140,9 +137,8 @@ describe("Zod schemas", () => {
         request.prefix.tools.set("typed", [
           tool({
             name: "echo",
-            input: z.object({ text: z.string() }),
+            parameters: z.object({ text: z.string() }),
             executeWith: "local",
-            route: {},
           }),
         ]);
         return next();

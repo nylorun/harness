@@ -95,7 +95,7 @@ curl -sS "http://127.0.0.1:4111/v1/sessions/$SESSION_ID/events?after=0&limit=100
 ```
 
 Pass when cursors are monotonic, both turns occur in one Harness Session, history contains both user
-messages and finals, and `.nylo/runs/<session-id>.jsonl` is readable after shutdown.
+messages and finals, and `.nylo/<session-id>/record.jsonl` plus `.nylo/<session-id>/observe.jsonl` are readable after shutdown.
 
 ## 5. Studio with the real agent
 
@@ -110,7 +110,7 @@ node ../../studio/dist/cli.js dev --studio --no-open --port 4111
 Open the printed `http://nylo.run.localhost:<port>` URL.
 
 1. Confirm the dashboard shows `ollama-simple`, `local/gemma4:e2b-mlx`,
-   `@nylorun/harness`, version `0.4.0-rc.1`, and the bound Harness model,
+   `@nylorun/harness`, version `0.5.0-beta.1`, and the bound Harness model,
    middleware, and adapter IDs.
 2. Create a Session and send `Current token: [studio-one]`.
 3. Confirm the assistant returns the sentinel through the AG-UI chat.

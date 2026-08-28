@@ -1,6 +1,6 @@
-import type { ModelAdapter } from "./types/model.js";
-import type { StepMiddleware } from "./types/middleware.js";
-import type { ToolAdapter, ToolDefinition } from "./types/tool.js";
+import type { ModelAdapter } from "../types/model.js";
+import type { StepMiddleware } from "../types/middleware.js";
+import type { ToolAdapter, ToolDefinition } from "../types/tool.js";
 
 export const tool = <T extends ToolDefinition>(value: T): T => value;
 export const adapter = <T extends ToolAdapter>(value: T): T => value;

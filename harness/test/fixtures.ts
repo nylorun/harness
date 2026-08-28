@@ -5,12 +5,12 @@ import {
   model as typedModel,
   tool as typedTool,
   type BuiltAgent,
-  type AgentRunInput,
   type InputOptions,
   type JsonObject,
   type ModelCandidate,
   type ModelAdapter,
   type SessionOptions,
+  type SessionInput,
   type StepRequest,
   type StepResponse,
   type ToolAdapter,
@@ -19,7 +19,7 @@ import {
 export const objectSchema = z.object({}).passthrough();
 
 export function tool(name = "echo", executeWith = "local") {
-  return typedTool({ name, input: objectSchema, executeWith, route: { operation: name } });
+  return typedTool({ name, parameters: objectSchema, executeWith });
 }
 
 export function offer(...tools: ReturnType<typeof tool>[]) {
@@ -32,7 +32,6 @@ export function offer(...tools: ReturnType<typeof tool>[]) {
 export function adapter(execute?: ToolAdapter["execute"]) {
   return typedAdapter({
     id: "local",
-    validateRoute() {},
     execute: execute ?? (async (call) => ({ kind: "completed" as const, output: call.args })),
   });
 }
@@ -66,7 +65,7 @@ export function expectBuildError(build: () => unknown): AgentBuildError {
 
 export function turn(
   agent: BuiltAgent,
-  input: AgentRunInput = "go",
+  input: SessionInput = "go",
   options: SessionOptions & InputOptions = {},
 ) {
   const session = agent.run({

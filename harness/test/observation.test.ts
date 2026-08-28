@@ -2,9 +2,16 @@ import { describe, expect, it } from "vitest";
 import { Agent, type ObserveEvent } from "../src/index.js";
 import { adapter, model, offer, tool, toolCalls } from "./fixtures.js";
 
+function expectPlainJson(value: unknown): void {
+  const encoded = JSON.stringify(value);
+  expect(encoded).toBeDefined();
+  expect(JSON.parse(encoded!)).toEqual(value);
+}
+
 describe("observation", () => {
   it("is causal within a run and fail-open for sync and async observer failures", async () => {
     const types: string[] = [];
+    const healthy: string[] = [];
     let count = 0;
     const result = Agent(model(async () => "done")).build();
     const session = result.run();
@@ -14,9 +21,59 @@ describe("observation", () => {
       if (count % 2) throw new Error("sync observer failure");
       return Promise.reject(new Error("async observer failure"));
     });
+    session.observe((event) => healthy.push(event.type));
     const completion = await session.input("go").completed;
     expect(completion.status).toBe("completed");
     expect(types.indexOf("model.started")).toBeLessThan(types.indexOf("model.completed"));
+    expect(healthy).toEqual(types);
+  });
+
+  it("delivers events to independent observers and unsubscribes one idempotently", async () => {
+    const first: string[] = [];
+    const second: string[] = [];
+    const session = Agent(model(async () => "done"))
+      .build()
+      .run();
+    const unsubscribeFirst = session.observe((event) => first.push(event.type));
+    session.observe((event) => second.push(event.type));
+
+    await session.input("first").completed;
+    expect(first).toEqual(second);
+    expect(first).toContain("turn.completed");
+
+    unsubscribeFirst();
+    unsubscribeFirst();
+    const firstCount = first.length;
+    await session.input("second").completed;
+    expect(first).toHaveLength(firstCount);
+    expect(second.length).toBeGreaterThan(firstCount);
+  });
+
+  it("deduplicates listeners and applies subscription changes from the next event", async () => {
+    const duplicateTypes: string[] = [];
+    const earlyTypes: string[] = [];
+    const lateTypes: string[] = [];
+    const session = Agent(model(async () => "done"))
+      .build()
+      .run();
+    const duplicate = (event: ObserveEvent) => duplicateTypes.push(event.type);
+    session.observe(duplicate);
+    session.observe(duplicate);
+
+    let unsubscribeEarly!: () => void;
+    unsubscribeEarly = session.observe((event) => {
+      earlyTypes.push(event.type);
+      if (event.type === "input.received") {
+        session.observe((nextEvent) => lateTypes.push(nextEvent.type));
+        unsubscribeEarly();
+      }
+    });
+
+    await session.input("go").completed;
+    expect(duplicateTypes.filter((type) => type === "input.received")).toHaveLength(1);
+    expect(earlyTypes).toEqual(["input.received"]);
+    expect(lateTypes).not.toContain("input.received");
+    expect(lateTypes).toContain("step.started");
   });
 
   it("records requestedModelId only when middleware selected an id", async () => {
@@ -46,6 +103,22 @@ describe("observation", () => {
     await plainSession.input("go").completed;
     expect(omitted).toEqual([undefined, undefined]);
     await plainSession.stop();
+  });
+
+  it("projects the model.started prefix to plain JSON", async () => {
+    const observed: ObserveEvent[] = [];
+    const session = Agent(model(async () => "done"))
+      .with(adapter())
+      .use("tools", offer(tool()))
+      .build()
+      .run();
+    session.observe((event) => observed.push(event));
+
+    await session.input("go").completed;
+
+    const started = observed.find((event) => event.type === "model.started");
+    if (!started || started.type !== "model.started") throw new Error("missing model.started");
+    expectPlainJson(started.attributes);
   });
 
   it("publishes input.cancelled on observe when a queued input is aborted", async () => {
@@ -379,5 +452,38 @@ describe("observation", () => {
       scope: "step",
       attributes: { message: "provider down" },
     });
+  });
+
+  it("shares a frozen point-in-time transcript on step.started and model.started", async () => {
+    let step = 0;
+    const session = Agent(
+      model(async () =>
+        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: { text: "hi" } }) : "done",
+      ),
+    )
+      .with(adapter())
+      .use("echo", offer(tool()))
+      .build()
+      .run();
+    const observed: ObserveEvent[] = [];
+    session.observe((event) => observed.push(event));
+    expect((await session.input("go").completed).status).toBe("completed");
+
+    const firstStep = observed.find((event) => event.type === "step.started");
+    const firstStarted = observed.find((event) => event.type === "model.started");
+    if (!firstStep || firstStep.type !== "step.started") throw new Error("missing step.started");
+    if (!firstStarted || firstStarted.type !== "model.started")
+      throw new Error("missing model.started");
+
+    expect(Object.isFrozen(firstStep.attributes.transcript)).toBe(true);
+    expect(Object.isFrozen(firstStarted.attributes.transcript)).toBe(true);
+    expectPlainJson(firstStep.attributes.transcript);
+    expectPlainJson(firstStarted.attributes.transcript);
+
+    const firstLength = firstStep.attributes.transcript.length;
+    expect(firstStarted.attributes.transcript).toHaveLength(firstLength);
+    expect(session.state.transcript.length).toBeGreaterThan(firstLength);
+    expect(firstStep.attributes.transcript).toHaveLength(firstLength);
+    expect(firstStarted.attributes.transcript).toHaveLength(firstLength);
   });
 });

@@ -1,13 +1,16 @@
 import type {
+  ContextMutationOptions,
+  ContextSnapshot,
   ModelCandidate,
   ModelDirective,
   PromptPrefixMutationOptions,
   PromptPrefixSnapshot,
 } from "../types/model.js";
 import type { StepInput, StepRequest, StepResponse } from "../types/middleware.js";
-import type { ContextItem, ObserveEvent, Tripwire } from "../types/shared.js";
+import type { ContextItem, Tripwire } from "../types/shared.js";
+import type { ObserveEmit } from "../utils/observe.js";
 import type { BoundToolDefinition, Interaction, ToolDefinition } from "../types/tool.js";
-import { copyJson } from "../utils/immutable.js";
+import { HarnessError, isHarnessError } from "../errors.js";
 import {
   callsFromCanonical,
   candidateFromCanonical,
@@ -15,7 +18,8 @@ import {
   identityKey,
   type CanonicalCall,
 } from "./canonicalize.js";
-import { normalizeCandidate } from "../types/model.js";
+import { normalizeCandidate } from "../model-normalize.js";
+import { ContextTransaction, contextOwner } from "./context-state.js";
 import { owner, PromptPrefixTransaction } from "./prompt-prefix.js";
 
 const branded = new WeakSet<object>();
@@ -27,8 +31,8 @@ export function isBrandedResponse(value: unknown): value is StepResponse {
 /** Mutable Step state. Middleware receives leased request views and one branded response. */
 export class StepContext {
   readonly input: Readonly<StepInput>;
-  readonly #observe: (event: ObserveEvent) => void;
-  readonly #contextItems: ContextItem[] = [];
+  readonly #observe: ObserveEmit;
+  readonly #context: ContextTransaction;
   readonly #prefix: PromptPrefixTransaction;
   readonly #denials = new Map<string, string>();
   readonly #interactions = new Map<string, Interaction>();
@@ -40,15 +44,18 @@ export class StepContext {
   #response?: StepResponse;
   #sealed = false;
   #committedPrefix?: PromptPrefixSnapshot;
+  #committedContext?: ContextSnapshot;
 
   constructor(
     input: Readonly<StepInput>,
-    observe: (event: ObserveEvent) => void,
+    observe: ObserveEmit,
     prefix: PromptPrefixTransaction,
+    context: ContextTransaction,
   ) {
     this.input = input;
     this.#observe = observe;
     this.#prefix = prefix;
+    this.#context = context;
   }
 
   get currentTripwire(): Tripwire | undefined {
@@ -63,8 +70,8 @@ export class StepContext {
   get instructions(): readonly string[] {
     return Object.freeze(this.prefixSnapshot().instructions.map((item) => item.text));
   }
-  get contextItems(): readonly ContextItem[] {
-    return Object.freeze([...this.#contextItems]);
+  contextSnapshot(): ContextSnapshot {
+    return this.#committedContext ?? this.#context.snapshot();
   }
   get offeredTools(): readonly BoundToolDefinition[] {
     return this.prefixSnapshot().tools;
@@ -72,15 +79,14 @@ export class StepContext {
   get catalogByName(): ReadonlyMap<string, BoundToolDefinition> {
     return this.#prefix.catalogByName();
   }
-
-  isToolHidden(toolName: string): boolean {
-    return this.#prefix.isWithheld(toolName);
-  }
   prefixSnapshot(): PromptPrefixSnapshot {
     return this.#committedPrefix ?? this.#prefix.snapshot();
   }
   commitPrefix(snapshot: PromptPrefixSnapshot): void {
     this.#committedPrefix = snapshot;
+  }
+  commitContext(snapshot: ContextSnapshot): void {
+    this.#committedContext = snapshot;
   }
   denialFor(callId: string): string | undefined {
     return this.#denials.get(callId);
@@ -130,7 +136,11 @@ export class StepContext {
           middlewareId,
           reason: this.#sealed ? "step-sealed" : "mutators-revoked",
         });
-        throw new Error("Middleware request mutators are no longer active");
+        throw new HarnessError(
+          "middleware.request-mutators-revoked",
+          "Middleware request mutators are no longer active",
+          { details: { middlewareId } },
+        );
       }
       action();
     };
@@ -140,18 +150,30 @@ export class StepContext {
           action();
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : String(cause);
-          const code =
-            kind === "tools"
-              ? "tool.invalid"
+          const code = isHarnessError(cause)
+            ? cause.code
+            : kind === "tools"
+              ? "tool.invalid-schema"
               : kind === "model"
-                ? message.startsWith("A different model directive")
-                  ? "model.selection-conflict"
-                  : "model.invalid-directive"
-                : "prefix.invalid";
+                ? "model.invalid-directive"
+                : "prefix.invalid-instructions";
           this.#tripwire ??= Object.freeze({ code, message });
         }
       });
+    const mutateContext = (action: () => void): void =>
+      mutate(() => {
+        try {
+          action();
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : String(cause);
+          this.#tripwire ??= Object.freeze({
+            code: isHarnessError(cause) ? cause.code : "context.invalid-item",
+            message,
+          });
+        }
+      });
     const value: StepRequest = Object.freeze({
+      sessionId: this.input.sessionId,
       session: this.input.session,
       turnNumber: this.input.turnNumber,
       stepNumber: this.input.stepNumber,
@@ -159,21 +181,14 @@ export class StepContext {
       toolResults: this.input.toolResults,
       transcript: this.input.transcript,
       context: Object.freeze({
-        add: (...items: ContextItem[]) =>
-          mutate(() => {
-            this.#contextItems.push(
-              ...items.map((item) => {
-                if (!item || typeof item !== "object")
-                  throw new TypeError("Step context items must be objects");
-                if (item.type !== undefined && typeof item.type !== "string")
-                  throw new TypeError("Step context item type must be a string");
-                return Object.freeze({
-                  ...(item.type === undefined ? {} : { type: item.type }),
-                  value: copyJson(item.value),
-                });
-              }),
-            );
-          }),
+        set: (slot: string, items: readonly ContextItem[], options?: ContextMutationOptions) =>
+          mutateContext(() =>
+            this.#context.set(contextOwner(middlewareId, middlewareOrder, slot), items, options),
+          ),
+        remove: (slot: string, options?: Omit<ContextMutationOptions, "order" | "lifetime">) =>
+          mutateContext(() =>
+            this.#context.remove(contextOwner(middlewareId, middlewareOrder, slot), options),
+          ),
       }),
       prefix: Object.freeze({
         instructions: Object.freeze({
@@ -203,16 +218,6 @@ export class StepContext {
             mutatePrefix("tools", () =>
               this.#prefix.removeTools(owner(middlewareId, middlewareOrder, slot), options),
             ),
-          withhold: (name: string, options?: Omit<PromptPrefixMutationOptions, "order">) =>
-            mutatePrefix("tools", () =>
-              this.#prefix.withhold(
-                owner(middlewareId, middlewareOrder, `withhold:${name}`),
-                name,
-                options,
-              ),
-            ),
-          restore: (name: string, options?: Omit<PromptPrefixMutationOptions, "order">) =>
-            mutatePrefix("tools", () => this.#prefix.restore(name, options)),
         }),
         model: Object.freeze({
           select: (
@@ -275,6 +280,7 @@ export class StepContext {
       },
       tripwire: (error: Tripwire) => {
         this.#tripwire ??= Object.freeze({ ...error });
+        return value;
       },
     });
     branded.add(value);
@@ -288,7 +294,7 @@ export class StepContext {
       normalized = normalizeCandidate(candidate);
     } catch (error) {
       this.#tripwire ??= Object.freeze({
-        code: "response.replace-invalid",
+        code: isHarnessError(error) ? error.code : "response.invalid-replacement",
         message: error instanceof Error ? error.message : String(error),
       });
       return;
@@ -298,14 +304,14 @@ export class StepContext {
       const original = this.#identities.get(call.id);
       if (original === undefined) {
         this.#tripwire ??= Object.freeze({
-          code: "response.replace-invalid",
+          code: "response.invalid-replacement",
           message: `replace() cannot add Tool call '${call.id}'`,
         });
         return;
       }
       if (original !== identityKey(call.name, call.args)) {
         this.#tripwire ??= Object.freeze({
-          code: "response.replace-invalid",
+          code: "response.invalid-replacement",
           message: `replace() cannot change identity of Tool call '${call.id}'`,
         });
         return;

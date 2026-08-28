@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Harness illustrations</title>
+    <style>
+      :root {
+        --ink: #111;
+        --paper: #fff;
+        --elevated: #f4f4f4;
+        --muted: #e8e8e8;
+        --stroke: #111;
+        --stroke-muted: #bbb;
+        --on-ink: #fff;
+        --secondary: #555;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #f2f2f2;
+          --paper: #111;
+          --elevated: #1c1c1c;
+          --muted: #2a2a2a;
+          --stroke: #f2f2f2;
+          --stroke-muted: #666;
+          --on-ink: #111;
+          --secondary: #aaa;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px 24px 64px;
+        background: var(--paper);
+        color: var(--ink);
+        font: 14px/20px ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+
+      h1 {
+        font-size: 24px;
+        line-height: 30px;
+        font-weight: 600;
+        margin: 0 0 8px;
+      }
+
+      h2 {
+        font-size: 18px;
+        line-height: 24px;
+        font-weight: 600;
+        margin: 0 0 8px;
+      }
+
+      .caption {
+        text-align: center;
+        color: var(--secondary);
+        font-size: 12px;
+        line-height: 16px;
+        margin: 0 auto;
+        max-width: 640px;
+      }
+
+      hr {
+        border: 0;
+        border-top: 1px solid var(--stroke-muted);
+        margin: 28px 0;
+      }
+
+      .section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        grid-template-rows: auto auto;
+        align-items: center;
+        padding: 28px 16px 8px;
+      }
+
+      .flow-arrow {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        min-width: 120px;
+      }
+
+      .flow-arrow span,
+      .down-arrow span {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--secondary);
+      }
+
+      .flow-arrow svg {
+        width: 100%;
+        height: 12px;
+      }
+
+      .session {
+        border: 1.5px solid var(--stroke);
+        background: var(--elevated);
+        border-radius: 8px;
+        padding: 12px 14px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .session > .label,
+      .agent > .label,
+      .box-title {
+        text-align: center;
+        font-weight: 600;
+      }
+
+      .agent {
+        background: var(--ink);
+        color: var(--on-ink);
+        border-radius: 8px;
+        padding: 16px 18px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 140px;
+      }
+
+      .agent.opaque {
+        padding: 22px 36px;
+        text-align: center;
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      .agent .label {
+        font-size: 18px;
+      }
+
+      .inner {
+        background: var(--elevated);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 6px;
+        padding: 16px 20px;
+        text-align: center;
+        font-weight: 600;
+        color: var(--ink);
+      }
+
+      .nested {
+        background: var(--elevated);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 6px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        color: var(--ink);
+      }
+
+      .chips {
+        display: flex;
+        gap: 8px;
+      }
+
+      .chip {
+        flex: 1;
+        min-width: 0;
+        background: var(--muted);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 4px;
+        padding: 10px 8px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--ink);
+      }
+
+      .chip.fixed {
+        flex: none;
+        width: 48%;
+        margin: 0 auto;
+      }
+
+      .loop {
+        display: grid;
+        grid-template-columns: 1fr auto auto 1fr;
+        align-items: center;
+        column-gap: 8px;
+        min-height: 56px;
+        color: var(--on-ink);
+        font-size: 12px;
+      }
+
+      .loop .right {
+        text-align: right;
+      }
+
+      .onion {
+        border: 1px solid var(--stroke);
+        background: var(--elevated);
+        border-radius: 6px;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        color: var(--ink);
+      }
+
+      .onion .slot-label {
+        text-align: center;
+        font-size: 12px;
+      }
+
+      .observe {
+        grid-column: 2;
+        grid-row: 2;
+        justify-self: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding-top: 12px;
+      }
+
+      .pipe-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 28px 16px 8px;
+      }
+
+      .pipe {
+        background: var(--elevated);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 6px;
+        padding: 10px 12px;
+        text-align: center;
+        min-width: 88px;
+      }
+
+      .pipe.invert {
+        background: var(--ink);
+        color: var(--on-ink);
+        border: 0;
+      }
+
+      .pipe strong {
+        display: block;
+        font-size: 12px;
+      }
+
+      .pipe small {
+        display: block;
+        font-size: 12px;
+        color: var(--secondary);
+      }
+
+      .pipe.invert small {
+        color: var(--on-ink);
+        opacity: 0.8;
+      }
+
+      .stack-center {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 28px 16px 8px;
+      }
+
+      .slot-box {
+        background: var(--elevated);
+        border: 1px solid var(--stroke);
+        border-radius: 6px;
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        max-width: 420px;
+      }
+
+      .tools-bind {
+        width: 100%;
+        max-width: 480px;
+        background: var(--elevated);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 6px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .bind-arrows {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        justify-items: center;
+      }
+
+      .mini-down {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        color: var(--secondary);
+      }
+
+      .turn-flow {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        padding: 28px 16px 8px;
+      }
+
+      .turn {
+        background: var(--elevated);
+        border: 1.5px solid var(--stroke);
+        border-radius: 8px;
+        padding: 12px 14px;
+        min-width: 320px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 12px;
+        background: var(--muted);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 4px;
+        padding: 10px 12px;
+      }
+
+      .step strong {
+        display: block;
+        font-size: 12px;
+      }
+
+      .step .detail,
+      .step .stream-label {
+        font-size: 12px;
+        color: var(--secondary);
+      }
+
+      .exits {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 28px 16px 8px;
+      }
+
+      .exit-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-width: 560px;
+        width: 100%;
+        margin: 0 auto;
+      }
+
+      .exit-row {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 8px;
+        background: var(--elevated);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 4px;
+        padding: 8px 12px;
+        font-size: 12px;
+      }
+
+      .exit-row .to {
+        color: var(--secondary);
+      }
+
+      .mw {
+        min-width: 400px;
+      }
+
+      .ad {
+        min-width: 360px;
+      }
+
+      .op {
+        min-width: 280px;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        width: 100%;
+        max-width: 720px;
+      }
+
+      .col {
+        background: var(--elevated);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 6px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .col.invert {
+        background: var(--ink);
+        color: var(--on-ink);
+        border: 0;
+      }
+
+      .col .box-title {
+        font-size: 12px;
+      }
+
+      .col.invert .box-title,
+      .col.invert .muted {
+        color: var(--on-ink);
+        opacity: 0.8;
+      }
+
+      .muted {
+        font-size: 12px;
+        color: var(--secondary);
+      }
+
+      .row {
+        background: var(--muted);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 4px;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+
+      .col.invert .row {
+        background: transparent;
+        border-color: color-mix(in srgb, var(--on-ink) 28%, transparent);
+      }
+
+      .onion-in {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+        max-width: 520px;
+      }
+
+      .layer {
+        border: 1px solid var(--stroke);
+        background: var(--elevated);
+        border-radius: 6px;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .layer-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+      }
+
+      .layer-head .when {
+        color: var(--secondary);
+      }
+
+      .msgs {
+        width: 100%;
+        max-width: 560px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .msg {
+        display: grid;
+        grid-template-columns: 72px 1fr;
+        gap: 10px;
+        background: var(--elevated);
+        border: 1px solid var(--stroke-muted);
+        border-radius: 4px;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+
+      .msg .role {
+        font-weight: 600;
+      }
+
+      .msg.system {
+        background: var(--ink);
+        color: var(--on-ink);
+        border: 0;
+      }
+
+      .msg.system .role {
+        opacity: 0.8;
+      }
+
+      .msg.tools {
+        grid-template-columns: 72px 1fr;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Harness</h1>
+
+    <section class="section">
+      <div class="flow">
+        <div class="flow-arrow">
+          <span>Input</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="session">
+          <div class="label">Session</div>
+          <div class="agent opaque">Agent</div>
+        </div>
+        <div class="flow-arrow">
+          <span>Stream</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="observe">
+          <svg width="12" height="48" viewBox="0 0 12 48" aria-hidden="true">
+            <line x1="6" y1="0" x2="6" y2="36" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="6,48 11,36 1,36" fill="currentColor" />
+          </svg>
+          <span>Observe</span>
+        </div>
+      </div>
+      <p class="caption">
+        Session owns input, stream, and observe. Agent is the sealed recipe inside it.
+      </p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="flow">
+        <div class="flow-arrow">
+          <span>Input</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="session">
+          <div class="label">Session</div>
+          <div class="agent op">
+            <div class="label">Agent</div>
+            <div class="inner">Model</div>
+            <div class="loop">
+              <span class="right">tool results</span>
+              <svg width="12" height="56" viewBox="0 0 12 56" aria-hidden="true">
+                <polygon points="6,2 11,12 1,12" fill="currentColor" />
+                <line x1="6" y1="12" x2="6" y2="54" stroke="currentColor" stroke-width="1.5" />
+              </svg>
+              <svg width="12" height="56" viewBox="0 0 12 56" aria-hidden="true">
+                <line x1="6" y1="2" x2="6" y2="44" stroke="currentColor" stroke-width="1.5" />
+                <polygon points="6,54 11,44 1,44" fill="currentColor" />
+              </svg>
+              <span>tool plan</span>
+            </div>
+            <div class="inner">Tools</div>
+          </div>
+        </div>
+        <div class="flow-arrow">
+          <span>Stream</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="observe">
+          <svg width="12" height="48" viewBox="0 0 12 48" aria-hidden="true">
+            <line x1="6" y1="0" x2="6" y2="36" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="6,48 11,36 1,36" fill="currentColor" />
+          </svg>
+          <span>Observe</span>
+        </div>
+      </div>
+      <p class="caption">
+        A turn loops: the model emits a tool plan, adapters run, tool results return on the next
+        step.
+      </p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="flow">
+        <div class="flow-arrow">
+          <span>Input</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="session">
+          <div class="label">Session</div>
+          <div class="agent ad">
+            <div class="label">Agent</div>
+            <div class="nested">
+              <div class="box-title">Model</div>
+              <div class="chip fixed">Model adapter</div>
+            </div>
+            <div class="loop">
+              <span class="right">tool results</span>
+              <svg width="12" height="56" viewBox="0 0 12 56" aria-hidden="true">
+                <polygon points="6,2 11,12 1,12" fill="currentColor" />
+                <line x1="6" y1="12" x2="6" y2="54" stroke="currentColor" stroke-width="1.5" />
+              </svg>
+              <svg width="12" height="56" viewBox="0 0 12 56" aria-hidden="true">
+                <line x1="6" y1="2" x2="6" y2="44" stroke="currentColor" stroke-width="1.5" />
+                <polygon points="6,54 11,44 1,44" fill="currentColor" />
+              </svg>
+              <span>tool plan</span>
+            </div>
+            <div class="nested">
+              <div class="box-title">Tools</div>
+              <div class="chips">
+                <div class="chip">Tool adapter</div>
+                <div class="chip">Tool adapter</div>
+                <div class="chip">Tool adapter</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flow-arrow">
+          <span>Stream</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="observe">
+          <svg width="12" height="48" viewBox="0 0 12 48" aria-hidden="true">
+            <line x1="6" y1="0" x2="6" y2="36" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="6,48 11,36 1,36" fill="currentColor" />
+          </svg>
+          <span>Observe</span>
+        </div>
+      </div>
+      <p class="caption">
+        One model invoke is sealed at Agent(); tool adapters are registered with .with() and
+        selected by executeWith.
+      </p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="flow">
+        <div class="flow-arrow">
+          <span>Input</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="session">
+          <div class="label">Session</div>
+          <div class="agent mw">
+            <div class="label">Agent</div>
+            <div class="onion">
+              <div class="slot-label">Middleware</div>
+              <div class="onion">
+                <div class="slot-label">Middleware</div>
+                <div class="onion">
+                  <div class="slot-label">Middleware</div>
+                  <div class="nested">
+                    <div class="box-title">Model</div>
+                    <div class="chip fixed">Model adapter</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="loop">
+              <span class="right">tool results</span>
+              <svg width="12" height="56" viewBox="0 0 12 56" aria-hidden="true">
+                <polygon points="6,2 11,12 1,12" fill="currentColor" />
+                <line x1="6" y1="12" x2="6" y2="54" stroke="currentColor" stroke-width="1.5" />
+              </svg>
+              <svg width="12" height="56" viewBox="0 0 12 56" aria-hidden="true">
+                <line x1="6" y1="2" x2="6" y2="44" stroke="currentColor" stroke-width="1.5" />
+                <polygon points="6,54 11,44 1,44" fill="currentColor" />
+              </svg>
+              <span>tool plan</span>
+            </div>
+            <div class="nested">
+              <div class="box-title">Tools</div>
+              <div class="chips">
+                <div class="chip">Tool adapter</div>
+                <div class="chip">Tool adapter</div>
+                <div class="chip">Tool adapter</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flow-arrow">
+          <span>Stream</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="observe">
+          <svg width="12" height="48" viewBox="0 0 12 48" aria-hidden="true">
+            <line x1="6" y1="0" x2="6" y2="36" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="6,48 11,36 1,36" fill="currentColor" />
+          </svg>
+          <span>Observe</span>
+        </div>
+      </div>
+      <p class="caption">
+        Middleware is the model lifecycle: it runs before invoke, reviews the candidate, then the
+        tool plan is sealed.
+      </p>
+    </section>
+
+    <hr />
+    <h2>Authoring</h2>
+
+    <section class="section">
+      <div class="pipe-row">
+        <div class="pipe"><strong>model</strong><small>directive?</small></div>
+        <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+          <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+          <polygon points="14,2 20,6 14,10" fill="currentColor" />
+        </svg>
+        <div class="pipe invert"><strong>Agent()</strong></div>
+        <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+          <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+          <polygon points="14,2 20,6 14,10" fill="currentColor" />
+        </svg>
+        <div class="pipe"><strong>.with()</strong><small>adapter</small></div>
+        <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+          <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+          <polygon points="14,2 20,6 14,10" fill="currentColor" />
+        </svg>
+        <div class="pipe"><strong>.use()</strong><small>middleware</small></div>
+        <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+          <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+          <polygon points="14,2 20,6 14,10" fill="currentColor" />
+        </svg>
+        <div class="pipe"><strong>.build()</strong></div>
+        <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+          <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+          <polygon points="14,2 20,6 14,10" fill="currentColor" />
+        </svg>
+        <div class="pipe invert"><strong>BuiltAgent</strong><small>manifest</small></div>
+        <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+          <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+          <polygon points="14,2 20,6 14,10" fill="currentColor" />
+        </svg>
+        <div class="pipe"><strong>.run()</strong></div>
+        <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+          <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+          <polygon points="14,2 20,6 14,10" fill="currentColor" />
+        </svg>
+        <div class="pipe"><strong>Session</strong></div>
+      </div>
+      <p class="caption">Seal once. run() creates an independent in-memory Session.</p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="stack-center">
+        <div class="slot-box">
+          <div class="box-title" style="font-size: 12px">Middleware</div>
+          <div class="chips">
+            <div class="chip">instructions</div>
+            <div class="chip">tools</div>
+            <div class="chip">model</div>
+          </div>
+        </div>
+        <div class="slot-box">
+          <div class="box-title" style="font-size: 12px">Middleware</div>
+          <div class="chips">
+            <div class="chip">instructions</div>
+            <div class="chip">tools</div>
+            <div class="chip">model</div>
+          </div>
+        </div>
+        <div class="mini-down">
+          freeze
+          <svg width="12" height="28" viewBox="0 0 12 28" aria-hidden="true">
+            <line x1="6" y1="0" x2="6" y2="18" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="6,28 11,18 1,18" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="pipe"><strong>PromptPrefixSnapshot</strong></div>
+        <div class="mini-down">
+          <svg width="12" height="28" viewBox="0 0 12 28" aria-hidden="true">
+            <line x1="6" y1="0" x2="6" y2="18" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="6,28 11,18 1,18" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="chip" style="flex: none; width: auto; min-width: 140px">Model adapter</div>
+      </div>
+      <p class="caption">
+        Middleware stages named prefix slots. Each model call gets one immutable snapshot.
+      </p>
+    </section>
+
+    <hr />
+    <h2>Prompt</h2>
+
+    <section class="section">
+      <div class="stack-center">
+        <div class="onion-in">
+          <div class="layer">
+            <div class="layer-head">
+              <strong>nylorun-folder</strong>
+              <span class="when">before next()</span>
+            </div>
+            <div class="chips">
+              <div class="chip">folder-instructions</div>
+              <div class="chip">folder-tools</div>
+            </div>
+            <div class="layer">
+              <div class="layer-head">
+                <strong>echo</strong>
+                <span class="when">before next()</span>
+              </div>
+              <div class="chips">
+                <div class="chip">echo-policy</div>
+                <div class="chip">echo-tools</div>
+              </div>
+              <div class="layer">
+                <div class="nested">
+                  <div class="box-title">freeze</div>
+                  <div class="chip fixed">PromptPrefixSnapshot</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">
+        Prefix is drafted on the way in. After next(), mutators are revoked. The snapshot is what
+        the model callback receives.
+      </p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="stack-center">
+        <div class="split">
+          <div class="col invert">
+            <div class="box-title">Prefix · session-scoped</div>
+            <div class="row">instructions, ordered texts</div>
+            <div class="row">tools, bound + unique names</div>
+            <div class="row">model directive</div>
+            <div class="muted">persists until the owning slot is removed</div>
+          </div>
+          <div class="col">
+            <div class="box-title">Tail · this step only</div>
+            <div class="row">transcript</div>
+            <div class="row">arrivals</div>
+            <div class="row">toolResults</div>
+            <div class="row">context.add items</div>
+            <div class="muted">rebuilt every step, not hashed into the prefix</div>
+          </div>
+        </div>
+        <div class="mini-down">
+          resolveModelRequest
+          <svg width="12" height="28" viewBox="0 0 12 28" aria-hidden="true">
+            <line x1="6" y1="0" x2="6" y2="18" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="6,28 11,18 1,18" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="pipe invert"><strong>ModelRequest</strong><small>invoke(request)</small></div>
+      </div>
+      <p class="caption">
+        Harness does not concatenate a prompt string. It hands the model an immutable request:
+        canonical prefix plus this-step tail.
+      </p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="stack-center">
+        <div class="slot-box" style="max-width: 560px">
+          <div class="box-title" style="font-size: 12px">Sort, then flatten</div>
+          <div class="row">
+            first:z order 10 — “You are a folder agent.”
+          </div>
+          <div class="row">
+            later:a order 20 — “Echo the user text.”
+          </div>
+          <div class="muted">order, then middleware registration, then slot name</div>
+        </div>
+        <div class="mini-down">
+          digest
+          <svg width="12" height="28" viewBox="0 0 12 28" aria-hidden="true">
+            <line x1="6" y1="0" x2="6" y2="18" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="6,28 11,18 1,18" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="chips" style="width: 100%; max-width: 560px">
+          <div class="chip">logical</div>
+          <div class="chip">model</div>
+          <div class="chip">request</div>
+        </div>
+      </div>
+      <p class="caption">
+        Instruction and tool order is canonical. Digests fingerprint the logical header, not the
+        provider wire and not a cache hit.
+      </p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="stack-center">
+        <div class="msgs">
+          <div class="msg system">
+            <div class="role">system</div>
+            <div>prefix.instructions joined with blank lines</div>
+          </div>
+          <div class="msg">
+            <div class="role">user</div>
+            <div>transcript input / interrupt</div>
+          </div>
+          <div class="msg">
+            <div class="role">assistant</div>
+            <div>transcript candidate text + tool-calls — reasoning omitted</div>
+          </div>
+          <div class="msg">
+            <div class="role">tool</div>
+            <div>transcript tool-results, one message per call</div>
+          </div>
+          <div class="msg tools">
+            <div class="role">tools</div>
+            <div>prefix tool contracts: name, description, inputSchema</div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">
+        create-agent’s GatewayModelAdapter is the first place a chat prompt is assembled. It
+        projects instructions + transcript + tools. request.context is not on the wire today.
+      </p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="stack-center">
+        <div class="tools-bind">
+          <div class="box-title">Tools</div>
+          <div class="chips">
+            <div class="chip">echo</div>
+            <div class="chip">list</div>
+            <div class="chip">fetch</div>
+          </div>
+          <div class="bind-arrows">
+            <div class="mini-down">
+              executeWith
+              <svg width="12" height="28" viewBox="0 0 12 28" aria-hidden="true">
+                <line x1="6" y1="0" x2="6" y2="18" stroke="currentColor" stroke-width="1.5" />
+                <polygon points="6,28 11,18 1,18" fill="currentColor" />
+              </svg>
+            </div>
+            <div class="mini-down">
+              executeWith
+              <svg width="12" height="28" viewBox="0 0 12 28" aria-hidden="true">
+                <line x1="6" y1="0" x2="6" y2="18" stroke="currentColor" stroke-width="1.5" />
+                <polygon points="6,28 11,18 1,18" fill="currentColor" />
+              </svg>
+            </div>
+            <div class="mini-down">
+              executeWith
+              <svg width="12" height="28" viewBox="0 0 12 28" aria-hidden="true">
+                <line x1="6" y1="0" x2="6" y2="18" stroke="currentColor" stroke-width="1.5" />
+                <polygon points="6,28 11,18 1,18" fill="currentColor" />
+              </svg>
+            </div>
+          </div>
+          <div class="chips">
+            <div class="chip">local</div>
+            <div class="chip">local</div>
+            <div class="chip">http</div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">
+        A tool is a definition staged onto the prefix. An adapter is where it executes.
+      </p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="turn-flow">
+        <div class="flow-arrow">
+          <span>Input</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="turn">
+          <div class="box-title">Turn</div>
+          <div class="step">
+            <div>
+              <strong>Step 1</strong>
+              <div class="detail">prefix + model → tool plan → adapters</div>
+            </div>
+            <div class="stream-label">stream candidate</div>
+          </div>
+          <div class="mini-down">
+            tool results
+            <svg width="12" height="28" viewBox="0 0 12 28" aria-hidden="true">
+              <line x1="6" y1="0" x2="6" y2="18" stroke="currentColor" stroke-width="1.5" />
+              <polygon points="6,28 11,18 1,18" fill="currentColor" />
+            </svg>
+          </div>
+          <div class="step">
+            <div>
+              <strong>Step 2</strong>
+              <div class="detail">tool results → prefix + model</div>
+            </div>
+            <div class="stream-label">candidate / final</div>
+          </div>
+        </div>
+        <div class="flow-arrow">
+          <span>Stream</span>
+          <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+            <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+          </svg>
+        </div>
+      </div>
+      <p class="caption">
+        One input starts a turn. Each model call is a step. Tool results stay on the next step of
+        the same turn.
+      </p>
+    </section>
+
+    <hr />
+
+    <section class="section">
+      <div class="exits">
+        <div class="turn-flow" style="padding: 0">
+          <div class="flow-arrow">
+            <span>Input</span>
+            <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+              <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+              <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+            </svg>
+          </div>
+          <div class="session">
+            <div class="label">Session</div>
+            <div class="agent opaque">Agent</div>
+          </div>
+          <div class="flow-arrow">
+            <span>Stream</span>
+            <svg viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true">
+              <line x1="0" y1="6" x2="108" y2="6" stroke="currentColor" stroke-width="1.5" />
+              <polygon points="108,1.5 120,6 108,10.5" fill="currentColor" />
+            </svg>
+          </div>
+        </div>
+        <div class="exit-list">
+          <div class="exit-row">
+            <span>tripwire</span>
+            <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+              <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+              <polygon points="14,2 20,6 14,10" fill="currentColor" />
+            </svg>
+            <span class="to">stream tripwire (session-scoped)</span>
+          </div>
+          <div class="exit-row">
+            <span>requireInteraction</span>
+            <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+              <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+              <polygon points="14,2 20,6 14,10" fill="currentColor" />
+            </svg>
+            <span class="to">waiting → input approve | respond</span>
+          </div>
+          <div class="exit-row">
+            <span>interrupt</span>
+            <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+              <line x1="0" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5" />
+              <polygon points="14,2 20,6 14,10" fill="currentColor" />
+            </svg>
+            <span class="to">next-step arrivals, or a new turn</span>
+          </div>
+        </div>
+      </div>
+      <p class="caption">
+        Happy path is not the only Session outcome. Budgets and approvals are host-owned.
+      </p>
+    </section>
+  </body>
+</html>

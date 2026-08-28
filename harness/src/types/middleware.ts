@@ -1,4 +1,5 @@
 import type {
+  ContextMutationOptions,
   ModelCandidate,
   ModelDirective,
   ModelToolCall,
@@ -26,13 +27,18 @@ export interface StepInput {
 }
 
 export interface StepRequest {
+  /** Opaque identity of the Session that owns this Step. */
+  readonly sessionId: string;
   readonly session: StepInput["session"];
   readonly turnNumber: number;
   readonly stepNumber: number;
   readonly arrivals: readonly InputEvent[];
   readonly toolResults: readonly ToolResult[];
   readonly transcript: readonly TranscriptEntry[];
-  readonly context: { add(...items: ContextItem[]): void };
+  readonly context: {
+    set(slot: string, items: readonly ContextItem[], options?: ContextMutationOptions): void;
+    remove(slot: string, options?: Omit<ContextMutationOptions, "order" | "lifetime">): void;
+  };
   readonly prefix: {
     readonly instructions: {
       set(slot: string, items: readonly string[], options?: PromptPrefixMutationOptions): void;
@@ -45,8 +51,6 @@ export interface StepRequest {
         options?: PromptPrefixMutationOptions,
       ): void;
       remove(slot: string, options?: Omit<PromptPrefixMutationOptions, "order">): void;
-      withhold(name: string, options?: Omit<PromptPrefixMutationOptions, "order">): void;
-      restore(name: string, options?: Omit<PromptPrefixMutationOptions, "order">): void;
     };
     readonly model: {
       select(directive: ModelDirective, options?: Omit<PromptPrefixMutationOptions, "order">): void;
@@ -67,7 +71,7 @@ export interface StepResponse {
   deny(callId: string, reason: string): void;
   requireInteraction(callId: string, interaction: Interaction): void;
   requirePreflight(callId: string, kind: "sandbox" | "validation"): void;
-  tripwire(error: Tripwire): void;
+  tripwire(error: Tripwire): StepResponse;
 }
 
 export type StepMiddleware = (

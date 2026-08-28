@@ -1,20 +1,24 @@
+import type { BoundMiddleware, StepMiddleware } from "../types/middleware.js";
+import type { ModelAdapter, ModelDirective } from "../types/model.js";
+import type { BuildDiagnostic } from "../types/shared.js";
+import type { ToolAdapter } from "../types/tool.js";
+import { HarnessError } from "../errors.js";
 import type { BuiltAgent } from "./agent.js";
-import type { BoundMiddleware, StepMiddleware } from "./types/middleware.js";
-import type { ModelAdapter, ModelDirective } from "./types/model.js";
-import type { BuildDiagnostic } from "./types/shared.js";
-import type { ToolAdapter } from "./types/tool.js";
-import { assembleAgent } from "./build/assemble.js";
+import { assembleAgent } from "./assemble.js";
 
-export class AgentBuildError extends Error {
+export class AgentBuildError extends HarnessError {
   constructor(readonly diagnostics: readonly BuildDiagnostic[]) {
-    super(diagnostics.map((item) => item.message).join("; ") || "Agent build failed");
+    super(
+      "agent.build-failed",
+      diagnostics.map((item) => item.message).join("; ") || "Agent build failed",
+    );
     this.name = "AgentBuildError";
   }
 }
 
-export class AgentLifecycleError extends Error {
+export class AgentLifecycleError extends HarnessError {
   constructor(message: string) {
-    super(message);
+    super("agent.lifecycle-sealed", message);
     this.name = "AgentLifecycleError";
   }
 }

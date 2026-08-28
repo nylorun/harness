@@ -69,7 +69,7 @@ function packageJson(
       studio: "nylo studio"
     },
     dependencies: {
-      "@nylorun/harness": harnessSpec ?? "0.4.0-rc.1",
+      "@nylorun/harness": harnessSpec ?? "0.5.0-beta.1",
       "zod": "^4.1.12"
     },
     devDependencies: { "@nylorun/create-agent": createAgentSpec, "@nylorun/studio": studioSpec, typescript: "^5.9.3", vite: "^8.0.0" },
@@ -156,7 +156,8 @@ OpenAI-compatible server is detected automatically; any compatible gateway can b
 \`NYLO_MODEL_GATEWAY_URL\` and, when needed, \`NYLO_MODEL_GATEWAY_API_KEY\`.
 
 Start sessions through the REST API after \`npm run serve\`. Credentials are read from your
-environment first, then \`.env\`; values are never printed or uploaded.
+environment first, then \`.env\`; values are never printed or uploaded. Each session writes
+\`.nylo/<session-id>/record.jsonl\` and \`.nylo/<session-id>/observe.jsonl\`.
 
 \`\`\`sh
 # Start a session, then follow its event stream.

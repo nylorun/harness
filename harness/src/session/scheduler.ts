@@ -1,7 +1,14 @@
-import type { InputEvent, InputOptions, SessionEvent, SessionSnapshot } from "../types/session.js";
+import type {
+  InputEvent,
+  InputOptions,
+  PromptPrefixPolicy,
+  SessionEvent,
+  SessionSnapshot,
+} from "../types/session.js";
 import type { ObserveEvent, Observer } from "../types/shared.js";
+import { HarnessError } from "../errors.js";
 import { createId } from "../utils/ids.js";
-import { createEmitter } from "../utils/observe.js";
+import { createObserverRegistry, type ObserveEmit } from "../utils/observe.js";
 import {
   InputQueue,
   isInteractionReply,
@@ -12,9 +19,10 @@ import {
 import { SessionEventLog } from "./event-log.js";
 import { SubmissionStream } from "./submission-stream.js";
 import { commitToolResults, initialState, withStatus } from "./state.js";
-import { type LoopAgent } from "../step/run.js";
+import { type LoopAgent } from "../build/agent.js";
 import { TurnRunner, type PendingTurn, type TurnProgress } from "../turn/runner.js";
-import { PromptPrefixState, type PromptPrefixPolicy } from "../step/prompt-prefix.js";
+import { ContextState } from "../step/context-state.js";
+import { PromptPrefixState } from "../step/prompt-prefix.js";
 
 /** Coordinates one active turn at a time; TurnRunner owns the turn's internal state machine. */
 export class SessionScheduler {
@@ -31,9 +39,10 @@ export class SessionScheduler {
   private stopped = false;
   private generation = 0;
   private stopPromise?: Promise<void>;
-  private emitObserve = createEmitter();
+  private readonly observers = createObserverRegistry();
   private readonly turns: TurnRunner;
   private readonly prefixState: PromptPrefixState;
+  private readonly contextState: ContextState;
 
   constructor(
     readonly id: string,
@@ -46,15 +55,17 @@ export class SessionScheduler {
   ) {
     this.snapshotValue = initialState(id);
     this.prefixState = new PromptPrefixState(prefixPolicy, agent.directive);
-    this.turns = new TurnRunner(agent, id, session, this.prefixState);
+    this.contextState = new ContextState(session.context);
+    this.turns = new TurnRunner(agent, id, session, this.prefixState, this.contextState);
   }
 
   get snapshot(): SessionSnapshot {
     return this.snapshotValue;
   }
 
-  setObserver(listener: Observer): void {
-    this.emitObserve = createEmitter(listener);
+  observe(listener: Observer): () => void {
+    if (this.stopped) return () => undefined;
+    return this.observers.observe(listener);
   }
 
   submit(event: InputEvent, options?: InputOptions): SubmissionStream {
@@ -212,8 +223,10 @@ export class SessionScheduler {
     try {
       const context = {
         signal,
-        observe: (event: ObserveEvent) =>
-          this.emitObserve(withInputId(event, submission.stream.inputId)),
+        observe: ((event) =>
+          this.emitObserve(() =>
+            withInputId(typeof event === "function" ? event() : event, submission.stream.inputId),
+          )) satisfies ObserveEmit,
         assertCurrent: () => this.assertCurrent(generation, signal),
         onPlanActive: (plan: PendingTurn | undefined) => {
           this.inFlightPlan = plan;
@@ -324,15 +337,20 @@ export class SessionScheduler {
     if (this.stopped) return;
     this.stopped = true;
     this.generation += 1;
-    this.sessionController.abort(new Error(reason));
-    this.activeController?.abort(new Error(reason));
+    this.sessionController.abort(new HarnessError("session.stale-result", reason));
+    this.activeController?.abort(new HarnessError("session.stale-result", reason));
     if (this.pending) this.commitCancelledPlan(this.pending, reason);
     this.pending = undefined;
     this.snapshotValue = withStatus(this.snapshotValue, "stopped");
     this.events.emit({ type: "session.stopped", sessionId: this.id });
     this.events.finish();
     this.emitObserve({ type: "session.stopped", reason });
+    this.observers.clear();
     for (const item of this.queue.drain()) this.finishStopped(item.stream);
+  }
+
+  private emitObserve(event: ObserveEvent | (() => ObserveEvent)): void {
+    this.observers.emit(event);
   }
 
   private commitCancelledPlan(pending: PendingTurn, reason: string): void {
@@ -365,7 +383,10 @@ export class SessionScheduler {
   private assertCurrent(generation: number, signal: AbortSignal): void {
     // An abort-ignoring adapter may resolve late; its state must never re-enter this Session.
     if (this.stopped || generation !== this.generation || signal.aborted)
-      throw signal.reason ?? new Error("Stale Session result quarantined");
+      throw (
+        signal.reason ??
+        new HarnessError("session.stale-result", "Stale Session result quarantined")
+      );
   }
 }
 

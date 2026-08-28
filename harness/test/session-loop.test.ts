@@ -6,7 +6,7 @@ describe("Session loop", () => {
   it("submits eagerly and processes overlapping inputs FIFO", async () => {
     const seen: string[] = [];
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         const arrival = request.arrivals[0];
         const text =
           arrival?.kind === "user-message" || arrival?.kind === "interrupt" ? arrival.text : "";
@@ -19,7 +19,7 @@ describe("Session loop", () => {
     const two = session.input("two");
     const three = session.interrupt("three");
     expect(
-      (await Promise.all([one.consume(), two.consume(), three.consume()])).map(
+      (await Promise.all([one.completed, two.completed, three.completed])).map(
         (item) => item.status,
       ),
     ).toEqual(["completed", "completed", "completed"]);
@@ -132,7 +132,7 @@ describe("Session loop", () => {
     const arrivals: string[][] = [];
     let modelStep = 0;
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         arrivals.push(
           request.arrivals.map((item) =>
             item.kind === "user-message" || item.kind === "interrupt" ? item.text : item.kind,
@@ -189,7 +189,7 @@ describe("Session loop", () => {
 
   it("starts a new turn when interrupt arrives after the current turn has finalized", async () => {
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         const arrival = request.arrivals[0];
         return arrival?.kind === "user-message" || arrival?.kind === "interrupt"
           ? arrival.text
@@ -213,7 +213,7 @@ describe("Session loop", () => {
     const arrivals: string[][] = [];
     let modelStep = 0;
     const result = Agent(
-      model(async (request) => {
+      model(async (_call, { request }) => {
         arrivals.push(
           request.arrivals.map((item) =>
             item.kind === "user-message" || item.kind === "interrupt" ? item.text : item.kind,

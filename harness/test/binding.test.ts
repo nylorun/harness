@@ -43,7 +43,7 @@ describe("build", () => {
         { id: "", extra: true } as never,
       ).build(),
     );
-    expect(error.diagnostics.some((item) => item.code === "harness.invalid-directive")).toBe(true);
+    expect(error.diagnostics.some((item) => item.code === "model.invalid-directive")).toBe(true);
   });
 
   it("throws AgentBuildError when middleware ids collide", () => {

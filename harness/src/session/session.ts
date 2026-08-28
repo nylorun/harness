@@ -1,5 +1,4 @@
 import type {
-  AgentRunInput,
   InputEvent,
   InputHandle,
   InputOptions,
@@ -9,10 +8,11 @@ import type {
   SessionEvent,
   SessionOptions,
   SessionSnapshot,
+  SessionInput,
 } from "../types/session.js";
 import type { Observer } from "../types/shared.js";
 import { SessionScheduler } from "./scheduler.js";
-import type { LoopAgent } from "../step/run.js";
+import type { LoopAgent } from "../build/agent.js";
 import { copyJsonObject } from "../utils/immutable.js";
 
 export class LiveSession implements Session {
@@ -33,7 +33,7 @@ export class LiveSession implements Session {
   get state(): SessionSnapshot {
     return this.scheduler.snapshot;
   }
-  input(event: AgentRunInput, options?: InputOptions): InputHandle {
+  input(event: SessionInput, options?: InputOptions): InputHandle {
     return this.scheduler.submit(normalizeInput(event), options);
   }
   interrupt(event: MessageInput, options?: InputOptions): InputHandle {
@@ -42,15 +42,15 @@ export class LiveSession implements Session {
   stream(): AsyncIterable<SessionEvent> {
     return this.scheduler.events;
   }
-  observe(listener: Observer): void {
-    this.scheduler.setObserver(listener);
+  observe(listener: Observer): () => void {
+    return this.scheduler.observe(listener);
   }
   stop(reason?: string): Promise<void> {
     return this.scheduler.stop(reason);
   }
 }
 
-function isInteractionReply(value: AgentRunInput): value is InteractionReply {
+function isInteractionReply(value: SessionInput): value is InteractionReply {
   return (
     typeof value === "object" &&
     "kind" in value &&
@@ -69,7 +69,7 @@ function normalizeMessage(kind: "user-message" | "interrupt", value: MessageInpu
   };
 }
 
-function normalizeInput(input: AgentRunInput): InputEvent {
+function normalizeInput(input: SessionInput): InputEvent {
   if (typeof input === "string") return { kind: "user-message", text: input };
   if (isInteractionReply(input)) return input;
   return normalizeMessage("user-message", input);

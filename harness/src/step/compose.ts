@@ -1,12 +1,13 @@
 import type { BoundMiddleware, StepResponse } from "../types/middleware.js";
-import type { ObserveEvent } from "../types/shared.js";
-import { isBrandedResponse, StepContext } from "./context.js";
+import type { ObserveEmit } from "../utils/observe.js";
+import { HarnessError, isHarnessError } from "../errors.js";
+import { isBrandedResponse, StepContext } from "./step-context.js";
 
 export async function runMiddleware(
   middleware: readonly BoundMiddleware[],
   context: StepContext,
   terminal: () => Promise<StepResponse>,
-  observe: (event: ObserveEvent) => void,
+  observe: ObserveEmit,
 ): Promise<StepResponse> {
   const dispatch = async (index: number): Promise<StepResponse> => {
     if (context.currentTripwire) return context.tripwire(context.currentTripwire);
@@ -28,10 +29,19 @@ export async function runMiddleware(
       let result: unknown;
       try {
         result = await item.handle(lease.value, () => {
-          if (returned) throw new Error(`Middleware '${item.id}' called next() after returning`);
+          if (returned)
+            throw new HarnessError(
+              "middleware.next-after-return",
+              `Middleware '${item.id}' called next() after returning`,
+              { details: { middlewareId: item.id } },
+            );
           if (nextPromise) {
             nextCalledTwice = true;
-            throw new Error(`Middleware '${item.id}' called next() more than once`);
+            throw new HarnessError(
+              "middleware.next-called-twice",
+              `Middleware '${item.id}' called next() more than once`,
+              { details: { middlewareId: item.id } },
+            );
           }
           lease.revokeMutators();
           nextPromise = dispatch(index + 1);
@@ -54,7 +64,10 @@ export async function runMiddleware(
       }
 
       if (handlerError) {
-        if (nextCalledTwice) {
+        if (
+          nextCalledTwice ||
+          (isHarnessError(handlerError) && handlerError.code === "middleware.next-called-twice")
+        ) {
           return context.tripwire({
             code: "middleware.next-called-twice",
             message: message(handlerError),
@@ -62,7 +75,7 @@ export async function runMiddleware(
           });
         }
         return context.tripwire({
-          code: "middleware.failed",
+          code: isHarnessError(handlerError) ? handlerError.code : "middleware.failed",
           message: message(handlerError),
         });
       }
@@ -72,7 +85,10 @@ export async function runMiddleware(
           return context.tripwire({
             code: "middleware.invalid-response",
             message: `Middleware '${item.id}' must return the StepResponse from next()`,
-            scope: "session",
+            // Calling next() completed the step successfully; forgetting to
+            // return that response is isolated to this step. A non-response
+            // replacement remains a session-level middleware-contract breach.
+            scope: result === undefined ? "step" : "session",
           });
         }
         return inner;

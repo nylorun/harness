@@ -1,4 +1,9 @@
-import type { ModelCandidate, ModelDirective, PromptPrefixSnapshot } from "./model.js";
+import type {
+  ContextSnapshot,
+  ModelCandidate,
+  ModelDirective,
+  PromptPrefixSnapshot,
+} from "./model.js";
 import type { InputEvent, TranscriptEntry } from "./session.js";
 import type { RequiredInteraction, ToolResult } from "./tool.js";
 
@@ -9,8 +14,8 @@ export type JsonObject = { readonly [key: string]: JsonValue };
 export interface BuildDiagnostic {
   readonly code: string;
   readonly message: string;
-  readonly capabilityId?: string;
   readonly toolName?: string;
+  readonly details?: Readonly<Record<string, string | number | boolean>>;
   readonly cause?: unknown;
 }
 
@@ -29,9 +34,12 @@ export interface ObserveToolSnapshot {
   readonly name: string;
   readonly description?: string;
   readonly executeWith: string;
-  readonly route: JsonValue;
-  readonly metadata?: JsonObject;
-  readonly input: { readonly jsonSchema: JsonObject };
+  readonly parameters: { readonly jsonSchema: JsonObject };
+}
+
+/** JSON-only prompt-prefix view suitable for an observation stream. */
+export interface ObservePromptPrefixSnapshot extends Omit<PromptPrefixSnapshot, "tools"> {
+  readonly tools: readonly ObserveToolSnapshot[];
 }
 
 export interface ObserveSealedCall {
@@ -39,7 +47,6 @@ export interface ObserveSealedCall {
   readonly toolName: string;
   readonly args: JsonValue;
   readonly executeWith: string;
-  readonly route: JsonValue;
   readonly invocationId: string;
   readonly preflight?: "sandbox" | "validation";
   readonly interaction?: RequiredInteraction;
@@ -47,9 +54,9 @@ export interface ObserveSealedCall {
 
 export interface ObserveModelRequest {
   readonly model?: ModelDirective;
-  readonly prefix: PromptPrefixSnapshot;
+  readonly prefix: ObservePromptPrefixSnapshot;
   readonly instructions: readonly string[];
-  readonly context: readonly ContextItem[];
+  readonly context: ContextSnapshot;
   readonly arrivals: readonly InputEvent[];
   readonly toolResults: readonly ToolResult[];
   readonly transcript: readonly TranscriptEntry[];

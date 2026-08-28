@@ -6,15 +6,16 @@ import type {
   PromptPrefixSnapshot,
   PromptPrefixTool,
 } from "../types/model.js";
+import type { PromptPrefixPolicy } from "../types/session.js";
 import type { ToolDefinition, BoundToolDefinition } from "../types/tool.js";
 import type { AdapterRegistry } from "../build/adapters.js";
 import { bindTool } from "../build/bind-tool.js";
-import { normalizeDirective, sameDirective } from "../types/model.js";
+import { HarnessError, isHarnessError } from "../errors.js";
+import { normalizeDirective, sameDirective } from "../model-normalize.js";
 import { digest } from "../utils/digest.js";
 import { copyJson } from "../utils/immutable.js";
 
 export type PromptPrefixStatus = "initial" | "unchanged" | "declared-change" | "drift";
-export type PromptPrefixPolicy = "observe" | "strict";
 
 export interface PromptPrefixLedgerEntry {
   readonly status: PromptPrefixStatus;
@@ -37,10 +38,6 @@ interface ModelSelection {
   readonly owner?: Owner;
   readonly reason?: string;
 }
-interface WithheldTool {
-  readonly owner: Owner;
-  readonly reason?: string;
-}
 interface Owner {
   readonly middlewareId: string;
   readonly middlewareOrder: number;
@@ -54,7 +51,6 @@ interface Mutation {
 interface State {
   readonly instructions: ReadonlyMap<string, InstructionSlot>;
   readonly tools: ReadonlyMap<string, ToolSlot>;
-  readonly withheld: ReadonlyMap<string, WithheldTool>;
   readonly model?: ModelSelection;
   readonly snapshot?: PromptPrefixSnapshot;
 }
@@ -90,7 +86,10 @@ export class PromptPrefixState {
       status === "declared-change" &&
       transaction.hasUnreasonedChange()
     )
-      throw new Error("Prompt prefix changed without a mutation reason in strict mode");
+      throw new HarnessError(
+        "prefix.strict-unreasoned-change",
+        "Prompt prefix changed without a mutation reason in strict mode",
+      );
     const snapshot = status === "unchanged" ? previous! : next;
     return Object.freeze({ status, snapshot, ...(previous === undefined ? {} : { previous }) });
   }
@@ -103,7 +102,6 @@ export class PromptPrefixState {
 export class PromptPrefixTransaction {
   #instructions: Map<string, InstructionSlot>;
   #tools: Map<string, ToolSlot>;
-  #withheld: Map<string, WithheldTool>;
   #model?: ModelSelection;
   #mutations: Mutation[] = [];
 
@@ -113,7 +111,6 @@ export class PromptPrefixTransaction {
   ) {
     this.#instructions = new Map(previous.instructions);
     this.#tools = new Map(previous.tools);
-    this.#withheld = new Map(previous.withheld);
     this.#model = previous.model;
   }
 
@@ -124,7 +121,10 @@ export class PromptPrefixTransaction {
   ): void {
     validateSlot(owner.slot);
     if (!Array.isArray(items) || items.some((item) => typeof item !== "string"))
-      throw new TypeError("Prompt prefix instructions must be strings");
+      throw new HarnessError(
+        "prefix.invalid-instructions",
+        "Prompt prefix instructions must be strings",
+      );
     const key = slotKey(owner);
     const prior = this.#instructions.get(key);
     const entry = Object.freeze({
@@ -148,7 +148,8 @@ export class PromptPrefixTransaction {
     options?: PromptPrefixMutationOptions,
   ): void {
     validateSlot(owner.slot);
-    if (!Array.isArray(tools)) throw new TypeError("Prompt prefix tools must be an array");
+    if (!Array.isArray(tools))
+      throw new HarnessError("prefix.invalid-tools", "Prompt prefix tools must be an array");
     const bound = Object.freeze(tools.map((tool) => bindTool(tool, this.adapters)));
     const key = slotKey(owner);
     const prior = this.#tools.get(key);
@@ -167,26 +168,6 @@ export class PromptPrefixTransaction {
     this.#mutations.push({ changed, reason: options?.reason });
   }
 
-  withhold(owner: Owner, name: string, options?: Omit<PromptPrefixMutationOptions, "order">): void {
-    validateToolName(name);
-    const prior = this.#withheld.get(name);
-    const entry = Object.freeze({
-      owner: withOrder(owner, options),
-      ...(options?.reason === undefined ? {} : { reason: validateReason(options.reason) }),
-    });
-    this.#withheld.set(name, entry);
-    this.#mutations.push({
-      changed: prior === undefined || !sameOwner(prior.owner, entry.owner),
-      reason: options?.reason,
-    });
-  }
-
-  restore(name: string, options?: Omit<PromptPrefixMutationOptions, "order">): void {
-    validateToolName(name);
-    const changed = this.#withheld.delete(name);
-    this.#mutations.push({ changed, reason: options?.reason });
-  }
-
   select(
     owner: Owner,
     directive: ModelDirective,
@@ -194,7 +175,8 @@ export class PromptPrefixTransaction {
   ): void {
     const normalized = checkedDirective(directive);
     if (this.#model && !sameDirective(this.#model.directive, normalized))
-      throw new Error(
+      throw new HarnessError(
+        "prefix.model-selection-conflict",
         "A different model directive is already selected; use model.replace() to change it",
       );
     const entry = Object.freeze({
@@ -255,9 +237,14 @@ export class PromptPrefixTransaction {
       if (seen.has(item.tool.name)) duplicate.add(item.tool.name);
       seen.add(item.tool.name);
     }
-    if (duplicate.size) throw new Error(`Duplicate Tool '${[...duplicate].sort().join("', '")}'`);
-    const tools = allTools.filter((item) => !this.#withheld.has(item.tool.name));
-    const toolContracts = tools.map(({ tool, contributor: source }) => toolContract(tool, source));
+    if (duplicate.size)
+      throw new HarnessError(
+        "prefix.duplicate-tool-name",
+        `Duplicate Tool '${[...duplicate].sort().join("', '")}'`,
+      );
+    const toolContracts = allTools.map(({ tool, contributor: source }) =>
+      toolContract(tool, source),
+    );
     const contributors = Object.freeze([
       ...[...this.#instructions.values()]
         .sort(compareSlots)
@@ -281,9 +268,8 @@ export class PromptPrefixTransaction {
       version: 1,
       ...(model === undefined ? {} : { model }),
       instructions: Object.freeze(instructions),
-      tools: Object.freeze(tools.map((item) => item.tool)),
+      tools: Object.freeze(allTools.map((item) => item.tool)),
       toolContracts: Object.freeze(toolContracts),
-      withheldTools: Object.freeze([...this.#withheld.keys()].sort()),
       contributors,
       digests: Object.freeze({
         logical,
@@ -297,7 +283,6 @@ export class PromptPrefixTransaction {
     return Object.freeze({
       instructions: new Map(this.#instructions),
       tools: new Map(this.#tools),
-      withheld: new Map(this.#withheld),
       ...(this.#model === undefined ? {} : { model: this.#model }),
       snapshot,
     });
@@ -309,10 +294,6 @@ export class PromptPrefixTransaction {
         slot.tools.map((tool) => [tool.name, tool] as const),
       ),
     );
-  }
-
-  isWithheld(name: string): boolean {
-    return this.#withheld.has(name);
   }
 }
 
@@ -326,7 +307,10 @@ export function assertCanonicalPrefix(snapshot: PromptPrefixSnapshot): void {
     const value = providerTool(tool);
     const recorded = snapshot.toolContracts[index];
     if (recorded === undefined || recorded.digest !== digest(value))
-      throw new Error("Prompt prefix tool contract differs from its bound tool");
+      throw new HarnessError(
+        "prefix.tool-contract-drift",
+        "Prompt prefix tool contract differs from its bound tool",
+      );
     return value;
   });
   const logical = digest({
@@ -340,14 +324,16 @@ export function assertCanonicalPrefix(snapshot: PromptPrefixSnapshot): void {
     snapshot.digests.model !== model ||
     snapshot.digests.request !== request
   )
-    throw new Error("Prompt prefix digests do not match its canonical logical content");
+    throw new HarnessError(
+      "prefix.digest-mismatch",
+      "Prompt prefix digests do not match its canonical logical content",
+    );
 }
 
 function seededState(directive?: ModelDirective): State {
   return Object.freeze({
     instructions: new Map(),
     tools: new Map(),
-    withheld: new Map(),
     ...(directive === undefined ? {} : { model: Object.freeze({ directive }) }),
   });
 }
@@ -356,20 +342,19 @@ function slotKey(value: Owner): string {
 }
 function validateSlot(value: string): void {
   if (typeof value !== "string" || value.length === 0)
-    throw new TypeError("Prompt prefix slot must be a non-empty string");
-}
-function validateToolName(value: string): void {
-  if (typeof value !== "string" || value.length === 0)
-    throw new TypeError("Tool name must be a non-empty string");
+    throw new HarnessError("prefix.invalid-slot", "Prompt prefix slot must be a non-empty string");
 }
 function validateReason(value: string): string {
   if (typeof value !== "string" || value.length === 0)
-    throw new TypeError("Prompt prefix mutation reason must be a non-empty string");
+    throw new HarnessError(
+      "prefix.invalid-reason",
+      "Prompt prefix mutation reason must be a non-empty string",
+    );
   return value;
 }
 function checkedDirective(value: ModelDirective): ModelDirective {
   const normalized = normalizeDirective(value);
-  if (normalized instanceof Error) throw normalized;
+  if (isHarnessError(normalized)) throw normalized;
   return normalized;
 }
 function withOrder(
@@ -378,7 +363,8 @@ function withOrder(
   previousOrder?: number,
 ): Owner {
   const order = options?.order ?? previousOrder ?? 0;
-  if (!Number.isFinite(order)) throw new TypeError("Prompt prefix order must be a finite number");
+  if (!Number.isFinite(order))
+    throw new HarnessError("prefix.invalid-order", "Prompt prefix order must be a finite number");
   return Object.freeze({ ...base, order });
 }
 function compareSlots(left: { readonly owner: Owner }, right: { readonly owner: Owner }): number {
@@ -423,7 +409,7 @@ function providerTool(tool: BoundToolDefinition): object {
   return {
     name: tool.name,
     ...(tool.description === undefined ? {} : { description: tool.description }),
-    inputSchema: copyJson(tool.input.jsonSchema),
+    inputSchema: copyJson(tool.parameters.jsonSchema),
   };
 }
 function toolContract(

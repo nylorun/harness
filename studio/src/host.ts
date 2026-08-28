@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createFileRecorder, type BuiltAgent } from "@nylorun/create-agent/local";
+import type { BuiltAgent } from "@nylorun/create-agent/local";
 import { startLocalRuntime } from "@nylorun/create-agent/local/runtime-host";
 
 export type StudioOptions = Readonly<{ project: string; agentServerUrl?: string; port?: number; open?: boolean }>;
@@ -81,7 +81,7 @@ export async function loadLocalAgent(project: string, cacheBust?: string): Promi
   catch { throw new Error("dist/agent.mjs is missing or unreadable. Run `nylo build` before Studio."); }
   if (module.agent === undefined || typeof module.agent.session.start !== "function") throw new Error("dist/agent.mjs does not export an agent runtime handle. Rebuild the project.");
   const secrets = Object.entries(process.env).filter(([name, value]) => value !== undefined && value.length >= 8 && /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(name)).map(([, value]) => value!);
-  return module.agent.withHost({ recorder: createFileRecorder({ projectRoot: project, redact: secrets }) });
+  return module.agent.withHost({ redact: secrets });
 }
 
 async function listen(server: Server, port: number): Promise<void> {
