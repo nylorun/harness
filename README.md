@@ -13,11 +13,12 @@ Read the package [quick start](./harness/README.md), [loop model](./harness/docs
 Harness supports Node.js 22.14, 24, and 26 or later.
 
 ```sh
+cd harness
 npm ci
 npm run check
 ```
 
-The root workspace currently contains Harness only. Studio and Create Agent are planned as future sibling packages and are not part of this repository release.
+Studio and Create Agent are planned additions and are not part of this repository release.
 
 ## Community and security
 

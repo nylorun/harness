@@ -1,12 +1,13 @@
 # Contributing to Nylorun Harness
 
-Thanks for contributing. This repository is an npm workspace whose current public package is [`@nylorun/harness`](./harness).
+Thanks for contributing. The public package lives in [`harness/`](./harness) as [`@nylorun/harness`](./harness).
 
 ## Development workflow
 
 Use a supported Node.js release (22.14, 24, or 26 or later), then run:
 
 ```sh
+cd harness
 npm ci
 npm run check
 ```

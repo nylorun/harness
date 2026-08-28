@@ -27,9 +27,11 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: harness/package-lock.json
       - run: npm ci
+        working-directory: harness
       - run: npm run check
+        working-directory: harness
 
   audit:
     name: Production dependency audit
@@ -40,9 +42,11 @@ jobs:
         with:
           node-version: "22.14.0"
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: harness/package-lock.json
       - run: npm ci
+        working-directory: harness
       - run: npm audit --omit=dev --audit-level=high
+        working-directory: harness
 
   verify:
     name: Verify
