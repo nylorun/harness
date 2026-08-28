@@ -62,6 +62,7 @@ try {
     cwd: process.cwd(),
     encoding: "utf8",
     env: { ...process.env, npm_config_cache: cache },
+    shell: process.platform === "win32",
   });
   const files = JSON.parse(output)[0].files.map((entry) => entry.path);
   const allowed = (path) =>
