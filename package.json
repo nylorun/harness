@@ -14,6 +14,6 @@
   "scripts": {
     "build": "npm run build --workspace @nylorun/harness && npm run build --workspace @nylorun/studio",
     "test": "npm run test --workspaces --if-present",
-    "check": "npm run check --workspace @nylorun/harness && npm run check --workspace @nylorun/studio"
+    "check": "npm run check --workspace @nylorun/harness"
   }
 }

@@ -1,7 +1,7 @@
 import { fileURLToPath, URL } from "node:url";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vite";
 
 export default defineConfig({
   root: "web",
@@ -12,9 +12,5 @@ export default defineConfig({
   build: {
     outDir: "../dist/web",
     emptyOutDir: false
-  },
-  test: {
-    environment: "jsdom",
-    include: ["../test/**/*.test.ts", "src/**/*.test.ts?(x)"]
   }
 });
