@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
   AgentBuildError,
-  adapter as typedAdapter,
   model as typedModel,
   tool as typedTool,
   type BuiltAgent,
@@ -13,13 +12,18 @@ import {
   type SessionInput,
   type StepRequest,
   type StepResponse,
-  type ToolAdapter,
+  type ToolDefinition,
+  type ToolExecutionContext,
+  type ToolOutcome,
 } from "../src/index.js";
 
 export const objectSchema = z.object({}).passthrough();
 
-export function tool(name = "echo", executeWith = "local") {
-  return typedTool({ name, parameters: objectSchema, executeWith });
+export function tool(
+  name = "echo",
+  execute: ToolDefinition["execute"] = async (args) => ({ kind: "completed", output: args }),
+) {
+  return typedTool({ name, parameters: objectSchema, execute });
 }
 
 export function offer(...tools: ReturnType<typeof tool>[]) {
@@ -29,11 +33,16 @@ export function offer(...tools: ReturnType<typeof tool>[]) {
   };
 }
 
-export function adapter(execute?: ToolAdapter["execute"]) {
-  return typedAdapter({
-    id: "local",
-    execute: execute ?? (async (call) => ({ kind: "completed" as const, output: call.args })),
-  });
+export function execution(
+  execute?: (
+    call: { readonly args: JsonObject; readonly callId?: string; readonly toolName?: string },
+    context: ToolExecutionContext,
+  ) => Promise<ToolOutcome>,
+): ToolDefinition["execute"] {
+  return async (args, context) =>
+    execute
+      ? execute({ args: args as JsonObject }, context)
+      : { kind: "completed" as const, output: args as JsonObject };
 }
 
 export function model(invoke: ModelAdapter) {

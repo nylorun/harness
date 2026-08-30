@@ -1,0 +1,242 @@
+import { HarnessError } from "../errors.js";
+import { normalizeCandidate } from "../model-normalize.js";
+import type {
+  InputEvent,
+  SessionSeed,
+  TranscriptEntry,
+  TranscriptToolsEntry,
+} from "../types/session.js";
+import type { ToolResult } from "../types/tool.js";
+import { assertJson, copyJson, copyJsonObject } from "../utils/immutable.js";
+
+export interface NormalizedSessionSeed {
+  readonly id?: string;
+  readonly userId?: string;
+  readonly context?: import("../types/shared.js").JsonObject;
+  readonly turnCount: number;
+  readonly revision: number;
+  readonly transcript: readonly TranscriptEntry[];
+}
+
+export function normalizeSessionSeed(seed: SessionSeed): NormalizedSessionSeed {
+  try {
+    return normalizeSeed(seed);
+  } catch (cause) {
+    if (cause instanceof HarnessError && cause.code === "session.invalid-seed") throw cause;
+    throw new HarnessError("session.invalid-seed", "Session seed contains invalid typed JSON", {
+      cause,
+    });
+  }
+}
+
+function normalizeSeed(seed: SessionSeed): NormalizedSessionSeed {
+  if (!seed || typeof seed !== "object") fail("Session seed must be an object");
+  if (!Array.isArray(seed.transcript)) fail("Session seed transcript must be an array");
+  optionalString(seed.id, "Session seed id");
+  optionalString(seed.userId, "Session seed userId");
+  const turnCount = count(seed.turnCount, "turnCount");
+  const revision = count(seed.revision, "revision");
+  const transcript = Object.freeze(seed.transcript.map((entry, index) => entryAt(entry, index)));
+  return Object.freeze({
+    ...(seed.id === undefined ? {} : { id: seed.id }),
+    ...(seed.userId === undefined ? {} : { userId: seed.userId }),
+    ...(seed.context === undefined
+      ? {}
+      : { context: copyJsonObject(seed.context, "session seed context") }),
+    turnCount,
+    revision,
+    transcript,
+  });
+}
+
+function entryAt(value: unknown, index: number): TranscriptEntry {
+  if (!value || typeof value !== "object") fail(`Transcript entry ${index} must be an object`);
+  const entry = value as Record<string, unknown>;
+  requiredString(entry.kind, `Transcript entry ${index} kind`);
+  requiredString(entry.turnId, `Transcript entry ${index} turnId`);
+  switch (entry.kind) {
+    case "input":
+      exactKeys(entry, ["kind", "turnId", "event"], `Transcript entry ${index}`);
+      return Object.freeze({
+        kind: "input",
+        turnId: entry.turnId as string,
+        event: inputEvent(entry.event, index),
+      });
+    case "candidate": {
+      exactKeys(entry, ["kind", "turnId", "stepId", "candidate"], `Transcript entry ${index}`);
+      requiredString(entry.stepId, `Transcript entry ${index} stepId`);
+      try {
+        validateSeedCandidate(entry.candidate, index);
+        return Object.freeze({
+          kind: "candidate",
+          turnId: entry.turnId as string,
+          stepId: entry.stepId as string,
+          candidate: normalizeCandidate(entry.candidate as never),
+        });
+      } catch (cause) {
+        throw new HarnessError("session.invalid-seed", `Invalid candidate at transcript ${index}`, {
+          cause,
+        });
+      }
+    }
+    case "tool-results": {
+      exactKeys(entry, ["kind", "turnId", "stepId", "results"], `Transcript entry ${index}`);
+      requiredString(entry.stepId, `Transcript entry ${index} stepId`);
+      if (!Array.isArray(entry.results))
+        fail(`Transcript entry ${index} tool results must be an array`);
+      const result: TranscriptToolsEntry = Object.freeze({
+        kind: "tool-results",
+        turnId: entry.turnId as string,
+        stepId: entry.stepId as string,
+        results: Object.freeze(
+          entry.results.map((item, resultIndex) => toolResult(item, resultIndex)),
+        ),
+      });
+      return result;
+    }
+    case "final":
+      exactKeys(entry, ["kind", "turnId", "stepId", "output"], `Transcript entry ${index}`);
+      requiredString(entry.stepId, `Transcript entry ${index} stepId`);
+      if (typeof entry.output !== "string")
+        fail(`Transcript entry ${index} output must be a string`);
+      return Object.freeze({
+        kind: "final",
+        turnId: entry.turnId as string,
+        stepId: entry.stepId as string,
+        output: entry.output,
+      });
+    default:
+      fail(`Transcript entry ${index} has unknown kind '${String(entry.kind)}'`);
+  }
+}
+
+function inputEvent(value: unknown, index: number): InputEvent {
+  if (!value || typeof value !== "object") fail(`Transcript input ${index} must be an object`);
+  const event = value as Record<string, unknown>;
+  switch (event.kind) {
+    case "user-message":
+    case "interrupt":
+      exactKeys(event, ["kind", "text", "metadata"], `Transcript input ${index}`);
+      if (typeof event.text !== "string") fail(`Transcript input ${index} text must be a string`);
+      return Object.freeze({
+        kind: event.kind,
+        text: event.text,
+        ...(event.metadata === undefined
+          ? {}
+          : { metadata: copyJsonObject(event.metadata, `transcript input ${index} metadata`) }),
+      });
+    case "approve":
+      exactKeys(event, ["kind", "interactionId", "approved"], `Transcript input ${index}`);
+      requiredString(event.interactionId, `Transcript input ${index} interactionId`);
+      if (typeof event.approved !== "boolean")
+        fail(`Transcript input ${index} approved must be a boolean`);
+      return Object.freeze({
+        kind: "approve",
+        interactionId: event.interactionId as string,
+        approved: event.approved,
+      });
+    case "respond":
+      exactKeys(event, ["kind", "interactionId", "value"], `Transcript input ${index}`);
+      requiredString(event.interactionId, `Transcript input ${index} interactionId`);
+      assertJson(event.value, `transcript input ${index} value`);
+      return Object.freeze({
+        kind: "respond",
+        interactionId: event.interactionId as string,
+        value: copyJson(event.value),
+      });
+    default:
+      fail(`Transcript input ${index} has unknown kind '${String(event.kind)}'`);
+  }
+}
+
+function toolResult(value: unknown, index: number): ToolResult {
+  if (!value || typeof value !== "object") fail(`Tool result ${index} must be an object`);
+  const result = value as Record<string, unknown>;
+  requiredString(result.callId, `Tool result ${index} callId`);
+  requiredString(result.toolName, `Tool result ${index} toolName`);
+  const base = { callId: result.callId as string, toolName: result.toolName as string };
+  switch (result.kind) {
+    case "completed":
+      exactKeys(result, ["callId", "toolName", "kind", "output"], `Tool result ${index}`);
+      assertJson(result.output, `tool result ${index} output`);
+      return Object.freeze({ ...base, kind: "completed", output: copyJson(result.output) });
+    case "denied":
+      exactKeys(result, ["callId", "toolName", "kind", "reason"], `Tool result ${index}`);
+      if (typeof result.reason !== "string") fail(`Tool result ${index} reason must be a string`);
+      return Object.freeze({ ...base, kind: "denied", reason: result.reason });
+    case "failed":
+      exactKeys(result, ["callId", "toolName", "kind", "code", "message"], `Tool result ${index}`);
+      if (typeof result.code !== "string" || typeof result.message !== "string")
+        fail(`Tool result ${index} code and message must be strings`);
+      return Object.freeze({
+        ...base,
+        kind: "failed",
+        code: result.code,
+        message: result.message,
+      });
+    default:
+      fail(`Tool result ${index} has unknown kind '${String(result.kind)}'`);
+  }
+}
+
+function validateSeedCandidate(value: unknown, index: number): void {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail(`Candidate at transcript ${index} must be an object`);
+  const candidate = value as Record<string, unknown>;
+  exactKeys(
+    candidate,
+    ["output", "finishReason", "usage", "evidence"],
+    `Candidate at transcript ${index}`,
+  );
+  if (!Array.isArray(candidate.output))
+    fail(`Candidate at transcript ${index} output must be an array`);
+  candidate.output.forEach((value, blockIndex) => {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      fail(`Candidate output ${blockIndex} at transcript ${index} must be an object`);
+    const block = value as Record<string, unknown>;
+    if (block.type === "text" || block.type === "reasoning") {
+      exactKeys(block, ["type", "text"], `Candidate output ${blockIndex}`);
+      if (typeof block.text !== "string")
+        fail(`Candidate output ${blockIndex} text must be a string`);
+      return;
+    }
+    if (block.type === "tool-call") {
+      exactKeys(block, ["type", "id", "name", "args", "raw"], `Candidate output ${blockIndex}`);
+      requiredString(block.id, `Candidate output ${blockIndex} id`);
+      requiredString(block.name, `Candidate output ${blockIndex} name`);
+      if (block.raw !== undefined && typeof block.raw !== "string")
+        fail(`Candidate output ${blockIndex} raw must be a string`);
+      copyJsonObject(block.args, `candidate output ${blockIndex} args`);
+      return;
+    }
+    fail(`Candidate output ${blockIndex} has unknown kind '${String(block.type)}'`);
+  });
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  label: string,
+): void {
+  for (const key of Object.keys(value))
+    if (!allowed.includes(key)) fail(`${label} has unknown field '${key}'`);
+}
+
+function count(value: unknown, label: string): number {
+  if (value === undefined) return 0;
+  if (!Number.isSafeInteger(value) || (value as number) < 0)
+    fail(`Session seed ${label} must be a non-negative safe integer`);
+  return value as number;
+}
+
+function optionalString(value: unknown, label: string): void {
+  if (value !== undefined) requiredString(value, label);
+}
+
+function requiredString(value: unknown, label: string): asserts value is string {
+  if (typeof value !== "string" || value.length === 0) fail(`${label} must be a non-empty string`);
+}
+
+function fail(message: string): never {
+  throw new HarnessError("session.invalid-seed", message);
+}

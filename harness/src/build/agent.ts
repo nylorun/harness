@@ -1,24 +1,20 @@
 import type { AgentManifest } from "../types/manifest.js";
 import type { BoundMiddleware } from "../types/middleware.js";
-import type { ModelAdapter, ModelDirective } from "../types/model.js";
-import type { Session, SessionOptions } from "../types/session.js";
+import type { ModelAdapter } from "../types/model.js";
+import type { Session, SessionRunOptions } from "../types/session.js";
 import { LiveSession } from "../session/session.js";
 import { createId } from "../utils/ids.js";
-import type { AdapterRegistry } from "./adapters.js";
+import { HarnessError } from "../errors.js";
 
 export interface LoopAgent {
   readonly middleware: readonly BoundMiddleware[];
   readonly invoke: ModelAdapter;
-  readonly directive?: ModelDirective;
-  readonly adapters: AdapterRegistry;
 }
 
 let createBoundAgent: (
   middleware: readonly BoundMiddleware[],
   invoke: ModelAdapter,
-  adapters: AdapterRegistry,
   manifest: AgentManifest,
-  directive?: ModelDirective,
 ) => BuiltAgent;
 
 export class BuiltAgent {
@@ -27,25 +23,33 @@ export class BuiltAgent {
   private constructor(
     readonly middleware: readonly BoundMiddleware[],
     invoke: ModelAdapter,
-    adapters: AdapterRegistry,
     readonly manifest: AgentManifest,
-    directive?: ModelDirective,
   ) {
     this.#loopAgent = Object.freeze({
       middleware,
       invoke,
-      adapters,
-      ...(directive === undefined ? {} : { directive }),
     });
   }
 
   static {
-    createBoundAgent = (middleware, invoke, adapters, manifest, directive) =>
-      new BuiltAgent(middleware, invoke, adapters, manifest, directive);
+    createBoundAgent = (middleware, invoke, manifest) =>
+      new BuiltAgent(middleware, invoke, manifest);
   }
 
-  run(options: SessionOptions = {}): Session {
-    const id = options.id ?? createId("session");
+  run(options: SessionRunOptions = {}): Session {
+    const seeded = "seed" in options && options.seed !== undefined;
+    if (
+      seeded &&
+      (("id" in options && options.id !== undefined) ||
+        ("userId" in options && options.userId !== undefined) ||
+        ("context" in options && options.context !== undefined))
+    )
+      throw new HarnessError(
+        "session.invalid-seed",
+        "Seeded run options cannot include id, userId, or context outside the seed",
+      );
+    const id =
+      (seeded ? options.seed.id : "id" in options ? options.id : undefined) ?? createId("session");
     return new LiveSession(id, this.#loopAgent, options);
   }
 }
@@ -53,9 +57,7 @@ export class BuiltAgent {
 export function bindAgent(
   middleware: readonly BoundMiddleware[],
   invoke: ModelAdapter,
-  adapters: AdapterRegistry,
   manifest: AgentManifest,
-  directive?: ModelDirective,
 ): BuiltAgent {
-  return createBoundAgent(middleware, invoke, adapters, manifest, directive);
+  return createBoundAgent(middleware, invoke, manifest);
 }

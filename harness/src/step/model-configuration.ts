@@ -7,7 +7,6 @@ import type {
   ModelDirective,
 } from "../types/model.js";
 import type { BoundToolDefinition, ToolDefinition } from "../types/tool.js";
-import type { AdapterRegistry } from "../build/adapters.js";
 import { bindTool } from "../build/bind-tool.js";
 import { HarnessError, isHarnessError } from "../errors.js";
 import { normalizeDirective, sameDirective } from "../model-normalize.js";
@@ -27,10 +26,7 @@ export class ModelConfigurationDraft {
   #tools = new SlotDraft<readonly BoundToolDefinition[]>();
   #model?: ModelSelection;
 
-  constructor(
-    private readonly adapters: AdapterRegistry,
-    directive?: ModelDirective,
-  ) {
+  constructor(directive?: ModelDirective) {
     if (directive !== undefined)
       this.#model = Object.freeze({ directive: checkedDirective(directive) });
   }
@@ -77,7 +73,7 @@ export class ModelConfigurationDraft {
       middlewareId,
       middlewareOrder,
       slot,
-      value: Object.freeze(tools.map((tool) => bindTool(tool, this.adapters))),
+      value: Object.freeze(tools.map((tool) => bindTool(tool, { middlewareId, slot }))),
       order: options?.order,
       reason: options?.reason,
       invalidSlot: "configuration.invalid-slot",

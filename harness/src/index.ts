@@ -2,7 +2,7 @@ export { Agent, AgentBuilder, AgentBuildError, AgentLifecycleError } from "./bui
 export { HarnessError, isHarnessError } from "./errors.js";
 export type { HarnessErrorCode, HarnessErrorDetails, HarnessErrorOptions } from "./errors.js";
 export { BuiltAgent } from "./build/agent.js";
-export { adapter, middleware, model, tool } from "./build/helpers.js";
+export { middleware, model, tool } from "./build/helpers.js";
 
 export type { AgentManifest } from "./types/manifest.js";
 export type {
@@ -32,6 +32,9 @@ export type {
 } from "./types/model.js";
 export type {
   BoundMiddleware,
+  CapabilityDeclaration,
+  CapabilityItems,
+  CapabilityState,
   StepInput,
   StepMiddleware,
   StepRequest,
@@ -40,6 +43,7 @@ export type {
 export type {
   BuildDiagnostic,
   ContextItem,
+  DeferredOutcome,
   JsonObject,
   JsonPrimitive,
   JsonValue,
@@ -52,6 +56,11 @@ export type {
   Tripwire,
 } from "./types/shared.js";
 export type {
+  ActiveExecutionRecord,
+  ActiveInteractionExecutionRecord,
+  ActiveModelExecutionRecord,
+  ActiveToolCallRecord,
+  ActiveToolsExecutionRecord,
   InteractionReply,
   InputCompletion,
   InputEvent,
@@ -60,8 +69,14 @@ export type {
   MessageInput,
   Session,
   SessionInput,
+  SessionIdentity,
   SessionEvent,
   SessionOptions,
+  SessionRecord,
+  SessionRecorder,
+  SessionRunOptions,
+  SessionSeed,
+  SeededSessionOptions,
   SessionSnapshot,
   TranscriptEntry,
 } from "./types/session.js";
@@ -69,15 +84,14 @@ export type {
   BoundToolSchema,
   BoundToolDefinition,
   Interaction,
-  PreflightOutcome,
   RequiredInteraction,
   SealedToolCall,
-  ToolAdapter,
-  AdapterExecutionOptions,
   ToolContent,
   ToolDefinition,
+  ToolExecutionContext,
   ToolExecutionResume,
   ToolObjectSchema,
+  ToolOwner,
   ToolOutcome,
   ToolResult,
 } from "./types/tool.js";

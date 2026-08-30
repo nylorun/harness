@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Agent, type ObserveEvent } from "../src/index.js";
-import { adapter, model, offer, tool, toolCalls } from "./fixtures.js";
+import { execution, model, offer, tool, toolCalls } from "./fixtures.js";
 
 function expectPlainJson(value: unknown): void {
   const encoded = JSON.stringify(value);
@@ -108,7 +108,6 @@ describe("observation", () => {
   it("projects the model.requested prefix to plain JSON", async () => {
     const observed: ObserveEvent[] = [];
     const session = Agent(model(async () => "done"))
-      .with(adapter())
       .use("tools", offer(tool()))
       .build()
       .run();
@@ -194,31 +193,30 @@ describe("observation", () => {
     });
   });
 
-  it("closes a thrown adapter with adapter.completed failed and continues the turn", async () => {
+  it("closes a thrown tool with tool.completed failed and continues the turn", async () => {
     let step = 0;
+    const execute = execution(async () => {
+      throw new Error("boom");
+    });
     const session = Agent(
       model(async () =>
         ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
     )
-      .with(
-        adapter(async () => {
-          throw new Error("boom");
-        }),
-      )
-      .use("test", offer(tool()))
+      .use("test", offer(tool("echo", execute)))
       .build()
       .run();
     const observed: ObserveEvent[] = [];
     session.observe((event) => observed.push(event));
     expect((await session.input("go").completed).status).toBe("completed");
     const types = observed.map((event) => event.type);
-    const started = types.indexOf("adapter.started");
-    const completed = types.indexOf("adapter.completed");
+    const started = types.indexOf("tool.started");
+    const completed = types.indexOf("tool.completed");
     expect(started).toBeGreaterThan(-1);
     expect(completed).toBeGreaterThan(started);
     expect(observed[completed]).toMatchObject({
-      type: "adapter.completed",
+      type: "tool.completed",
+      sessionId: expect.any(String),
       toolName: "echo",
       callId: "call",
       outcome: "failed",
@@ -283,7 +281,6 @@ describe("observation", () => {
         ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
     )
-      .with(adapter())
       .use("approve-echo", async (_request, next) => {
         const response = await next();
         const call = response.toolCalls()[0];
@@ -320,13 +317,17 @@ describe("observation", () => {
     const afterApprove = observed
       .slice(approveIndex + 1)
       .filter((event) => "turnId" in event && event.inputId === approve.inputId);
-    expect(afterApprove.some((event) => event.type === "adapter.started")).toBe(true);
+    expect(afterApprove.some((event) => event.type === "tool.started")).toBe(true);
     expect(afterApprove.some((event) => event.type === "turn.completed")).toBe(true);
     expect(afterApprove.every((event) => event.turnId === pause?.turnId)).toBe(true);
   });
 
   it("copies raw emit-site snapshots onto filterable observe events", async () => {
     let step = 0;
+    const execute = execution(async (call) => ({
+      kind: "completed" as const,
+      output: { echoed: call.args },
+    }));
     const session = Agent(
       model(async () =>
         ++step === 1
@@ -334,11 +335,8 @@ describe("observation", () => {
           : "Completed with echoed",
       ),
     )
-      .with(
-        adapter(async (call) => ({ kind: "completed" as const, output: { echoed: call.args } })),
-      )
       .use("echo", async (request, next) => {
-        request.configuration.tools.set("capture", [tool()]);
+        request.configuration.tools.set("capture", [tool("echo", execute)]);
         request.configuration.instructions.set("capture", ["Echo the user text."]);
         return next();
       })
@@ -397,9 +395,9 @@ describe("observation", () => {
       expect.objectContaining({ callId: "call_1", toolName: "echo", args: { text: "hello" } }),
     ]);
 
-    const adapterDone = observed.find((event) => event.type === "adapter.completed");
-    expect(adapterDone).toMatchObject({
-      type: "adapter.completed",
+    const toolDone = observed.find((event) => event.type === "tool.completed");
+    expect(toolDone).toMatchObject({
+      type: "tool.completed",
       toolName: "echo",
       callId: "call_1",
       outcome: "completed",
@@ -463,7 +461,6 @@ describe("observation", () => {
           : "done";
       }),
     )
-      .with(adapter())
       .use("echo", offer(tool()))
       .build()
       .run();

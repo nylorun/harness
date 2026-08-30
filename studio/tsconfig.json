@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2025", "module": "NodeNext", "moduleResolution": "NodeNext", "strict": true,
+    "declaration": true, "outDir": "dist", "rootDir": "src", "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true, "skipLibCheck": true, "types": ["node"], "paths": { "@/*": ["./web/src/*"] }
+  },
+  "include": ["src/**/*.ts"], "exclude": ["dist", "node_modules", "test"]
+}

@@ -5,6 +5,8 @@ import type {
   BoundToolDefinition,
   RequiredInteraction,
   SealedToolCall,
+  ToolOwner,
+  ToolOutcome,
   ToolResult,
 } from "../types/tool.js";
 import { createId } from "../utils/ids.js";
@@ -16,8 +18,9 @@ import type { StepContext } from "./step-context.js";
 export interface ExecutablePlanEntry {
   readonly call: SealedToolCall;
   readonly invocationId: string;
+  readonly owner: ToolOwner;
+  readonly execute: BoundToolDefinition["execute"];
   readonly interaction?: RequiredInteraction;
-  readonly preflight?: "sandbox" | "validation";
 }
 
 export interface InternalToolPlan {
@@ -30,6 +33,10 @@ export interface InternalToolPlan {
 export type SealedStepOutput =
   | { readonly kind: "tripwire"; readonly tripwire: Tripwire }
   | { readonly kind: "final"; readonly output: string }
+  | {
+      readonly kind: "deferred-model";
+      readonly active: import("../types/session.js").ActiveModelExecutionRecord;
+    }
   | { readonly kind: "tools"; readonly plan: InternalToolPlan };
 
 interface SealedCall {
@@ -46,6 +53,8 @@ const failed = (callId: string, toolName: string, code: string, message: string)
 export function sealStep(context: StepContext): SealedStepOutput {
   if (context.currentTripwire)
     return Object.freeze({ kind: "tripwire", tripwire: context.currentTripwire });
+  if (context.currentModelDeferred)
+    return Object.freeze({ kind: "deferred-model", active: context.currentModelDeferred });
   const calls = context.canonicalCalls();
   if (!calls.length)
     return Object.freeze({
@@ -142,7 +151,6 @@ function sealCall(
   const interaction = requested
     ? Object.freeze({ ...requested, id: requested.id ?? createId("interaction") })
     : undefined;
-  const preflight = context.preflightFor(candidate.id);
   return {
     order,
     canonical,
@@ -151,11 +159,11 @@ function sealCall(
         callId: candidate.id,
         toolName: candidate.name,
         args,
-        executeWith: tool.executeWith,
       }),
       invocationId: createId("invocation"),
+      owner: tool.owner,
+      execute: tool.execute,
       ...(interaction ? { interaction } : {}),
-      ...(preflight ? { preflight } : {}),
     }),
   };
 }

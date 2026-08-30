@@ -8,7 +8,7 @@ import {
   type ModelConfigurationSnapshot,
 } from "../src/index.js";
 import { projectModelCall } from "../src/step/project.js";
-import { adapter, model, offer, tool, toolCalls, turn } from "./fixtures.js";
+import { execution, model, offer, tool, toolCalls, turn } from "./fixtures.js";
 
 function configuration(
   overrides: Partial<ModelConfigurationSnapshot> = {},
@@ -193,7 +193,8 @@ describe("projectModelCall", () => {
             {
               name: "echo",
               description: "Echo a message",
-              executeWith: "local",
+              execute: async () => ({ kind: "completed", output: null }),
+              owner: { middlewareId: "tools", slot: "echo" },
               parameters: {
                 jsonSchema: { type: "object", properties: { text: { type: "string" } } },
                 validate: () => ({ ok: true, value: {} }),
@@ -258,7 +259,7 @@ describe("projectModelCall", () => {
         toolCallId: "fail_1",
         toolName: "echo",
         status: "failed",
-        content: [{ type: "text", text: '{"kind":"failed","reason":"x"}' }],
+        content: [{ type: "text", text: '{"kind":"failed","code":"boom","message":"x"}' }],
       },
     ]);
   });
@@ -275,7 +276,6 @@ describe("projectModelCall", () => {
         return "done";
       }),
     )
-      .with(adapter())
       .use("echo", async (step, next) => {
         step.configuration.instructions.set("policy", ["Echo the user text."]);
         step.context.set("fixture", [{ type: "fixture", value: { n: 1 } }]);
@@ -310,6 +310,10 @@ describe("projectModelCall", () => {
   it("runs the documented two-step echo redraw example", async () => {
     const calls: ModelCall[] = [];
     const requests: ModelRequest[] = [];
+    const execute = execution(async (call) => ({
+      kind: "completed" as const,
+      output: { echoed: call.args.text },
+    }));
     const result = Agent(
       model(async (call, { request }) => {
         calls.push(call);
@@ -318,18 +322,12 @@ describe("projectModelCall", () => {
           ? toolCalls({ id: "call_1", name: "echo", args: { text: "hello" } })
           : "Completed with echoed hello.";
       }),
-      { id: "haiku" },
     )
-      .with(
-        adapter(async (call) => ({
-          kind: "completed" as const,
-          output: { echoed: call.args.text },
-        })),
-      )
+      .use({ id: "model", model: { id: "haiku" } })
       .use("echo", async (step, next) => {
         // Declarations are deliberately repeated: each model call redraws configuration and context.
         step.configuration.instructions.set("echo-policy", ["Echo the user text."]);
-        step.configuration.tools.set("echo-tools", [tool("echo", "local")]);
+        step.configuration.tools.set("echo-tools", [tool("echo", execute)]);
         step.context.set("example", [{ type: "example", value: { step: step.stepNumber } }]);
         return next();
       })
@@ -369,9 +367,9 @@ describe("projectModelCall", () => {
       ],
     ]);
 
-    expect(requests.map((request) => request.configuration.tools[0]?.executeWith)).toEqual([
-      "local",
-      "local",
+    expect(requests.map((request) => request.configuration.tools[0]?.owner)).toEqual([
+      { middlewareId: "echo", slot: "echo-tools" },
+      { middlewareId: "echo", slot: "echo-tools" },
     ]);
     expect(calls.map((call) => call.tools)).toEqual([
       [

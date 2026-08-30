@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Agent, type ContextSnapshot } from "../src/index.js";
-import { adapter, model, offer, tool, toolCalls, turn } from "./fixtures.js";
+import { model, offer, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("runtime context", () => {
   it("is fresh for every model step", async () => {
@@ -12,7 +12,6 @@ describe("runtime context", () => {
         return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
-      .with(adapter())
       .use("retrieval", async (request, next) => {
         request.configuration.tools.set("tools", [tool()]);
         if (request.stepNumber === 1)
@@ -33,7 +32,6 @@ describe("runtime context", () => {
         return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
-      .with(adapter())
       .use("tools", offer(tool()))
       .use("plugin", async (request, next) => {
         request.context.set("extra", [{ type: "note", value: "current-step" }]);
@@ -64,7 +62,6 @@ describe("runtime context", () => {
         return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
-      .with(adapter())
       .use("assembly", async (request, next) => {
         request.configuration.instructions.set("policy", ["Stable policy"]);
         request.configuration.tools.set("tools", [tool()]);

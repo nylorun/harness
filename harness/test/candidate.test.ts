@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Agent } from "../src/index.js";
-import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("model candidate blocks", () => {
   it("joins interleaved text blocks and ignores reasoning on session final", async () => {
@@ -26,7 +26,6 @@ describe("model candidate blocks", () => {
         };
       }),
     )
-      .with(adapter())
       .use("test", offer(tool()))
       .build();
     const { session, handle } = turn(result, "go");
@@ -156,7 +155,6 @@ describe("model candidate blocks", () => {
         };
       }),
     )
-      .with(adapter())
       .use("review", async (request, next) => {
         request.configuration.tools.set("review", [tool()]);
         const response = await next();
@@ -185,7 +183,6 @@ describe("model candidate blocks", () => {
         ++call === 1 ? toolCalls({ id: "echo", name: "echo", args: {} }) : "done",
       ),
     )
-      .with(adapter())
       .use("typed", async (request, next) => {
         request.configuration.tools.set("typed", [tool()]);
         return next();

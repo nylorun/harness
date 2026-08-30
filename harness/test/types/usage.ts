@@ -1,11 +1,11 @@
 import { z } from "zod";
 import {
   Agent,
-  type AdapterExecutionOptions,
   HarnessError,
-  type HarnessErrorCode,
-  adapter,
   tool,
+  type CapabilityDeclaration,
+  type AgentManifest,
+  type HarnessErrorCode,
   type BuiltAgent,
   type BoundToolSchema,
   type BuildDiagnostic,
@@ -16,6 +16,9 @@ import {
   type ModelRequest,
   type ModelConfigurationSnapshot,
   type Session,
+  type SessionRecord,
+  type SessionRecorder,
+  type SessionSeed,
   type SessionInput,
   type SessionOptions,
   type StepRequest,
@@ -27,33 +30,62 @@ import { bindAgent } from "../../src/index.js";
 tool({
   name: "echo",
   parameters: z.object({ text: z.string().trim() }),
-  executeWith: "local",
+  async execute(args) {
+    return { kind: "completed", output: { text: args.text } };
+  },
 });
 
 tool({
   name: "invalid-root",
   // @ts-expect-error Harness accepts Zod object roots only.
   parameters: z.string(),
-  executeWith: "local",
-});
-
-const local = adapter({
-  id: "local",
-  async execute(call) {
-    return { kind: "completed" as const, output: call.args };
+  async execute() {
+    return { kind: "completed", output: null };
   },
 });
 
-const adapterExecutionOptions: AdapterExecutionOptions = { maxConcurrentCalls: 1 };
-void adapterExecutionOptions;
-
 Agent(async () => "done")
-  .with(local, { maxConcurrentCalls: 1 })
   .use("echo", async (_request, next) => next())
   .build()
   .run();
 
+// @ts-expect-error bind-time model directives were removed; use a declaration.
 Agent(async () => "done", { id: "opus" });
+
+declare const manifest: AgentManifest;
+// @ts-expect-error model selection is no longer build-time manifest state.
+void manifest.model;
+
+type CounterState = { count: number };
+const counterSchema = z.object({});
+const counterTool = tool<typeof counterSchema, CounterState>({
+  name: "counter",
+  parameters: counterSchema,
+  async execute(_args, context) {
+    const state: CounterState = await context.state;
+    return { kind: "completed", output: state.count };
+  },
+});
+const counterCapability: CapabilityDeclaration<CounterState> = {
+  id: "counter",
+  state: { create: () => ({ count: 0 }) },
+  tools: [counterTool],
+  middleware: async (request, next) => {
+    const state: CounterState = await request.state;
+    state.count += 1;
+    return next();
+  },
+};
+Agent(async () => "done").use(counterCapability);
+const statelessCapability: CapabilityDeclaration = {
+  id: "stateless",
+  middleware: async (request, next) => {
+    // @ts-expect-error declarations without state do not expose request.state
+    void request.state;
+    return next();
+  },
+};
+void statelessCapability;
 
 // @ts-expect-error model is required
 Agent();
@@ -77,6 +109,13 @@ session.interrupt({ text: "ok" });
 session.input({ kind: "interrupt", text: "x" });
 
 declare const agent: BuiltAgent;
+
+const seed: SessionSeed = { transcript: [], revision: 4 };
+const recorder: SessionRecorder = { async record(_value: SessionRecord) {} };
+agent.run({ seed, recorder }).continue();
+
+// @ts-expect-error adapters were removed
+agent.with({});
 
 // @ts-expect-error Session limits are application middleware policy.
 agent.run({ limits: { maxTurns: 1 } });
@@ -140,7 +179,11 @@ call.stepId = "step";
 
 declare const modelRequest: ModelRequest;
 declare const invoke: ModelAdapter;
-void invoke(call, { request: modelRequest, signal: new AbortController().signal });
+void invoke(call, {
+  request: modelRequest,
+  invocationId: "invocation",
+  signal: new AbortController().signal,
+});
 // @ts-expect-error ModelAdapter receives the projected call before its context object
 void invoke(call, modelRequest, new AbortController().signal);
 

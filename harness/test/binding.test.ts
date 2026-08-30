@@ -1,163 +1,77 @@
 import { describe, expect, it } from "vitest";
 import { Agent } from "../src/index.js";
-import { createAdapterRegistry } from "../src/build/adapters.js";
-import { adapter, expectBuildError, model, turn } from "./fixtures.js";
+import { expectBuildError, model, turn } from "./fixtures.js";
 
 describe("build", () => {
-  it("registers middleware in order and returns a frozen agent", () => {
+  it("seals middleware order and returns a frozen adapter-free manifest", () => {
     const builder = Agent(model(async () => "done"))
-      .with(adapter())
       .use("first", async (_request, next) => next())
       .use("second", async (_request, next) => next());
     const agent = builder.build();
     expect(builder.build()).toBe(agent);
-    expect(() => builder.with(adapter())).toThrow(/after build/);
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual(["first", "second"]);
-    expect(agent.manifest.middleware[0]).toEqual({ id: "first" });
-    expect(agent.manifest.model).toBeUndefined();
-    expect(agent.manifest.adapters).toEqual([{ id: "local" }]);
+    expect(agent.manifest).toEqual({ middleware: [{ id: "first" }, { id: "second" }] });
+    expect(agent.manifest).not.toHaveProperty("adapters");
     expect(Object.isFrozen(agent.manifest)).toBe(true);
   });
 
-  it("seals an optional model directive onto the manifest", () => {
-    const agent = Agent(
-      model(async () => "done"),
-      {
-        id: "opus",
-        controls: { temperature: 0.2 },
-        config: { reasoning: "high" },
-      },
-    ).build();
-    expect(agent.manifest.model).toEqual({
-      id: "opus",
-      controls: { temperature: 0.2 },
-      config: { reasoning: "high" },
-    });
-    expect(Object.isFrozen(agent.manifest.model)).toBe(true);
+  it("rejects middleware mutation after build", () => {
+    const builder = Agent(model(async () => "done"));
+    builder.build();
+    expect(() => builder.use("late", async (_request, next) => next())).toThrow(/after build/);
   });
 
-  it("throws AgentBuildError when the sealed directive is invalid", () => {
-    const error = expectBuildError(() =>
-      Agent(
-        model(async () => "done"),
-        { id: "", extra: true } as never,
-      ).build(),
-    );
-    expect(error.diagnostics.some((item) => item.code === "model.invalid-directive")).toBe(true);
+  it("rejects duplicate middleware ids", () => {
+    const builder = Agent(model(async () => "done"))
+      .use("same", async (_request, next) => next())
+      .use("same", async (_request, next) => next());
+    expect(() => builder.build()).toThrow(/Duplicate middleware id/);
   });
 
-  it("throws AgentBuildError when middleware ids collide", () => {
-    const error = expectBuildError(() =>
-      Agent(model(async () => "done"))
-        .use("same", async (_request, next) => next())
-        .use("same", async (_request, next) => next())
-        .build(),
-    );
-    expect(error.diagnostics.some((item) => item.code === "middleware.duplicate-id")).toBe(true);
-  });
-
-  it("throws AgentBuildError when adapter ids collide", () => {
-    const error = expectBuildError(() =>
-      Agent(model(async () => "done"))
-        .with(adapter())
-        .with(adapter())
-        .build(),
-    );
-    expect(error.diagnostics.some((item) => item.code === "adapter.duplicate-id")).toBe(true);
-  });
-
-  it("records per-adapter concurrency limits and rejects invalid values", () => {
+  it("records a model declaration as middleware rather than manifest model state", () => {
     const agent = Agent(model(async () => "done"))
-      .with(adapter(), { maxConcurrentCalls: 2 })
+      .use({ id: "model", model: { id: "opus", controls: { temperature: 0.2 } } })
       .build();
-    expect(agent.manifest.adapters).toEqual([{ id: "local", maxConcurrentCalls: 2 }]);
-
-    for (const maxConcurrentCalls of [
-      0,
-      -1,
-      1.5,
-      Number.POSITIVE_INFINITY,
-      Number.MAX_SAFE_INTEGER + 1,
-    ]) {
-      const error = expectBuildError(() =>
-        Agent(model(async () => "done"))
-          .with(adapter(), { maxConcurrentCalls })
-          .build(),
-      );
-      expect(
-        error.diagnostics.some((item) => item.code === "adapter.invalid-max-concurrent-calls"),
-      ).toBe(true);
-    }
+    expect(agent.manifest).toEqual({ middleware: [{ id: "model" }] });
+    expect(agent.manifest).not.toHaveProperty("model");
   });
 
-  it("throws AgentBuildError when the model invoke callback is missing", () => {
+  it("reports a missing model callback", () => {
     const error = expectBuildError(() => Agent({} as never).build());
     expect(error.diagnostics.some((item) => item.code === "harness.invalid-model")).toBe(true);
   });
 
-  it("assigns generated middleware ids when omitted", () => {
-    const agent = Agent(model(async () => "done"))
-      .use(async (_request, next) => next())
-      .use("named", async (_request, next) => next())
-      .build();
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual(["middleware-1", "named"]);
-  });
-
-  it("skips generated ids that collide with an explicit middleware id", () => {
+  it("assigns generated middleware ids and skips explicit collisions", () => {
     const agent = Agent(model(async () => "done"))
       .use("middleware-1", async (_request, next) => next())
       .use(async (_request, next) => next())
+      .use("named", async (_request, next) => next())
       .build();
     expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
       "middleware-1",
       "middleware-2",
+      "named",
     ]);
   });
 
-  it("snapshots middleware descriptors when build() starts", () => {
+  it("snapshots middleware descriptors when build starts", () => {
     const id = { value: "original" };
     const builder = Agent(model(async () => "done")).use(id.value, async (_request, next) =>
       next(),
     );
     id.value = "mutated";
-    const agent = builder.build();
-    expect(agent.manifest.middleware).toEqual([{ id: "original" }]);
+    expect(builder.build().manifest.middleware).toEqual([{ id: "original" }]);
   });
 
-  it("snapshots registered adapters and rejects post-build mutation", () => {
-    const local = adapter();
-    const builder = Agent(model(async () => "done")).with(local);
-    const agent = builder.build();
-    expect(() => builder.with(local)).toThrow(/after build/);
-    expect(agent.manifest.adapters).toEqual([{ id: "local" }]);
-    (local as { id: string }).id = "mutated";
-    expect(agent.manifest.adapters).toEqual([{ id: "local" }]);
+  it("hides internal model and tool registries", () => {
+    const agent = Agent(model(async () => "done")).build() as unknown as Record<string, unknown>;
+    expect(agent.models).toBeUndefined();
+    expect(agent.model).toBeUndefined();
+    expect(agent.adapters).toBeUndefined();
+    expect(agent.catalog).toBeUndefined();
+    expect(agent.instructions).toBeUndefined();
   });
 
-  it("exposes fixed registry views and hides raw maps on the Agent", () => {
-    const local = adapter();
-    const invoke = model(async () => "done");
-    const agent = Agent(invoke).with(local).build();
-
-    const adapterEntries = createAdapterRegistry([local]).entries as unknown as Record<
-      string,
-      unknown
-    >;
-    expect(adapterEntries.set).toBeUndefined();
-    expect(adapterEntries.clear).toBeUndefined();
-    expect([...createAdapterRegistry([local]).entries.keys()]).toEqual(["local"]);
-    expect(agent.manifest.model).toBeUndefined();
-    expect(agent.manifest.adapters).toEqual([{ id: "local" }]);
-
-    const rawAgent = agent as unknown as Record<string, unknown>;
-    expect(rawAgent.models).toBeUndefined();
-    expect(rawAgent.model).toBeUndefined();
-    expect(rawAgent.adapters).toBeUndefined();
-    expect(rawAgent.catalog).toBeUndefined();
-    expect(rawAgent.instructions).toBeUndefined();
-  });
-
-  it("starts a Session from run without submitting input", async () => {
+  it("starts an idle Session without submitting input", async () => {
     const agent = Agent(model(async () => "hello")).build();
     const session = agent.run();
     expect(session.state.status).toBe("idle");

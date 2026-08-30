@@ -1,18 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
-import { createAdapterRegistry } from "../src/build/adapters.js";
 import { initialState } from "../src/session/state.js";
 import { TurnRunner } from "../src/turn/runner.js";
+import type { SessionRecord } from "../src/types/session.js";
 import { model } from "./fixtures.js";
 
 describe("TurnRunner", () => {
-  it("returns a final outcome while reporting each committed state transition", async () => {
-    const agent = {
-      middleware: [],
-      invoke: model(async () => "done"),
-      adapters: createAdapterRegistry(),
-    };
-    const states: string[] = [];
-    const runner = new TurnRunner(agent, "session", {});
+  it("reports every proposed final-turn recording transition", async () => {
+    const runner = new TurnRunner(
+      {
+        middleware: [],
+        invoke: model(async () => "done"),
+      },
+      "session",
+      {},
+    );
+    const transitions: SessionRecord["transition"][] = [];
     const outcome = await runner.start(
       initialState("session"),
       { kind: "user-message", text: "go" },
@@ -21,13 +23,18 @@ describe("TurnRunner", () => {
         observe: vi.fn(),
         assertCurrent() {},
         onPlanActive() {},
-        onState: (state) => states.push(state.status),
+        async commit(state, transition) {
+          transitions.push(transition);
+          return state;
+        },
         onConversation() {},
-        claimInterrupts: () => [],
+        async claimInterrupts(state) {
+          return { state, arrivals: [] };
+        },
       },
     );
 
     expect(outcome).toMatchObject({ kind: "final", output: "done" });
-    expect(states).toEqual(["running", "running"]);
+    expect(transitions).toEqual(["input", "model-requested", "candidate", "final"]);
   });
 });

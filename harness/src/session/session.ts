@@ -6,7 +6,7 @@ import type {
   MessageInput,
   Session,
   SessionEvent,
-  SessionOptions,
+  SessionRunOptions,
   SessionSnapshot,
   SessionInput,
 } from "../types/session.js";
@@ -14,6 +14,7 @@ import type { Observer } from "../types/shared.js";
 import { SessionScheduler } from "./scheduler.js";
 import type { LoopAgent } from "../build/agent.js";
 import { copyJsonObject } from "../utils/immutable.js";
+import { normalizeSessionSeed } from "./seed.js";
 
 export class LiveSession implements Session {
   private readonly scheduler: SessionScheduler;
@@ -21,13 +22,21 @@ export class LiveSession implements Session {
   constructor(
     readonly id: string,
     agent: LoopAgent,
-    options: SessionOptions,
+    options: SessionRunOptions,
   ) {
+    const seed = "seed" in options && options.seed ? normalizeSessionSeed(options.seed) : undefined;
+    const userId = seed?.userId ?? ("userId" in options ? options.userId : undefined);
+    const suppliedContext = seed?.context ?? ("context" in options ? options.context : undefined);
     const session = Object.freeze({
-      ...(options.userId ? { userId: options.userId } : {}),
-      ...(options.context ? { context: copyJsonObject(options.context, "session context") } : {}),
+      ...(userId === undefined ? {} : { userId }),
+      ...(suppliedContext === undefined
+        ? {}
+        : { context: copyJsonObject(suppliedContext, "session context") }),
     });
-    this.scheduler = new SessionScheduler(id, agent, session);
+    this.scheduler = new SessionScheduler(id, agent, session, {
+      ...(seed === undefined ? {} : { seed }),
+      ...(options.recorder === undefined ? {} : { recorder: options.recorder }),
+    });
   }
 
   get state(): SessionSnapshot {
@@ -38,6 +47,9 @@ export class LiveSession implements Session {
   }
   interrupt(event: MessageInput, options?: InputOptions): InputHandle {
     return this.scheduler.submit(normalizeMessage("interrupt", event), options);
+  }
+  continue(options?: InputOptions): InputHandle {
+    return this.scheduler.continue(options);
   }
   stream(): AsyncIterable<SessionEvent> {
     return this.scheduler.events;

@@ -1,4 +1,4 @@
-import type { ContextItem, JsonObject } from "./shared.js";
+import type { ContextItem, DeferredOutcome, JsonObject } from "./shared.js";
 import type { InputEvent, TranscriptEntry } from "./session.js";
 import type { BoundToolDefinition, ToolResult } from "./tool.js";
 
@@ -183,10 +183,11 @@ export interface ModelCall {
 
 export interface ModelAdapterContext {
   readonly request: ModelRequest;
+  readonly invocationId: string;
   readonly signal: AbortSignal;
 }
 
 export type ModelAdapter = (
   call: ModelCall,
   context: ModelAdapterContext,
-) => Promise<ModelCandidate | string>;
+) => Promise<ModelCandidate | string | DeferredOutcome>;

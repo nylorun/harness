@@ -2,10 +2,16 @@ import { HarnessError } from "../errors.js";
 import type { JsonObject, JsonValue } from "../types/shared.js";
 
 export function assertJson(value: unknown, path = "value"): asserts value is JsonValue {
+  assertJsonValue(value, path, new WeakSet<object>());
+}
+
+function assertJsonValue(value: unknown, path: string, ancestors: WeakSet<object>): void {
   if (value === null || typeof value === "string" || typeof value === "boolean") return;
   if (typeof value === "number" && Number.isFinite(value)) return;
   if (Array.isArray(value)) {
-    value.forEach((item, index) => assertJson(item, `${path}[${index}]`));
+    enterJsonContainer(value, path, ancestors);
+    value.forEach((item, index) => assertJsonValue(item, `${path}[${index}]`, ancestors));
+    ancestors.delete(value);
     return;
   }
   if (typeof value === "object") {
@@ -14,18 +20,28 @@ export function assertJson(value: unknown, path = "value"): asserts value is Jso
       throw new HarnessError("json.invalid-data", `${path} must be plain JSON data`, {
         details: { path },
       });
+    enterJsonContainer(value, path, ancestors);
     for (const [key, item] of Object.entries(value)) {
       if (item === undefined)
         throw new HarnessError("json.invalid-data", `${path}.${key} cannot be undefined`, {
           details: { path: `${path}.${key}` },
         });
-      assertJson(item, `${path}.${key}`);
+      assertJsonValue(item, `${path}.${key}`, ancestors);
     }
+    ancestors.delete(value);
     return;
   }
   throw new HarnessError("json.invalid-data", `${path} must be JSON-serializable`, {
     details: { path },
   });
+}
+
+function enterJsonContainer(value: object, path: string, ancestors: WeakSet<object>): void {
+  if (ancestors.has(value))
+    throw new HarnessError("json.invalid-data", `${path} cannot contain a cycle`, {
+      details: { path },
+    });
+  ancestors.add(value);
 }
 
 export function copyJson<T>(value: T): T {

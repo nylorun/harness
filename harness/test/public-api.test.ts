@@ -12,7 +12,6 @@ describe("public API", () => {
         "AgentLifecycleError",
         "BuiltAgent",
         "tool",
-        "adapter",
         "model",
         "middleware",
       ]),
