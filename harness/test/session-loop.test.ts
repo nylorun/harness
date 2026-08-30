@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Agent } from "../src/index.js";
-import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("Session loop", () => {
   it("submits eagerly and processes overlapping inputs FIFO", async () => {
@@ -39,8 +39,15 @@ describe("Session loop", () => {
           : "done",
       ),
     )
-      .with(adapter(async () => ({ kind: "completed", output: "ok" })))
-      .use("test", offer(tool()))
+      .use(
+        "test",
+        offer(
+          tool(
+            "echo",
+            execution(async () => ({ kind: "completed", output: "ok" })),
+          ),
+        ),
+      )
       .build();
 
     const completion = await turn(result, "go").handle.completed;
@@ -79,7 +86,7 @@ describe("Session loop", () => {
       releaseAdapter = resolve;
     });
     let modelStep = 0;
-    const local = adapter(async () => {
+    const local = execution(async () => {
       markAdapterStarted();
       await adapterGate;
       return { kind: "completed", output: "late" };
@@ -89,8 +96,7 @@ describe("Session loop", () => {
         ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "next",
       ),
     )
-      .with(local)
-      .use("test", offer(tool()))
+      .use("test", offer(tool("echo", local)))
       .build();
     const controller = new AbortController();
     const { session, handle: active } = turn(result, "first", { signal: controller.signal });
@@ -141,14 +147,19 @@ describe("Session loop", () => {
         return ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
-      .with(
-        adapter(async () => {
-          markToolStarted();
-          await toolGate;
-          return { kind: "completed" as const, output: "ok" };
-        }),
+      .use(
+        "test",
+        offer(
+          tool(
+            "echo",
+            execution(async () => {
+              markToolStarted();
+              await toolGate;
+              return { kind: "completed" as const, output: "ok" };
+            }),
+          ),
+        ),
       )
-      .use("test", offer(tool()))
       .build();
     const { session, handle } = turn(result, "go");
     await toolStarted;
@@ -222,13 +233,20 @@ describe("Session loop", () => {
         return ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
-      .with(adapter(async () => ({ kind: "completed" as const, output: "ok" })))
       .use("approval", async (_request, next) => {
         const response = await next();
         response.requireInteraction("call", { kind: "approval", prompt: "approve" });
         return response;
       })
-      .use("test", offer(tool()))
+      .use(
+        "test",
+        offer(
+          tool(
+            "echo",
+            execution(async () => ({ kind: "completed" as const, output: "ok" })),
+          ),
+        ),
+      )
       .build();
     const { session, handle } = turn(result, "go");
     const first = await handle.completed;

@@ -1,51 +1,37 @@
 import { describe, expect, it, vi } from "vitest";
 import { Agent } from "../src/index.js";
-import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("interaction resume", () => {
-  it("retains the plan, resumes the same invocation, and runs preflights before calls", async () => {
+  it("retains the plan and resumes an execution interaction with the same invocation", async () => {
     const invocationIds: string[] = [];
     const order: string[] = [];
     const positions: { turnNumber: number; stepNumber: number }[] = [];
     const execute = vi.fn(async (_call, context) => {
       invocationIds.push(context.invocationId);
-      order.push("execute");
-      return { kind: "completed" as const, output: "ok" };
+      order.push(context.resume ? "execute-resumed" : "execute");
+      return context.resume
+        ? { kind: "completed" as const, output: "ok" }
+        : {
+            kind: "interaction-required" as const,
+            interaction: { kind: "approval" as const, prompt: "approve" },
+            token: "opaque",
+          };
     });
-    const local = {
-      ...adapter(execute),
-      async preflight(
-        _call: unknown,
-        context: { invocationId: string; resume?: { approved?: boolean } },
-      ) {
-        invocationIds.push(context.invocationId);
-        order.push(context.resume ? "preflight-resumed" : "preflight");
-        return context.resume
-          ? { kind: "completed" as const }
-          : {
-              kind: "interaction-required" as const,
-              interaction: { kind: "approval" as const, prompt: "approve" },
-              token: "opaque",
-            };
-      },
-    };
     let step = 0;
     const result = Agent(
       model(async () =>
         ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
     )
-      .with(local)
-      .use("preflight", async (request, next) => {
+      .use("policy", async (request, next) => {
         positions.push({
           turnNumber: request.turnNumber,
           stepNumber: request.stepNumber,
         });
-        const response = await next();
-        response.requirePreflight("call", "validation");
-        return response;
+        return next();
       })
-      .use("test", offer(tool()))
+      .use("test", offer(tool("echo", execution(execute))))
       .build();
     const { session, handle: streamed } = turn(result, "go");
     const first = await streamed.completed;
@@ -59,7 +45,7 @@ describe("interaction resume", () => {
       approved: true,
     }).completed;
     expect(resumed.events.at(-1)).toMatchObject({ type: "final", output: "done" });
-    expect(order).toEqual(["preflight", "preflight-resumed", "execute"]);
+    expect(order).toEqual(["execute", "execute-resumed"]);
     expect(new Set(invocationIds).size).toBe(1);
     expect(positions).toEqual([
       { turnNumber: 1, stepNumber: 1 },
@@ -91,7 +77,6 @@ describe("interaction resume", () => {
           : "after-cancel",
       ),
     )
-      .with(adapter())
       .use("approval", async (_request, next) => {
         const response = await next();
         response.requireInteraction("first-call", { kind: "approval", prompt: "approve" });
@@ -128,7 +113,7 @@ describe("interaction resume", () => {
 
   it("resumes an interaction after a delay without a harness deadline", async () => {
     let modelStep = 0;
-    const local = adapter(async () => {
+    const local = execution(async () => {
       await new Promise((resolve) => setTimeout(resolve, 35));
       return { kind: "completed", output: "too late" };
     });
@@ -137,13 +122,12 @@ describe("interaction resume", () => {
         ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
     )
-      .with(local)
       .use("approval", async (_request, next) => {
         const response = await next();
         response.requireInteraction("call", { kind: "approval", prompt: "approve" });
         return response;
       })
-      .use("test", offer(tool()))
+      .use("test", offer(tool("echo", local)))
       .build();
     const { session, handle: streamed } = turn(result, "go");
     const first = await streamed.completed;

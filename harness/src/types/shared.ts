@@ -12,6 +12,11 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
 export type JsonObject = { readonly [key: string]: JsonValue };
 
+export interface DeferredOutcome {
+  readonly kind: "deferred";
+  readonly token?: JsonValue;
+}
+
 export interface BuildDiagnostic {
   readonly code: string;
   readonly message: string;
@@ -34,7 +39,7 @@ export interface Tripwire {
 export interface ObserveToolSnapshot {
   readonly name: string;
   readonly description?: string;
-  readonly executeWith: string;
+  readonly owner: { readonly middlewareId: string; readonly slot: string };
   readonly parameters: { readonly jsonSchema: JsonObject };
 }
 
@@ -50,9 +55,8 @@ export interface ObserveSealedCall {
   readonly callId: string;
   readonly toolName: string;
   readonly args: JsonValue;
-  readonly executeWith: string;
   readonly invocationId: string;
-  readonly preflight?: "sandbox" | "validation";
+  readonly owner: { readonly middlewareId: string; readonly slot: string };
   readonly interaction?: RequiredInteraction;
 }
 
@@ -67,6 +71,22 @@ export interface ObserveModelRequested {
 
 export type ObserveEvent =
   | { readonly type: "session.stopped"; readonly reason: string }
+  | {
+      readonly type: "capability.state.dispose.failed";
+      readonly capabilityId: string;
+      readonly attributes: { readonly message: string };
+    }
+  | {
+      readonly type: "session.seeded";
+      readonly revision: number;
+      readonly transcriptEntries: number;
+    }
+  | { readonly type: "session.continued"; readonly inputId?: string }
+  | {
+      readonly type: "session.record.failed";
+      readonly code: string;
+      readonly attributes: { readonly message: string };
+    }
   | { readonly type: "input.received"; readonly inputId: string; readonly kind: string }
   | { readonly type: "input.queued"; readonly inputId: string }
   | { readonly type: "input.rejected"; readonly inputId: string; readonly reason: string }
@@ -86,6 +106,14 @@ export type ObserveEvent =
       readonly inputId?: string;
       readonly requestedModelId?: string;
       readonly attributes: ModelCandidate;
+    }
+  | {
+      readonly type: "model.deferred";
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly inputId?: string;
+      readonly invocationId: string;
+      readonly attributes: { readonly token?: JsonValue };
     }
   | {
       readonly type: "step.started";
@@ -127,27 +155,45 @@ export type ObserveEvent =
       };
     }
   | {
-      readonly type: "adapter.preflight.started" | "adapter.started";
+      readonly type: "tool.started";
+      readonly sessionId: string;
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;
-      readonly adapterId: string;
       readonly toolName: string;
       readonly callId: string;
-      readonly invocationId?: string;
+      readonly invocationId: string;
+      readonly middlewareId: string;
+      readonly slot: string;
       readonly attributes: { readonly args: JsonValue };
     }
   | {
-      readonly type: "adapter.preflight.completed" | "adapter.completed";
+      readonly type: "tool.completed";
+      readonly sessionId: string;
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;
-      readonly adapterId: string;
       readonly toolName: string;
       readonly callId: string;
+      readonly invocationId: string;
+      readonly middlewareId: string;
+      readonly slot: string;
       readonly outcome: string;
       readonly code?: string;
       readonly attributes?: ToolResult;
+    }
+  | {
+      readonly type: "tool.deferred";
+      readonly sessionId: string;
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly inputId?: string;
+      readonly toolName: string;
+      readonly callId: string;
+      readonly invocationId: string;
+      readonly middlewareId: string;
+      readonly slot: string;
+      readonly attributes: { readonly token?: JsonValue };
     }
   | {
       readonly type: "turn.completed";
@@ -165,7 +211,7 @@ export type ObserveEvent =
       readonly kind: string;
       readonly callId?: string;
       readonly toolName?: string;
-      readonly phase?: "interaction" | "preflight" | "execute";
+      readonly phase?: "interaction" | "execute";
       readonly attributes: { readonly prompt: string; readonly metadata?: JsonObject };
     }
   | {

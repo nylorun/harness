@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Agent, type SessionEvent } from "../src/index.js";
-import { adapter, offer, model, tool } from "./fixtures.js";
+import { offer, model, tool } from "./fixtures.js";
 
 describe("conversation stream", () => {
   it("streams input and per-step candidates without tool results", async () => {
@@ -36,7 +36,6 @@ describe("conversation stream", () => {
         return "Refund of $84 is on the way.";
       }),
     )
-      .with(adapter())
       .use("approval", async (_request, next) => {
         const response = await next();
         if (response.toolCalls().some((call) => call.id === "c2")) {

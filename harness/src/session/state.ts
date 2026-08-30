@@ -1,23 +1,48 @@
-import type { InputEvent, SessionSnapshot, TranscriptEntry } from "../types/session.js";
+import type {
+  ActiveExecutionRecord,
+  InputEvent,
+  SessionSnapshot,
+  TranscriptEntry,
+} from "../types/session.js";
 import type { ModelCandidate } from "../types/model.js";
 import type { RequiredInteraction, ToolResult } from "../types/tool.js";
 
-export function initialState(id: string): SessionSnapshot {
-  return Object.freeze({ id, status: "idle", turnCount: 0, transcript: Object.freeze([]) });
+export function initialState(
+  id: string,
+  input: {
+    readonly turnCount?: number;
+    readonly revision?: number;
+    readonly transcript?: readonly TranscriptEntry[];
+  } = {},
+): SessionSnapshot {
+  return Object.freeze({
+    id,
+    status: "idle",
+    turnCount: input.turnCount ?? 0,
+    revision: input.revision ?? 0,
+    transcript: Object.freeze([...(input.transcript ?? [])]),
+  });
 }
 
 export function withStatus(
   state: SessionSnapshot,
   status: SessionSnapshot["status"],
   pendingInteraction?: RequiredInteraction,
+  active?: ActiveExecutionRecord,
 ): SessionSnapshot {
   return Object.freeze({
     id: state.id,
     status,
     turnCount: state.turnCount,
+    revision: state.revision,
     transcript: state.transcript,
     ...(pendingInteraction ? { pendingInteraction } : {}),
+    ...(active ? { active } : {}),
   });
+}
+
+export function withRevision(state: SessionSnapshot, revision: number): SessionSnapshot {
+  return Object.freeze({ ...state, revision });
 }
 
 export function beginTurn(
@@ -34,7 +59,8 @@ export function beginTurn(
   return Object.freeze({
     id: state.id,
     status: "running",
-    turnCount: state.turnCount + (event ? 1 : 0),
+    turnCount: state.turnCount + 1,
+    revision: state.revision,
     transcript: Object.freeze(transcript),
   });
 }

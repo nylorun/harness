@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Agent } from "../src/index.js";
-import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("middleware", () => {
   it("runs as an outward-to-inward request onion and inward-to-outward response onion", async () => {
@@ -11,7 +11,6 @@ describe("middleware", () => {
         return "done";
       }),
     )
-      .with(adapter())
       .use("one", async (request, next) => {
         order.push("enter-one");
         request.configuration.instructions.set("extra", ["extra"]);
@@ -38,7 +37,6 @@ describe("middleware", () => {
         ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
     )
-      .with(adapter())
       .use("durability", async (request, next) => {
         sessionIds.push(request.sessionId);
         return next();
@@ -83,7 +81,6 @@ describe("middleware", () => {
         );
       }),
     )
-      .with(adapter(execute))
       .use("attacker", async (request, next) => {
         const raw = request as unknown as Record<string, unknown>;
         facadeChecks.push(Object.isFrozen(request), raw.hiddenTools === undefined);
@@ -102,11 +99,10 @@ describe("middleware", () => {
         return response;
       })
       .use("restrictions", async (request, next) => {
-        request.configuration.tools.set("restrictions", [tool("echo")]);
+        request.configuration.tools.set("restrictions", [tool("echo", execution(execute))]);
         const response = await next();
         response.deny("deny", "policy");
         response.requireInteraction("deny", { kind: "approval", prompt: "approve" });
-        response.requirePreflight("deny", "validation");
         return response;
       })
       .build();
@@ -213,7 +209,6 @@ describe("middleware", () => {
         return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
-      .with(adapter())
       .use("test", offer(tool()))
       .build();
     await turn(result, "go").handle.completed;
@@ -359,7 +354,6 @@ describe("middleware", () => {
         return seen.length === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
-      .with(adapter())
       .use("route", async (request, next) => {
         expect(Object.isFrozen(request.transcript)).toBe(true);
         expect(() => {
@@ -401,7 +395,7 @@ describe("middleware", () => {
     await session.stop();
   });
 
-  it("seeds every step configuration from the Agent directive without a middleware owner", async () => {
+  it("declares a model through middleware on every Step", async () => {
     const seen: unknown[] = [];
     const configurations: unknown[] = [];
     const agent = Agent(
@@ -409,8 +403,9 @@ describe("middleware", () => {
         seen.push(request.model);
         return "done";
       }),
-      { id: "opus", controls: { temperature: 0.2 } },
-    ).build();
+    )
+      .use({ id: "model", model: { id: "opus", controls: { temperature: 0.2 } } })
+      .build();
     const session = agent.run();
     session.observe((event) => {
       if (event.type === "model.requested") configurations.push(event.attributes.configuration);
@@ -420,7 +415,7 @@ describe("middleware", () => {
     expect(configurations).toMatchObject([
       {
         model: { id: "opus", controls: { temperature: 0.2 } },
-        contributors: [],
+        contributors: [{ middlewareId: "model", slot: "model" }],
       },
     ]);
     await session.stop();
@@ -448,15 +443,15 @@ describe("middleware", () => {
     expect(seen[0]?.stepId).not.toBe(seen[1]?.stepId);
   });
 
-  it("lets middleware replace or clear a seeded directive and rejects a conflicting select", async () => {
+  it("lets middleware replace or clear a declared directive and rejects a conflicting select", async () => {
     const replaced: unknown[] = [];
     const replaceAgent = Agent(
       model(async (_call, { request }) => {
         replaced.push(request.model);
         return "done";
       }),
-      { id: "opus" },
     )
+      .use({ id: "model", model: { id: "opus" } })
       .use("route", async (request, next) => {
         request.configuration.model.select({ id: "opus" });
         request.configuration.model.replace({ id: "haiku" });
@@ -474,9 +469,8 @@ describe("middleware", () => {
           ? toolCalls({ id: "call", name: "echo", args: {} })
           : "done";
       }),
-      { id: "opus" },
     )
-      .with(adapter())
+      .use({ id: "model", model: { id: "opus" } })
       .use("route", async (request, next) => {
         if (request.stepNumber === 2) request.configuration.model.clear();
         return next();
@@ -486,10 +480,8 @@ describe("middleware", () => {
     await turn(clearAgent, "go").handle.completed;
     expect(cleared).toEqual([{ id: "opus" }, undefined]);
 
-    const conflict = Agent(
-      model(async () => "done"),
-      { id: "opus" },
-    )
+    const conflict = Agent(model(async () => "done"))
+      .use({ id: "model", model: { id: "opus" } })
       .use("route", async (request, next) => {
         request.configuration.model.select({ id: "haiku" });
         return next();

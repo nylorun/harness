@@ -1,27 +1,27 @@
 # Nylorun Harness
 
-Nylorun Harness is a provider-neutral, in-memory agent loop for TypeScript. The published package lives in [`harness/`](./harness) as [`@nylorun/harness`](https://www.npmjs.com/package/@nylorun/harness).
+Nylorun Harness is a provider-neutral TypeScript agent loop with direct capability composition.
+This repository contains the core package, a loopback-only Studio dashboard, and runnable examples.
 
-> **Experimental beta.** The public API is intentionally experimental until 1.0. Install the current beta with `npm install @nylorun/harness@beta`.
+> **Experimental beta.** APIs may change before 1.0.
 
-## Use Harness
+## Packages
 
-Read the package [quick start](./harness/README.md), [loop model](./harness/docs/loop.md), [model-call projection](./harness/docs/model-call-projection.md), and [public reference](./harness/docs/reference.md).
+- [`@nylorun/harness`](./harness) — model/tool loop and capability composition.
+- [`@nylorun/studio`](./studio) — local dashboard for compatible agent servers.
+- [`examples`](./examples) — direct-Harness multi-agent starter with Hono, MCP, Docker, skills, and code mode.
 
-## Development
-
-Harness supports Node.js 22.14, 24, and 26 or later.
+## Develop
 
 ```sh
+git clone https://github.com/nylorun/harness.git
 cd harness
 npm ci
 npm run check
 ```
 
-Studio and Create Agent are planned additions and are not part of this repository release.
-
-## Community and security
-
-Please read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request. Use [GitHub Discussions](https://github.com/nylorun/harness/discussions) for questions and ideas, [Issues](https://github.com/nylorun/harness/issues) for reproducible bugs or feature requests, and [SECURITY.md](./SECURITY.md) for vulnerability reporting.
+See the [Harness package](./harness/README.md), [Studio](./studio/README.md), and
+[Examples](./examples/README.md). Contributions follow [CONTRIBUTING.md](./CONTRIBUTING.md);
+security reports follow [SECURITY.md](./SECURITY.md).
 
 Licensed under [Apache-2.0](./LICENSE).

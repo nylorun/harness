@@ -1,5 +1,5 @@
 import type { ZodObject, output } from "zod";
-import type { JsonObject, JsonValue } from "./shared.js";
+import type { DeferredOutcome, JsonObject, JsonValue } from "./shared.js";
 
 type SchemaValidationSuccess<T> = { readonly ok: true; readonly value: T };
 type SchemaValidationFailure = { readonly ok: false; readonly issues: readonly string[] };
@@ -13,17 +13,28 @@ export interface BoundToolSchema<T> {
   validate(value: unknown): SchemaValidation<T>;
 }
 
-export interface ToolDefinition<Parameters extends ToolObjectSchema = ToolObjectSchema> {
+export interface ToolDefinition<
+  Parameters extends ToolObjectSchema = ToolObjectSchema,
+  State = never,
+> {
   readonly name: string;
   readonly description?: string;
   readonly parameters: Parameters;
-  readonly executeWith: string;
+  execute(args: output<Parameters>, context: ToolExecutionContext<State>): Promise<ToolOutcome>;
 }
 
 export interface BoundToolDefinition<
   Parameters extends ToolObjectSchema = ToolObjectSchema,
-> extends Omit<ToolDefinition<Parameters>, "parameters"> {
+  State = never,
+> extends Omit<ToolDefinition<Parameters, State>, "parameters" | "execute"> {
   readonly parameters: BoundToolSchema<output<Parameters>>;
+  readonly execute: ToolDefinition<Parameters, State>["execute"];
+  readonly owner: ToolOwner;
+}
+
+export interface ToolOwner {
+  readonly middlewareId: string;
+  readonly slot: string;
 }
 
 export interface Interaction {
@@ -49,8 +60,20 @@ export interface SealedToolCall {
   readonly callId: string;
   readonly toolName: string;
   readonly args: JsonValue;
-  readonly executeWith: string;
 }
+
+interface ToolExecutionContextBase {
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly stepId: string;
+  readonly callId: string;
+  readonly invocationId: string;
+  readonly signal: AbortSignal;
+  readonly resume?: ToolExecutionResume;
+}
+
+export type ToolExecutionContext<State = never> = ToolExecutionContextBase &
+  ([State] extends [never] ? object : { readonly state: Promise<State> });
 
 export type ToolContent = JsonValue;
 export type ToolOutcome =
@@ -61,47 +84,26 @@ export type ToolOutcome =
       readonly kind: "interaction-required";
       readonly interaction: Interaction;
       readonly token?: JsonValue;
+    }
+  | DeferredOutcome;
+
+export type ToolResult =
+  | {
+      readonly callId: string;
+      readonly toolName: string;
+      readonly kind: "completed";
+      readonly output: ToolContent;
+    }
+  | {
+      readonly callId: string;
+      readonly toolName: string;
+      readonly kind: "denied";
+      readonly reason: string;
+    }
+  | {
+      readonly callId: string;
+      readonly toolName: string;
+      readonly kind: "failed";
+      readonly code: string;
+      readonly message: string;
     };
-
-export type PreflightOutcome =
-  { readonly kind: "completed" } | Exclude<ToolOutcome, { readonly kind: "completed" }>;
-
-export interface ToolAdapter {
-  readonly id: string;
-  preflight?(
-    call: SealedToolCall,
-    context: {
-      readonly kind: "sandbox" | "validation";
-      readonly invocationId: string;
-      readonly signal: AbortSignal;
-      readonly resume?: ToolExecutionResume;
-    },
-  ): Promise<PreflightOutcome>;
-  execute(
-    call: SealedToolCall,
-    context: {
-      readonly invocationId: string;
-      readonly signal: AbortSignal;
-      readonly resume?: ToolExecutionResume;
-    },
-  ): Promise<ToolOutcome>;
-}
-
-/** Scheduling policy for one adapter registration on an Agent. */
-export interface AdapterExecutionOptions {
-  /**
-   * Maximum concurrent execute() calls across all Sessions from the built Agent.
-   * Omit for unbounded parallel execution.
-   */
-  readonly maxConcurrentCalls?: number;
-}
-
-export interface ToolResult {
-  readonly callId: string;
-  readonly toolName: string;
-  readonly kind: "completed" | "denied" | "failed";
-  readonly output?: ToolContent;
-  readonly reason?: string;
-  readonly code?: string;
-  readonly message?: string;
-}

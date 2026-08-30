@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Agent, tool as authoredTool } from "../src/index.js";
-import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 import { z } from "zod";
 
 describe("step pipeline", () => {
@@ -31,7 +31,6 @@ describe("step pipeline", () => {
         return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
-      .with(adapter())
       .use("once", async (request, next) => {
         if (request.stepNumber === 1) request.configuration.tools.set("once", [tool()]);
         return next();
@@ -44,7 +43,6 @@ describe("step pipeline", () => {
   it("tripwires duplicate dynamic tools before the Model runs", async () => {
     const invoke = vi.fn(async () => "done");
     const result = Agent(model(invoke))
-      .with(adapter())
       .use("dup", async (request, next) => {
         request.configuration.tools.set("dup", [tool("echo"), tool("echo")]);
         return next();
@@ -70,14 +68,13 @@ describe("step pipeline", () => {
         );
       }),
     )
-      .with(adapter(execute))
       .use("outer", async (_request, next) => {
         const response = await next();
         response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 1 } }));
         return response;
       })
       .use("inner", async (request, next) => {
-        request.configuration.tools.set("inner", [tool()]);
+        request.configuration.tools.set("inner", [tool("echo", execution(execute))]);
         const response = await next();
         expect(response.toolCalls().map((call) => call.id)).toEqual(["keep", "drop"]);
         response.deny("keep", "blocked");
@@ -103,7 +100,6 @@ describe("step pipeline", () => {
         ++step === 1 ? toolCalls({ id: "keep", name: "echo", args: { n: 1 } }) : "done",
       ),
     )
-      .with(adapter())
       .use("rewrite", async (request, next) => {
         request.configuration.tools.set("rewrite", [tool()]);
         const response = await next();
@@ -149,7 +145,9 @@ describe("step pipeline", () => {
     const definition = authoredTool({
       name: "echo",
       parameters: z.object({ text: z.string() }),
-      executeWith: "local",
+      async execute(args) {
+        return { kind: "completed", output: args };
+      },
     });
     const schemas: unknown[] = [];
     const result = Agent(
@@ -158,7 +156,6 @@ describe("step pipeline", () => {
         return "done";
       }),
     )
-      .with(adapter())
       .use("snapshot", async (request, next) => {
         request.configuration.tools.set("snapshot", [definition]);
         (definition as { parameters: unknown }).parameters = z.object({ admin: z.string() });
@@ -177,7 +174,6 @@ describe("step pipeline", () => {
         ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
     )
-      .with(adapter())
       .use("test", offer(tool()))
       .build();
     const session = result.run();
@@ -234,9 +230,7 @@ describe("step pipeline", () => {
         seen.push(request.tools.map((item) => item.name));
         return "done";
       }),
-    )
-      .with(adapter())
-      .use("nylorun-folder", folder(false));
+    ).use("nylorun-folder", folder(false));
     await turn(builder.build(), "go").handle.completed;
     expect(seen).toEqual([[]]);
     expect(builder.build().manifest.middleware.map((item) => item.id)).toEqual(["nylorun-folder"]);

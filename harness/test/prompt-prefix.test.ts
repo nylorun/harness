@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Agent, type ModelConfigurationSnapshot } from "../src/index.js";
-import { adapter, model, tool, toolCalls, turn } from "./fixtures.js";
+import { model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("model configuration", () => {
   it("assembles named slots fresh for every model step", async () => {
@@ -12,7 +12,6 @@ describe("model configuration", () => {
         return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
       }),
     )
-      .with(adapter())
       .use("baseline", async (request, next) => {
         if (request.stepNumber === 1) {
           request.configuration.instructions.set("policy", ["Discarded declaration"]);
@@ -44,7 +43,6 @@ describe("model configuration", () => {
         return "done";
       }),
     )
-      .with(adapter())
       .use("later", async (request, next) => {
         request.configuration.instructions.set("a", ["second"], { order: 20 });
         request.configuration.tools.set("late", [tool("late")], { order: 20 });
@@ -68,9 +66,9 @@ describe("model configuration", () => {
     ]);
   });
 
-  it("uses the current tool route when an equivalent contract is re-declared", async () => {
+  it("uses the current executable implementation when an equivalent contract is re-declared", async () => {
     const routes: string[] = [];
-    const observedRoutes: string[] = [];
+    const observedOwners: unknown[] = [];
     let calls = 0;
     const agent = Agent(
       model(async () => {
@@ -78,22 +76,12 @@ describe("model configuration", () => {
         return calls <= 2 ? toolCalls({ id: `call-${calls}`, name: "echo", args: {} }) : "done";
       }),
     )
-      .with(
-        adapter(async (call) => {
-          routes.push(call.executeWith);
-          return { kind: "completed", output: "ok" };
-        }),
-      )
-      .with({
-        id: "alternate",
-        execute: async (call) => {
-          routes.push(call.executeWith);
-          return { kind: "completed", output: "ok" };
-        },
-      })
       .use("tools", async (request, next) => {
         request.configuration.tools.set("echo", [
-          tool("echo", request.stepNumber === 1 ? "local" : "alternate"),
+          tool("echo", async () => {
+            routes.push(request.stepNumber === 1 ? "first" : "later");
+            return { kind: "completed", output: "ok" };
+          }),
         ]);
         return next();
       })
@@ -101,11 +89,15 @@ describe("model configuration", () => {
     const session = agent.run();
     session.observe((event) => {
       if (event.type === "model.requested")
-        observedRoutes.push(event.attributes.configuration.tools[0]?.executeWith ?? "");
+        observedOwners.push(event.attributes.configuration.tools[0]?.owner);
     });
     await session.input("go").completed;
 
-    expect(observedRoutes).toEqual(["local", "alternate", "alternate"]);
-    expect(routes).toEqual(["local", "alternate"]);
+    expect(observedOwners).toEqual([
+      { middlewareId: "tools", slot: "echo" },
+      { middlewareId: "tools", slot: "echo" },
+      { middlewareId: "tools", slot: "echo" },
+    ]);
+    expect(routes).toEqual(["first", "later"]);
   });
 });

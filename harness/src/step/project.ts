@@ -100,8 +100,9 @@ function projectToolResult(result: ToolResult): PromptItem {
 }
 
 function toolResultPayload(result: ToolResult): unknown {
-  if (result.kind === "completed") return result.output ?? null;
-  return { kind: result.kind, reason: result.reason ?? result.message ?? result.code ?? "failed" };
+  if (result.kind === "completed") return result.output;
+  if (result.kind === "denied") return { kind: result.kind, reason: result.reason };
+  return { kind: result.kind, code: result.code, message: result.message };
 }
 
 function textPart(text: string): PromptContentPart {

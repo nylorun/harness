@@ -7,7 +7,8 @@ import type {
   ModelConfigurationSnapshot,
 } from "../types/model.js";
 import type { StepInput, StepRequest, StepResponse } from "../types/middleware.js";
-import type { ContextItem, Tripwire } from "../types/shared.js";
+import type { ContextItem, DeferredOutcome, Tripwire } from "../types/shared.js";
+import type { ActiveModelExecutionRecord } from "../types/session.js";
 import type { ObserveEmit } from "../utils/observe.js";
 import type { BoundToolDefinition, Interaction, ToolDefinition } from "../types/tool.js";
 import { HarnessError, isHarnessError } from "../errors.js";
@@ -21,6 +22,7 @@ import {
 import { normalizeCandidate } from "../model-normalize.js";
 import { ContextDraft } from "./context-draft.js";
 import { ModelConfigurationDraft } from "./model-configuration.js";
+import type { CapabilityStateRegistry } from "../session/capability-state.js";
 
 const branded = new WeakSet<object>();
 
@@ -34,13 +36,14 @@ export class StepContext {
   readonly #observe: ObserveEmit;
   readonly #context: ContextDraft;
   readonly #configuration: ModelConfigurationDraft;
+  readonly #states?: CapabilityStateRegistry;
   readonly #denials = new Map<string, string>();
   readonly #interactions = new Map<string, Interaction>();
-  readonly #preflights = new Map<string, "sandbox" | "validation">();
   readonly #identities = new Map<string, string>();
   #canonical: readonly CanonicalCall[] = Object.freeze([]);
   #candidate?: ModelCandidate;
   #tripwire?: Tripwire;
+  #modelDeferred?: ActiveModelExecutionRecord;
   #response?: StepResponse;
   #sealed = false;
   #configurationSnapshot?: ModelConfigurationSnapshot;
@@ -51,11 +54,13 @@ export class StepContext {
     observe: ObserveEmit,
     configuration: ModelConfigurationDraft,
     context: ContextDraft,
+    states?: CapabilityStateRegistry,
   ) {
     this.input = input;
     this.#observe = observe;
     this.#configuration = configuration;
     this.#context = context;
+    this.#states = states;
   }
 
   get currentTripwire(): Tripwire | undefined {
@@ -63,6 +68,9 @@ export class StepContext {
   }
   get currentCandidate(): Readonly<ModelCandidate> | undefined {
     return this.#candidate;
+  }
+  get currentModelDeferred(): ActiveModelExecutionRecord | undefined {
+    return this.#modelDeferred;
   }
   get selectedDirective(): ModelDirective | undefined {
     return this.configurationSnapshot().model;
@@ -94,9 +102,6 @@ export class StepContext {
   interactionFor(callId: string): Interaction | undefined {
     return this.#interactions.get(callId);
   }
-  preflightFor(callId: string): "sandbox" | "validation" | undefined {
-    return this.#preflights.get(callId);
-  }
   canonicalCalls(): readonly CanonicalCall[] {
     return this.#canonical;
   }
@@ -107,6 +112,11 @@ export class StepContext {
     this.#candidate = candidateFromCanonical(candidate, output);
     this.#identities.clear();
     for (const call of calls) this.#identities.set(call.id, identityKey(call.name, call.args));
+    return this.#ensureResponse();
+  }
+
+  deferModel(active: ActiveModelExecutionRecord): StepResponse {
+    this.#modelDeferred = active;
     return this.#ensureResponse();
   }
 
@@ -175,7 +185,7 @@ export class StepContext {
           });
         }
       });
-    const value: StepRequest = Object.freeze({
+    const request: Record<string, unknown> = {
       sessionId: this.input.sessionId,
       turnId: this.input.turnId,
       stepId: this.input.stepId,
@@ -244,7 +254,13 @@ export class StepContext {
         });
         return minted;
       },
-    });
+    };
+    if (this.#states?.has(middlewareId))
+      Object.defineProperty(request, "state", {
+        enumerable: true,
+        get: () => this.#states!.get(middlewareId),
+      });
+    const value = Object.freeze(request) as StepRequest;
     return Object.freeze({
       value,
       revokeMutators: () => {
@@ -265,9 +281,6 @@ export class StepContext {
       requireInteraction: (callId: string, interaction: Interaction) => {
         if (!this.#interactions.has(callId))
           this.#interactions.set(callId, freezeGraph({ ...interaction }));
-      },
-      requirePreflight: (callId: string, kind: "sandbox" | "validation") => {
-        if (!this.#preflights.has(callId)) this.#preflights.set(callId, kind);
       },
       tripwire: (error: Tripwire) => {
         this.#tripwire ??= Object.freeze({ ...error });

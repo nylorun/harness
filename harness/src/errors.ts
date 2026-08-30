@@ -1,9 +1,9 @@
 /** Machine-readable error raised by Harness-owned code. */
 export type HarnessErrorCode =
-  | "adapter.invalid-outcome"
-  | "adapter.not-registered"
   | "agent.build-failed"
   | "agent.lifecycle-sealed"
+  | "capability.state.create-failed"
+  | "capability.state.undeclared"
   | "context.invalid-item"
   | "context.invalid-item-type"
   | "context.invalid-order"
@@ -29,7 +29,10 @@ export type HarnessErrorCode =
   | "configuration.invalid-tools"
   | "configuration.model-selection-conflict"
   | "response.invalid-replacement"
+  | "session.invalid-seed"
+  | "session.record-failed"
   | "session.stale-result"
+  | "tool.invalid"
   | "tool.invalid-arguments"
   | "tool.invalid-name"
   | "tool.invalid-schema"

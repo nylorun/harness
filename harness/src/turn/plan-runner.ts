@@ -1,7 +1,10 @@
-import type { AdapterRegistry } from "../build/adapters.js";
 import { HarnessError, isHarnessError } from "../errors.js";
 import type { ObserveEmit } from "../utils/observe.js";
 import type { InputEvent } from "../types/session.js";
+import type {
+  ActiveInteractionExecutionRecord,
+  ActiveToolsExecutionRecord,
+} from "../types/session.js";
 import type {
   Interaction,
   RequiredInteraction,
@@ -9,37 +12,51 @@ import type {
   ToolOutcome,
   ToolResult,
 } from "../types/tool.js";
+import type { JsonValue, ObserveEvent } from "../types/shared.js";
 import { createId } from "../utils/ids.js";
 import { copyJson, copyJsonObject } from "../utils/immutable.js";
+import type { CapabilityStateRegistry } from "../session/capability-state.js";
 import type { ExecutablePlanEntry, InternalToolPlan } from "../step/seal.js";
 
-type PlanPhase = "interaction" | "preflight" | "execute";
-
 interface PendingBarrier {
-  readonly phase: PlanPhase;
   readonly index: number;
   readonly interaction: RequiredInteraction;
-  readonly token?: import("../types/shared.js").JsonValue;
+  readonly token?: JsonValue;
+}
+
+export interface DeferredToolCall {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly args: JsonValue;
+  readonly invocationId: string;
+  readonly owner: ExecutablePlanEntry["owner"];
+  readonly token?: JsonValue;
 }
 
 export type ToolPlanProgress =
   | { readonly kind: "completed"; readonly results: readonly ToolResult[] }
-  | { readonly kind: "interaction-required"; readonly interaction: RequiredInteraction };
+  | { readonly kind: "interaction-required"; readonly interaction: RequiredInteraction }
+  | {
+      readonly kind: "deferred";
+      readonly settled: readonly ToolResult[];
+      readonly deferred: readonly DeferredToolCall[];
+    };
 
 export interface ToolPlanRunContext {
-  readonly adapters: AdapterRegistry;
   readonly signal: AbortSignal;
   readonly observe: ObserveEmit;
   readonly ids: { readonly sessionId: string; readonly turnId: string; readonly stepId: string };
+  readonly states?: CapabilityStateRegistry;
 }
 
-/** Owns the mutable progress of one sealed tool plan across interaction resumes. */
+/** Owns one sealed plan's deterministic interaction and concurrent execution progress. */
 export class ToolPlanRunner {
   private readonly results: Map<string, ToolResult>;
+  private readonly deferred = new Map<string, DeferredToolCall>();
   private readonly resumes = new Map<string, ToolExecutionResume>();
-  private phase: PlanPhase = "interaction";
-  private index = 0;
   private readonly pending: PendingBarrier[] = [];
+  private readonly settlementEvents: ObserveEvent[] = [];
+  private interactionIndex = 0;
   private executeStarted = false;
   private resumeExecute?: ExecutablePlanEntry;
 
@@ -55,66 +72,120 @@ export class ToolPlanRunner {
   }
   get interactionCallId(): string | undefined {
     const pending = this.pending[0];
-    if (!pending) return undefined;
-    return this.plan.executable[pending.index]?.call.callId;
+    return pending ? this.plan.executable[pending.index]?.call.callId : undefined;
   }
   get interactionToolName(): string | undefined {
     const pending = this.pending[0];
-    if (!pending) return undefined;
-    return this.plan.executable[pending.index]?.call.toolName;
-  }
-  get interactionPhase(): PlanPhase | undefined {
-    return this.pending[0]?.phase;
+    return pending ? this.plan.executable[pending.index]?.call.toolName : undefined;
   }
 
   cancelledResults(reason: string): readonly ToolResult[] {
     return this.resultsInOrder("tool.cancelled", reason);
   }
 
+  /** Publishes settlement facts only after their authoritative state was recorded. */
+  publishSettlements(observe: ObserveEmit): void {
+    for (const event of this.settlementEvents.splice(0)) observe(event);
+  }
+
+  activeToolsRecord(turnId: string, stepId: string): ActiveToolsExecutionRecord {
+    return Object.freeze({
+      kind: "tools",
+      turnId,
+      stepId,
+      calls: Object.freeze(
+        this.plan.executable.map((entry) => {
+          const result = this.results.get(entry.call.callId);
+          const deferred = this.deferred.get(entry.call.callId);
+          return Object.freeze({
+            callId: entry.call.callId,
+            toolName: entry.call.toolName,
+            args: copyJson(entry.call.args),
+            invocationId: entry.invocationId,
+            owner: entry.owner,
+            status: result
+              ? ("settled" as const)
+              : deferred
+                ? ("deferred" as const)
+                : ("pending" as const),
+            ...(result ? { result } : {}),
+            ...(deferred?.token === undefined ? {} : { token: deferred.token }),
+          });
+        }),
+      ),
+    });
+  }
+
+  activeInteractionRecord(
+    turnId: string,
+    stepId: string,
+    resume?: ToolExecutionResume,
+  ): ActiveInteractionExecutionRecord {
+    const pending = this.pending[0];
+    const entry = pending ? this.plan.executable[pending.index] : undefined;
+    if (!pending || !entry)
+      throw new HarnessError("interaction.invalid", "Missing pending interaction state");
+    return Object.freeze({
+      kind: "interaction",
+      turnId,
+      stepId,
+      callId: entry.call.callId,
+      toolName: entry.call.toolName,
+      interaction: pending.interaction,
+      ...(pending.token === undefined ? {} : { token: pending.token }),
+      ...(resume === undefined ? {} : { resume }),
+      tools: this.activeToolsRecord(turnId, stepId),
+    });
+  }
+
+  interactionResume(event: InputEvent): ToolExecutionResume {
+    const pending = this.pending[0];
+    if (!pending)
+      throw new HarnessError("interaction.invalid", "Missing pending interaction state");
+    return resumeValue(event, pending);
+  }
+
   async run(context: ToolPlanRunContext, resume?: InputEvent): Promise<ToolPlanProgress> {
     this.acceptResume(resume);
-    while (true) {
+    while (this.interactionIndex < this.plan.executable.length) {
       this.throwIfAborted(context.signal);
-      if (this.phase === "execute") return this.runExecute(context);
-      if (this.index >= this.plan.executable.length) {
-        if (this.phase === "interaction") {
-          this.phase = "preflight";
-          this.index = 0;
-          continue;
-        }
-        if (this.phase === "preflight") {
-          this.phase = "execute";
-          this.index = 0;
-          continue;
-        }
-        return { kind: "completed", results: this.orderedResults() };
-      }
-
-      const entry = this.plan.executable[this.index]!;
+      const entry = this.plan.executable[this.interactionIndex]!;
       if (this.results.has(entry.call.callId)) {
-        this.index += 1;
+        this.interactionIndex += 1;
         continue;
       }
-
-      if (this.phase === "interaction") {
-        if (!entry.interaction) {
-          this.index += 1;
-          continue;
-        }
-        return this.requireInteraction({
-          phase: this.phase,
-          index: this.index,
-          interaction: entry.interaction,
-        });
+      if (entry.interaction) {
+        this.enqueueInteraction({ index: this.interactionIndex, interaction: entry.interaction });
+        return this.interactionRequired();
       }
-
-      const adapter = context.adapters.require(entry.call.executeWith);
-      if (this.phase === "preflight") {
-        const progress = await this.preflight(entry, adapter, context);
-        if (progress) return progress;
-      }
-      this.index += 1;
+      this.interactionIndex += 1;
     }
+
+    if (this.resumeExecute) {
+      const entry = this.resumeExecute;
+      this.resumeExecute = undefined;
+      await this.executeBatch([entry], context);
+    } else if (!this.executeStarted) {
+      this.executeStarted = true;
+      await this.executeBatch(
+        this.plan.executable.filter((entry) => !this.results.has(entry.call.callId)),
+        context,
+      );
+    }
+
+    if (this.pending.length) return this.interactionRequired();
+    if (this.deferred.size)
+      return {
+        kind: "deferred",
+        settled: this.orderedSettledResults(),
+        deferred: Object.freeze(
+          this.plan.executable.flatMap((entry) => {
+            const value = this.deferred.get(entry.call.callId);
+            return value ? [value] : [];
+          }),
+        ),
+      };
+    return { kind: "completed", results: this.orderedResults() };
   }
 
   private acceptResume(resume?: InputEvent): void {
@@ -137,104 +208,12 @@ export class ToolPlanRunner {
           reason: "Approval rejected",
         }),
       );
-      this.index += 1;
+      this.interactionIndex = Math.max(this.interactionIndex, pending.index + 1);
       return;
     }
-    if (pending.phase === "interaction") {
-      this.resumes.set(entry.call.callId, value);
-      this.index += 1;
-      return;
-    }
-    this.resumes.set(`${pending.phase}:${entry.call.callId}`, value);
-    if (pending.phase === "execute") this.resumeExecute = entry;
-  }
-
-  private async runExecute(context: ToolPlanRunContext): Promise<ToolPlanProgress> {
-    if (this.resumeExecute) {
-      const entry = this.resumeExecute;
-      this.resumeExecute = undefined;
-      await this.executeBatch([entry], context);
-    } else if (!this.executeStarted) {
-      this.executeStarted = true;
-      await this.executeBatch(
-        this.plan.executable.filter((entry) => !this.results.has(entry.call.callId)),
-        context,
-      );
-    }
-    return this.pending.length
-      ? this.interactionRequired()
-      : { kind: "completed", results: this.orderedResults() };
-  }
-
-  private async preflight(
-    entry: ExecutablePlanEntry,
-    adapter: ReturnType<AdapterRegistry["require"]>,
-    context: ToolPlanRunContext,
-  ): Promise<ToolPlanProgress | undefined> {
-    if (!entry.preflight) return undefined;
-    if (!adapter.preflight) {
-      this.results.set(
-        entry.call.callId,
-        failed(
-          entry,
-          "tool.preflight-missing",
-          `Adapter '${entry.call.executeWith}' does not implement preflight`,
-        ),
-      );
-      return undefined;
-    }
-    context.observe({
-      type: "adapter.preflight.started",
-      turnId: context.ids.turnId,
-      stepId: context.ids.stepId,
-      adapterId: adapter.id,
-      toolName: entry.call.toolName,
-      callId: entry.call.callId,
-      invocationId: entry.invocationId,
-      attributes: { args: copyJson(entry.call.args) },
-    });
-    try {
-      const outcome = await adapter.preflight(entry.call, {
-        kind: entry.preflight,
-        invocationId: entry.invocationId,
-        signal: context.signal,
-        resume: this.takeResume("preflight", entry.call.callId),
-      });
-      this.throwIfAborted(context.signal);
-      if (outcome.kind === "interaction-required")
-        return this.requireInteraction(interactionBarrier(this.phase, this.index, outcome));
-      if (outcome.kind !== "completed")
-        this.results.set(entry.call.callId, resultFrom(entry, outcome));
-      context.observe({
-        type: "adapter.preflight.completed",
-        turnId: context.ids.turnId,
-        stepId: context.ids.stepId,
-        adapterId: adapter.id,
-        toolName: entry.call.toolName,
-        callId: entry.call.callId,
-        outcome: outcome.kind,
-        ...adapterCompleted(this.results.get(entry.call.callId)),
-      });
-    } catch (error) {
-      this.throwIfAborted(context.signal);
-      const result = failed(
-        entry,
-        isHarnessError(error) ? error.code : "tool.preflight-failed",
-        error,
-      );
-      this.results.set(entry.call.callId, result);
-      context.observe({
-        type: "adapter.preflight.completed",
-        turnId: context.ids.turnId,
-        stepId: context.ids.stepId,
-        adapterId: adapter.id,
-        toolName: entry.call.toolName,
-        callId: entry.call.callId,
-        outcome: "failed",
-        ...adapterCompleted(result),
-      });
-    }
-    return undefined;
+    this.resumes.set(entry.call.callId, value);
+    if (this.executeStarted) this.resumeExecute = entry;
+    else this.interactionIndex = Math.max(this.interactionIndex, pending.index + 1);
   }
 
   private async executeBatch(
@@ -253,40 +232,69 @@ export class ToolPlanRunner {
     entry: ExecutablePlanEntry,
     context: ToolPlanRunContext,
   ): Promise<PendingBarrier | undefined> {
-    const adapter = context.adapters.require(entry.call.executeWith);
+    context.observe({
+      type: "tool.started",
+      sessionId: context.ids.sessionId,
+      turnId: context.ids.turnId,
+      stepId: context.ids.stepId,
+      toolName: entry.call.toolName,
+      callId: entry.call.callId,
+      invocationId: entry.invocationId,
+      middlewareId: entry.owner.middlewareId,
+      slot: entry.owner.slot,
+      attributes: { args: copyJson(entry.call.args) },
+    });
     try {
-      return await context.adapters.execute(adapter.id, context.signal, async () => {
-        context.observe({
-          type: "adapter.started",
+      const toolContext: Record<string, unknown> = {
+        sessionId: context.ids.sessionId,
+        turnId: context.ids.turnId,
+        stepId: context.ids.stepId,
+        callId: entry.call.callId,
+        invocationId: entry.invocationId,
+        signal: context.signal,
+        resume: this.takeResume(entry.call.callId),
+      };
+      if (context.states?.has(entry.owner.middlewareId))
+        Object.defineProperty(toolContext, "state", {
+          enumerable: true,
+          get: () => context.states!.get(entry.owner.middlewareId),
+        });
+      const outcome = await entry.execute(
+        entry.call.args as never,
+        Object.freeze(toolContext) as import("../types/tool.js").ToolExecutionContext,
+      );
+      this.throwIfAborted(context.signal);
+      if (!outcome || typeof outcome !== "object" || typeof outcome.kind !== "string")
+        throw new HarnessError("tool.invalid-tool-result", "Tool returned an invalid outcome");
+      if (outcome.kind === "interaction-required")
+        return interactionBarrier(this.plan.executable.indexOf(entry), outcome);
+      if (outcome.kind === "deferred") {
+        const value = Object.freeze({
+          callId: entry.call.callId,
+          toolName: entry.call.toolName,
+          args: copyJson(entry.call.args),
+          invocationId: entry.invocationId,
+          owner: entry.owner,
+          ...(outcome.token === undefined ? {} : { token: copyJson(outcome.token) }),
+        });
+        this.deferred.set(entry.call.callId, value);
+        this.settlementEvents.push({
+          type: "tool.deferred",
+          sessionId: context.ids.sessionId,
           turnId: context.ids.turnId,
           stepId: context.ids.stepId,
-          adapterId: adapter.id,
           toolName: entry.call.toolName,
           callId: entry.call.callId,
           invocationId: entry.invocationId,
-          attributes: { args: copyJson(entry.call.args) },
-        });
-        const outcome = await adapter.execute(entry.call, {
-          invocationId: entry.invocationId,
-          signal: context.signal,
-          resume: this.takeResume("execute", entry.call.callId),
-        });
-        this.throwIfAborted(context.signal);
-        if (outcome.kind === "interaction-required")
-          return interactionBarrier("execute", this.plan.executable.indexOf(entry), outcome);
-        this.results.set(entry.call.callId, resultFrom(entry, outcome));
-        context.observe({
-          type: "adapter.completed",
-          turnId: context.ids.turnId,
-          stepId: context.ids.stepId,
-          adapterId: adapter.id,
-          toolName: entry.call.toolName,
-          callId: entry.call.callId,
-          outcome: outcome.kind,
-          ...adapterCompleted(this.results.get(entry.call.callId)),
+          middlewareId: entry.owner.middlewareId,
+          slot: entry.owner.slot,
+          attributes: outcome.token === undefined ? {} : { token: copyJson(outcome.token) },
         });
         return undefined;
-      });
+      }
+      const result = resultFrom(entry, outcome);
+      this.results.set(entry.call.callId, result);
+      this.settlementEvents.push(completedEvent(entry, context, result));
     } catch (error) {
       this.throwIfAborted(context.signal);
       const result = failed(
@@ -295,33 +303,15 @@ export class ToolPlanRunner {
         error,
       );
       this.results.set(entry.call.callId, result);
-      context.observe({
-        type: "adapter.completed",
-        turnId: context.ids.turnId,
-        stepId: context.ids.stepId,
-        adapterId: adapter.id,
-        toolName: entry.call.toolName,
-        callId: entry.call.callId,
-        outcome: "failed",
-        ...adapterCompleted(result),
-      });
+      this.settlementEvents.push(completedEvent(entry, context, result));
     }
     return undefined;
   }
 
-  private takeResume(
-    phase: Extract<PlanPhase, "preflight" | "execute">,
-    callId: string,
-  ): ToolExecutionResume | undefined {
-    const phased = `${phase}:${callId}`;
-    const resume = this.resumes.get(phased) ?? this.resumes.get(callId);
-    this.resumes.delete(phased);
-    return resume;
-  }
-
-  private requireInteraction(pending: PendingBarrier): ToolPlanProgress {
-    this.enqueueInteraction(pending);
-    return this.interactionRequired();
+  private takeResume(callId: string): ToolExecutionResume | undefined {
+    const value = this.resumes.get(callId);
+    this.resumes.delete(callId);
+    return value;
   }
 
   private enqueueInteraction(pending: PendingBarrier): void {
@@ -340,18 +330,21 @@ export class ToolPlanRunner {
     return this.resultsInOrder("tool.missing-result", "Tool call did not produce a result");
   }
 
+  private orderedSettledResults(): readonly ToolResult[] {
+    return Object.freeze(
+      this.plan.order.flatMap(({ callId }) => {
+        const result = this.results.get(callId);
+        return result ? [result] : [];
+      }),
+    );
+  }
+
   private resultsInOrder(code: string, message: string): readonly ToolResult[] {
     return Object.freeze(
       this.plan.order.map(
         ({ callId, toolName }) =>
           this.results.get(callId) ??
-          Object.freeze({
-            callId,
-            toolName,
-            kind: "failed" as const,
-            code,
-            message,
-          }),
+          Object.freeze({ kind: "failed" as const, callId, toolName, code, message }),
       ),
     );
   }
@@ -362,12 +355,10 @@ export class ToolPlanRunner {
 }
 
 function interactionBarrier(
-  phase: PlanPhase,
   index: number,
   outcome: Extract<ToolOutcome, { kind: "interaction-required" }>,
 ): PendingBarrier {
   return {
-    phase,
     index,
     interaction: normalizeInteraction(outcome.interaction),
     ...(outcome.token === undefined ? {} : { token: copyJson(outcome.token) }),
@@ -416,7 +407,7 @@ function resumeValue(event: InputEvent, pending: PendingBarrier): ToolExecutionR
 
 function resultFrom(
   entry: ExecutablePlanEntry,
-  outcome: Exclude<ToolOutcome, { kind: "interaction-required" }>,
+  outcome: Extract<ToolOutcome, { kind: "completed" | "denied" | "failed" }>,
 ): ToolResult {
   const base = { callId: entry.call.callId, toolName: entry.call.toolName };
   switch (outcome.kind) {
@@ -438,18 +429,26 @@ function resultFrom(
         code: outcome.code,
         message: outcome.message,
       });
-    default:
-      throw new HarnessError("adapter.invalid-outcome", "Tool adapter returned an invalid outcome");
   }
 }
 
-function adapterCompleted(result?: ToolResult): {
-  readonly code?: string;
-  readonly attributes?: ToolResult;
-} {
-  if (!result) return {};
+function completedEvent(
+  entry: ExecutablePlanEntry,
+  context: ToolPlanRunContext,
+  result: ToolResult,
+): ObserveEvent {
   return {
-    ...(result.code === undefined ? {} : { code: result.code }),
+    type: "tool.completed",
+    sessionId: context.ids.sessionId,
+    turnId: context.ids.turnId,
+    stepId: context.ids.stepId,
+    toolName: entry.call.toolName,
+    callId: entry.call.callId,
+    invocationId: entry.invocationId,
+    middlewareId: entry.owner.middlewareId,
+    slot: entry.owner.slot,
+    outcome: result.kind,
+    ...(result.kind === "failed" ? { code: result.code } : {}),
     attributes: copyJson(result),
   };
 }

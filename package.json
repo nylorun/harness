@@ -1,0 +1,19 @@
+{
+  "name": "nylorun-harness-workspace",
+  "private": true,
+  "description": "Public workspace for the Nylorun Harness toolchain.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "harness",
+    "studio"
+  ],
+  "engines": {
+    "node": "^22.14.0 || ^24.0.0 || >=26.0.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @nylorun/harness && npm run build --workspace @nylorun/studio",
+    "test": "npm run test --workspaces --if-present",
+    "check": "npm run check --workspace @nylorun/harness"
+  }
+}

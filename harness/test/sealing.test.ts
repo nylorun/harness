@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Agent } from "../src/index.js";
-import { adapter, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("sealing", () => {
   it("turns invalid calls into paired failures and dispatches only sealed calls", async () => {
@@ -17,8 +17,7 @@ describe("sealing", () => {
           : `results:${request.toolResults.map((item) => item.kind).join(",")}`;
       }),
     )
-      .with(adapter(execute))
-      .use("test", offer(tool()))
+      .use("test", offer(tool("echo", execution(execute))))
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
@@ -28,12 +27,12 @@ describe("sealing", () => {
       { type: "final", output: "results:failed,completed" },
     ]);
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(Object.isFrozen(execute.mock.calls[0]![0])).toBe(true);
+    expect(Object.isFrozen(execute.mock.calls[0]![0].args)).toBe(true);
   });
 
   it("canonicalizes malformed call ids and deeply copies candidate and Tool result data", async () => {
     const candidateArgs = { value: 1 };
-    const adapterOutput = { nested: { value: 1 } };
+    const implementationOutput = { nested: { value: 1 } };
     let step = 0;
     const result = Agent(
       model(async (_call, { request }) => {
@@ -46,14 +45,21 @@ describe("sealing", () => {
         );
       }),
     )
-      .with(adapter(async () => ({ kind: "completed", output: adapterOutput })))
-      .use("test", offer(tool()))
+      .use(
+        "test",
+        offer(
+          tool(
+            "echo",
+            execution(async () => ({ kind: "completed", output: implementationOutput })),
+          ),
+        ),
+      )
       .build();
     const { session, handle } = turn(result, "go");
     await handle.completed;
 
     candidateArgs.value = 9;
-    adapterOutput.nested.value = 9;
+    implementationOutput.nested.value = 9;
     const candidate = session.state.transcript.find((entry) => entry.kind === "candidate");
     const results = session.state.transcript.find((entry) => entry.kind === "tool-results");
     if (!candidate || candidate.kind !== "candidate" || !results || results.kind !== "tool-results")
@@ -79,7 +85,7 @@ describe("sealing", () => {
     expect(Object.isFrozen((results.results[3]?.output as { nested: object }).nested)).toBe(true);
   });
 
-  it("normalizes malformed JavaScript model and adapter scalar fields into failures", async () => {
+  it("normalizes malformed JavaScript model and tool outcome scalar fields into failures", async () => {
     const malformedModel = Agent(model(async () => ({ output: "invalid" }) as never)).build();
     const modelCompletion = await turn(malformedModel, "go").handle.completed;
     expect(modelCompletion.events).toMatchObject([
@@ -93,8 +99,15 @@ describe("sealing", () => {
         ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
       ),
     )
-      .with(adapter(async () => ({ kind: "denied", reason: { mutable: true } }) as never))
-      .use("test", offer(tool()))
+      .use(
+        "test",
+        offer(
+          tool(
+            "echo",
+            execution(async () => ({ kind: "denied", reason: { mutable: true } }) as never),
+          ),
+        ),
+      )
       .build();
     const { session, handle } = turn(malformedAdapter, "go");
     await handle.completed;

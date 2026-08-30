@@ -1,12 +1,18 @@
-import type { InputEvent, SessionEvent, SessionSnapshot } from "../types/session.js";
+import type {
+  ActiveExecutionRecord,
+  InputEvent,
+  SessionEvent,
+  SessionRecord,
+  SessionSnapshot,
+} from "../types/session.js";
 import type { JsonObject, Tripwire } from "../types/shared.js";
 import type { RequiredInteraction, ToolResult } from "../types/tool.js";
 import {
   beginTurn,
   commitCandidate,
   commitFinal,
-  commitInput,
   commitToolResults,
+  withStatus,
 } from "../session/state.js";
 import type { LoopAgent } from "../build/agent.js";
 import { runStep } from "../step/run.js";
@@ -14,6 +20,7 @@ import { createId } from "../utils/ids.js";
 import { copyJson } from "../utils/immutable.js";
 import type { ObserveEmit } from "../utils/observe.js";
 import { ToolPlanRunner } from "./plan-runner.js";
+import type { CapabilityStateRegistry } from "../session/capability-state.js";
 
 export interface PendingTurn {
   readonly plan: ToolPlanRunner;
@@ -37,6 +44,13 @@ export type TurnProgress =
       readonly interaction: RequiredInteraction;
     }
   | {
+      readonly kind: "deferred";
+      readonly state: SessionSnapshot;
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly active: ActiveExecutionRecord;
+    }
+  | {
       readonly kind: "tripwire";
       readonly state: SessionSnapshot;
       readonly turnId: string;
@@ -46,15 +60,23 @@ export type TurnProgress =
 
 export interface TurnRunContext {
   readonly signal: AbortSignal;
+  readonly states: CapabilityStateRegistry;
   readonly observe: ObserveEmit;
   readonly assertCurrent: () => void;
   readonly onPlanActive: (pending: PendingTurn | undefined) => void;
-  readonly onState: (state: SessionSnapshot) => void;
+  readonly commit: (
+    state: SessionSnapshot,
+    transition: SessionRecord["transition"],
+    active?: ActiveExecutionRecord,
+  ) => Promise<SessionSnapshot>;
   readonly onConversation: (event: SessionEvent) => void;
-  readonly claimInterrupts: (turnId: string) => readonly InputEvent[];
+  readonly claimInterrupts: (
+    state: SessionSnapshot,
+    turnId: string,
+  ) => Promise<{ readonly state: SessionSnapshot; readonly arrivals: readonly InputEvent[] }>;
 }
 
-/** Advances one Turn until it finalizes, trips a policy, or pauses for an interaction. */
+/** Advances one Turn until it finalizes, trips policy, or reaches a waiting barrier. */
 export class TurnRunner {
   constructor(
     private readonly agent: LoopAgent,
@@ -68,10 +90,14 @@ export class TurnRunner {
     context: TurnRunContext,
   ): Promise<TurnProgress> {
     const turnId = createId("turn");
-    const started = beginTurn(state, turnId, event);
-    context.onState(started);
+    state = await context.commit(beginTurn(state, turnId, event), "input");
     context.onConversation({ type: "input", event, turnId });
-    return this.advance(started, turnId, 1, [event], [], context);
+    return this.advance(state, turnId, 1, [event], [], context);
+  }
+
+  async continue(state: SessionSnapshot, context: TurnRunContext): Promise<TurnProgress> {
+    const turnId = createId("turn");
+    return this.advance(beginTurn(state, turnId), turnId, 1, [], [], context);
   }
 
   async resume(
@@ -80,13 +106,26 @@ export class TurnRunner {
     event: InputEvent,
     context: TurnRunContext,
   ): Promise<TurnProgress> {
+    const resume = pending.plan.interactionResume(event);
+    const active = pending.plan.activeInteractionRecord(pending.turnId, pending.stepId, resume);
+    state = await context.commit(withStatus(state, "running", undefined, active), "input", active);
     context.onConversation({ type: "input", event, turnId: pending.turnId });
     const progress = await this.runPlan(pending, context, event);
     if (progress.kind === "interaction-required")
-      return { kind: "interaction-required", state, pending, interaction: progress.interaction };
-    const afterTools = commitToolResults(state, pending.turnId, pending.stepId, progress.results);
-    context.onState(afterTools);
-    const claimed = claimAndRecord(afterTools, pending.turnId, context);
+      return this.waitForInteraction(state, pending, progress.interaction, context);
+    if (progress.kind === "deferred")
+      return this.waitForDeferred(
+        state,
+        pending,
+        pending.plan.activeToolsRecord(pending.turnId, pending.stepId),
+        context,
+      );
+    state = await context.commit(
+      commitToolResults(state, pending.turnId, pending.stepId, progress.results),
+      "tool-results",
+    );
+    pending.plan.publishSettlements(context.observe);
+    const claimed = await context.claimInterrupts(state, pending.turnId);
     return this.advance(
       claimed.state,
       pending.turnId,
@@ -123,75 +162,148 @@ export class TurnRunner {
         toolResults,
         signal: context.signal,
         session: this.session,
+        states: context.states,
+        recordModelRequested: (next, active) => context.commit(next, "model-requested", active),
       });
       context.assertCurrent();
+      state = run.state;
+
+      const pending =
+        run.output.kind === "tools"
+          ? {
+              plan: new ToolPlanRunner(run.output.plan),
+              turnId,
+              stepId,
+              stepNumber,
+            }
+          : undefined;
+
       if (run.candidate) {
-        state = commitCandidate(state, turnId, stepId, run.candidate);
-        context.onState(state);
+        const active = pending?.plan.activeToolsRecord(turnId, stepId);
+        state = await context.commit(
+          commitCandidate(state, turnId, stepId, run.candidate),
+          "candidate",
+          active,
+        );
+        context.observe({
+          type: "model.completed",
+          turnId,
+          stepId,
+          ...(run.requestedModelId === undefined ? {} : { requestedModelId: run.requestedModelId }),
+          attributes: run.candidate,
+        });
         context.onConversation({ type: "candidate", turnId, stepId, candidate: run.candidate });
       }
 
       if (run.output.kind === "tripwire")
         return { kind: "tripwire", state, turnId, stepId, tripwire: run.output.tripwire };
-      if (run.output.kind === "final")
-        return {
-          kind: "final",
-          state: commitFinal(state, turnId, stepId, run.output.output),
-          turnId,
-          stepId,
-          output: run.output.output,
-        };
+      if (run.output.kind === "deferred-model") {
+        state = await context.commit(
+          withStatus(state, "waiting", undefined, run.output.active),
+          "waiting",
+          run.output.active,
+        );
+        return { kind: "deferred", state, turnId, stepId, active: run.output.active };
+      }
+      if (run.output.kind === "final") {
+        state = await context.commit(
+          withStatus(commitFinal(state, turnId, stepId, run.output.output), "idle"),
+          "final",
+        );
+        return { kind: "final", state, turnId, stepId, output: run.output.output };
+      }
 
-      const plan = run.output.plan;
+      const toolPlan = run.output.plan;
+
       context.observe(() => ({
         type: "tool.sealed",
         turnId,
         stepId,
         attributes: {
           executable: Object.freeze(
-            plan.executable.map((entry) =>
+            toolPlan.executable.map((entry) =>
               Object.freeze({
                 callId: entry.call.callId,
                 toolName: entry.call.toolName,
                 args: copyJson(entry.call.args),
-                executeWith: entry.call.executeWith,
                 invocationId: entry.invocationId,
-                ...(entry.preflight === undefined ? {} : { preflight: entry.preflight }),
+                owner: entry.owner,
                 ...(entry.interaction === undefined
                   ? {}
                   : { interaction: copyJson(entry.interaction) }),
               }),
             ),
           ),
-          immediate: copyJson(plan.immediateResults),
+          immediate: copyJson(toolPlan.immediateResults),
         },
       }));
-      const pending: PendingTurn = {
-        plan: new ToolPlanRunner(run.output.plan),
-        turnId,
-        stepId,
-        stepNumber,
-      };
-      const progress = await this.runPlan(pending, context);
+      const progress = await this.runPlan(pending!, context);
       if (progress.kind === "interaction-required")
-        return { kind: "interaction-required", state, pending, interaction: progress.interaction };
-      state = commitToolResults(state, turnId, stepId, progress.results);
-      context.onState(state);
-      const claimed = claimAndRecord(state, turnId, context);
+        return this.waitForInteraction(state, pending!, progress.interaction, context);
+      if (progress.kind === "deferred")
+        return this.waitForDeferred(
+          state,
+          pending!,
+          pending!.plan.activeToolsRecord(turnId, stepId),
+          context,
+        );
+      state = await context.commit(
+        commitToolResults(state, turnId, stepId, progress.results),
+        "tool-results",
+      );
+      pending!.plan.publishSettlements(context.observe);
+      const claimed = await context.claimInterrupts(state, turnId);
       state = claimed.state;
       stepArrivals = claimed.arrivals;
       toolResults = progress.results;
     }
   }
 
+  private async waitForInteraction(
+    state: SessionSnapshot,
+    pending: PendingTurn,
+    interaction: RequiredInteraction,
+    context: TurnRunContext,
+  ): Promise<TurnProgress> {
+    const active = pending.plan.activeInteractionRecord(pending.turnId, pending.stepId);
+    state = await context.commit(
+      withStatus(state, "waiting", interaction, active),
+      "waiting",
+      active,
+    );
+    pending.plan.publishSettlements(context.observe);
+    return { kind: "interaction-required", state, pending, interaction };
+  }
+
+  private async waitForDeferred(
+    state: SessionSnapshot,
+    pending: PendingTurn,
+    active: ActiveExecutionRecord,
+    context: TurnRunContext,
+  ): Promise<TurnProgress> {
+    state = await context.commit(
+      withStatus(state, "waiting", undefined, active),
+      "waiting",
+      active,
+    );
+    pending.plan.publishSettlements(context.observe);
+    return {
+      kind: "deferred",
+      state,
+      turnId: pending.turnId,
+      stepId: pending.stepId,
+      active,
+    };
+  }
+
   private async runPlan(pending: PendingTurn, context: TurnRunContext, resume?: InputEvent) {
     context.onPlanActive(pending);
     const progress = await pending.plan.run(
       {
-        adapters: this.agent.adapters,
         signal: context.signal,
         observe: context.observe,
         ids: { sessionId: this.sessionId, turnId: pending.turnId, stepId: pending.stepId },
+        states: context.states,
       },
       resume,
     );
@@ -199,17 +311,4 @@ export class TurnRunner {
     context.onPlanActive(undefined);
     return progress;
   }
-}
-
-function claimAndRecord(
-  state: SessionSnapshot,
-  turnId: string,
-  context: TurnRunContext,
-): { readonly state: SessionSnapshot; readonly arrivals: readonly InputEvent[] } {
-  const arrivals = context.claimInterrupts(turnId);
-  if (arrivals.length === 0) return { state, arrivals };
-  let next = state;
-  for (const event of arrivals) next = commitInput(next, turnId, event);
-  context.onState(next);
-  return { state: next, arrivals };
 }

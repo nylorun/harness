@@ -2,12 +2,18 @@ import type { InputEvent, InputOptions } from "../types/session.js";
 import { copyJson, copyJsonObject } from "../utils/immutable.js";
 import { SubmissionStream } from "./submission-stream.js";
 
+export type WorkEvent = InputEvent | { readonly kind: "continue" };
+
 export interface QueuedInput {
-  readonly event: InputEvent;
+  readonly event: WorkEvent;
   readonly options?: InputOptions;
   readonly stream: SubmissionStream;
   cancelled: boolean;
 }
+
+export type QueuedInterrupt = Omit<QueuedInput, "event"> & {
+  readonly event: Extract<InputEvent, { kind: "interrupt" }>;
+};
 
 export interface QueueAbortHandlers {
   readonly isActive: () => boolean;
@@ -37,6 +43,10 @@ export function snapshotInput(event: InputEvent): InputEvent {
   }
 }
 
+export function snapshotWork(event: WorkEvent): WorkEvent {
+  return event.kind === "continue" ? Object.freeze({ kind: "continue" }) : snapshotInput(event);
+}
+
 /** Serializes ordinary input while allowing a matching interaction reply to resume immediately. */
 export class InputQueue {
   private readonly values: QueuedInput[] = [];
@@ -52,12 +62,16 @@ export class InputQueue {
 
   take(waitingForInteraction: boolean): QueuedInput | undefined {
     const next = this.values[0];
-    if (!next || (waitingForInteraction && !isInteractionReply(next.event))) return undefined;
+    if (
+      !next ||
+      (waitingForInteraction && (next.event.kind === "continue" || !isInteractionReply(next.event)))
+    )
+      return undefined;
     return this.values.shift();
   }
 
-  takeInterrupts(): QueuedInput[] {
-    const claimed: QueuedInput[] = [];
+  takeInterrupts(): QueuedInterrupt[] {
+    const claimed: QueuedInterrupt[] = [];
     for (let index = 0; index < this.values.length;) {
       const item = this.values[index]!;
       if (item.event.kind !== "interrupt") {
@@ -65,7 +79,7 @@ export class InputQueue {
         continue;
       }
       this.values.splice(index, 1);
-      if (!item.cancelled) claimed.push(item);
+      if (!item.cancelled) claimed.push(item as QueuedInterrupt);
     }
     return claimed;
   }
