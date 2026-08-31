@@ -57,10 +57,18 @@ describe("multi-agent Hono host", () => {
         "http://nylo.run.localhost:4161",
       );
       const body = await response.text();
+      const projectedEvents = body
+        .trim()
+        .split("\n\n")
+        .map((frame) => JSON.parse(frame.slice("data: ".length)) as Record<string, unknown>);
       expect(body).toContain("TOOL_CALL_START");
       expect(body).toContain("TOOL_CALL_RESULT");
       expect(body).toContain("TEXT_MESSAGE_CONTENT");
       expect(body).toContain("Done.");
+      expect(projectedEvents.find((event) => event.type === "TOOL_CALL_RESULT")).toMatchObject({
+        messageId: expect.any(String),
+        toolCallId: "calc-1",
+      });
     } finally {
       await runtime.close();
       await rm(root, { recursive: true, force: true });
