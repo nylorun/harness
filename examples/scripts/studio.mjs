@@ -5,11 +5,17 @@ import { createRequire } from "node:module";
 const port = Number(process.env.PORT ?? "4111");
 const agentUrl = `http://127.0.0.1:${port}`;
 const nylo = createRequire(import.meta.url).resolve("@nylorun/studio/dist/cli.js");
-const server = (await ready(agentUrl, 300)) ? undefined : await startAgent(agentUrl);
+const attachedToExistingServer = await ready(agentUrl, 300);
+const server = attachedToExistingServer ? undefined : await startAgent(agentUrl);
 const studio = spawn(process.execPath, [nylo, "studio", "--agent-server-url", agentUrl], {
   stdio: "inherit",
 });
+let checkingAttachedServer = false;
+const attachedServerMonitor = attachedToExistingServer
+  ? setInterval(() => void ensureAttachedServer(), 1_000)
+  : undefined;
 const stop = () => {
+  if (attachedServerMonitor !== undefined) clearInterval(attachedServerMonitor);
   server?.kill("SIGTERM");
   studio.kill("SIGTERM");
 };
@@ -24,8 +30,20 @@ server?.once("exit", (code) => {
 });
 studio.once("exit", (code) => {
   if (code && code !== 0) process.exitCode = code;
+  if (attachedServerMonitor !== undefined) clearInterval(attachedServerMonitor);
   server?.kill("SIGTERM");
 });
+
+async function ensureAttachedServer() {
+  if (checkingAttachedServer || (await ready(agentUrl, 200))) return;
+  checkingAttachedServer = true;
+  if (attachedServerMonitor !== undefined) clearInterval(attachedServerMonitor);
+  process.stderr.write(
+    `Agent server at ${agentUrl} stopped. Studio is closing; restart the agent server, then run npm run studio again.\n`,
+  );
+  process.exitCode = 1;
+  studio.kill("SIGTERM");
+}
 
 async function startAgent(url) {
   if (!existsSync("dist/main.js")) {

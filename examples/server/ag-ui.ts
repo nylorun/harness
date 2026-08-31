@@ -30,6 +30,7 @@ export function agUiEvents(
     } else if (event.type === "tool.completed" && typeof event.payload.callId === "string") {
       output.push({
         type: "TOOL_CALL_RESULT",
+        messageId: `nylorun-${threadId}-${event.seq}`,
         toolCallId: event.payload.callId,
         content: JSON.stringify(
           event.payload.attributes ?? { outcome: event.payload.outcome ?? "completed" },
