@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { Agent, type ObserveEvent } from "../src/index.js";
-import { execution, model, offer, tool, toolCalls } from "./fixtures.js";
+import { type ObserveEvent } from "../src/index.js";
+import { testAgent, execution, model, offer, tool, toolCalls } from "./fixtures.js";
 
 function expectPlainJson(value: unknown): void {
   const encoded = JSON.stringify(value);
@@ -13,7 +13,9 @@ describe("observation", () => {
     const types: string[] = [];
     const healthy: string[] = [];
     let count = 0;
-    const result = Agent(model(async () => "done")).build();
+    const result = testAgent()
+      .with(model(async () => "done"))
+      .build();
     const session = result.run();
     session.observe((event) => {
       types.push(event.type);
@@ -31,7 +33,8 @@ describe("observation", () => {
   it("delivers events to independent observers and unsubscribes one idempotently", async () => {
     const first: string[] = [];
     const second: string[] = [];
-    const session = Agent(model(async () => "done"))
+    const session = testAgent()
+      .with(model(async () => "done"))
       .build()
       .run();
     const unsubscribeFirst = session.observe((event) => first.push(event.type));
@@ -53,7 +56,8 @@ describe("observation", () => {
     const duplicateTypes: string[] = [];
     const earlyTypes: string[] = [];
     const lateTypes: string[] = [];
-    const session = Agent(model(async () => "done"))
+    const session = testAgent()
+      .with(model(async () => "done"))
       .build()
       .run();
     const duplicate = (event: ObserveEvent) => duplicateTypes.push(event.type);
@@ -78,11 +82,12 @@ describe("observation", () => {
 
   it("records requestedModelId only when middleware selected an id", async () => {
     const selected: unknown[] = [];
-    const routed = Agent(model(async () => "done"))
+    const routed = testAgent()
       .use("route", async (request, next) => {
         request.configuration.model.select({ id: "test-model" });
         return next();
       })
+      .with(model(async () => "done"))
       .build();
     const routedSession = routed.run();
     routedSession.observe((event) => {
@@ -94,7 +99,9 @@ describe("observation", () => {
     await routedSession.stop();
 
     const omitted: unknown[] = [];
-    const plain = Agent(model(async () => "done")).build();
+    const plain = testAgent()
+      .with(model(async () => "done"))
+      .build();
     const plainSession = plain.run();
     plainSession.observe((event) => {
       if (event.type === "model.requested" || event.type === "model.completed")
@@ -107,8 +114,9 @@ describe("observation", () => {
 
   it("projects the model.requested prefix to plain JSON", async () => {
     const observed: ObserveEvent[] = [];
-    const session = Agent(model(async () => "done"))
+    const session = testAgent()
       .use("tools", offer(tool()))
+      .with(model(async () => "done"))
       .build()
       .run();
     session.observe((event) => observed.push(event));
@@ -125,12 +133,13 @@ describe("observation", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const session = Agent(
-      model(async () => {
-        await gate;
-        return "done";
-      }),
-    )
+    const session = testAgent()
+      .with(
+        model(async () => {
+          await gate;
+          return "done";
+        }),
+      )
       .build()
       .run();
     const observed: ObserveEvent[] = [];
@@ -162,12 +171,13 @@ describe("observation", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const session = Agent(
-      model(async () => {
-        await gate;
-        return "done";
-      }),
-    )
+    const session = testAgent()
+      .with(
+        model(async () => {
+          await gate;
+          return "done";
+        }),
+      )
       .build()
       .run();
     const observed: ObserveEvent[] = [];
@@ -198,12 +208,13 @@ describe("observation", () => {
     const execute = execution(async () => {
       throw new Error("boom");
     });
-    const session = Agent(
-      model(async () =>
-        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
-      ),
-    )
+    const session = testAgent()
       .use("test", offer(tool("echo", execute)))
+      .with(
+        model(async () =>
+          ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
+        ),
+      )
       .build()
       .run();
     const observed: ObserveEvent[] = [];
@@ -234,13 +245,14 @@ describe("observation", () => {
       release = resolve;
     });
     let calls = 0;
-    const session = Agent(
-      model(async () => {
-        calls += 1;
-        if (calls === 1) await gate;
-        return `turn-${calls}`;
-      }),
-    )
+    const session = testAgent()
+      .with(
+        model(async () => {
+          calls += 1;
+          if (calls === 1) await gate;
+          return `turn-${calls}`;
+        }),
+      )
       .build()
       .run();
     const observed: ObserveEvent[] = [];
@@ -276,11 +288,7 @@ describe("observation", () => {
 
   it("stamps the approve inputId on resume events of the same turn", async () => {
     let step = 0;
-    const session = Agent(
-      model(async () =>
-        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
-      ),
-    )
+    const session = testAgent()
       .use("approve-echo", async (_request, next) => {
         const response = await next();
         const call = response.toolCalls()[0];
@@ -288,6 +296,11 @@ describe("observation", () => {
         return response;
       })
       .use("test", offer(tool()))
+      .with(
+        model(async () =>
+          ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
+        ),
+      )
       .build()
       .run();
     const observed: ObserveEvent[] = [];
@@ -328,18 +341,19 @@ describe("observation", () => {
       kind: "completed" as const,
       output: { echoed: call.args },
     }));
-    const session = Agent(
-      model(async () =>
-        ++step === 1
-          ? toolCalls({ id: "call_1", name: "echo", args: { text: "hello" } })
-          : "Completed with echoed",
-      ),
-    )
+    const session = testAgent()
       .use("echo", async (request, next) => {
         request.configuration.tools.set("capture", [tool("echo", execute)]);
         request.configuration.instructions.set("capture", ["Echo the user text."]);
         return next();
       })
+      .with(
+        model(async () =>
+          ++step === 1
+            ? toolCalls({ id: "call_1", name: "echo", args: { text: "hello" } })
+            : "Completed with echoed",
+        ),
+      )
       .build()
       .run();
     const observed: ObserveEvent[] = [];
@@ -410,8 +424,9 @@ describe("observation", () => {
   });
 
   it("emits step.started before an early middleware tripwire and skips model.requested", async () => {
-    const session = Agent(model(async () => "done"))
+    const session = testAgent()
       .use("block", async (request) => request.tripwire({ code: "policy.block", message: "nope" }))
+      .with(model(async () => "done"))
       .build()
       .run();
     const observed: ObserveEvent[] = [];
@@ -431,11 +446,12 @@ describe("observation", () => {
   });
 
   it("puts tripwire code on the event and the message in attributes", async () => {
-    const session = Agent(
-      model(async () => {
-        throw new Error("provider down");
-      }),
-    )
+    const session = testAgent()
+      .with(
+        model(async () => {
+          throw new Error("provider down");
+        }),
+      )
       .build()
       .run();
     const observed: ObserveEvent[] = [];
@@ -453,15 +469,16 @@ describe("observation", () => {
   it("publishes the exact immutable ModelCall supplied to the adapter", async () => {
     let step = 0;
     const calls: unknown[] = [];
-    const session = Agent(
-      model(async (call) => {
-        calls.push(call);
-        return ++step === 1
-          ? toolCalls({ id: "call", name: "echo", args: { text: "hi" } })
-          : "done";
-      }),
-    )
+    const session = testAgent()
       .use("echo", offer(tool()))
+      .with(
+        model(async (call) => {
+          calls.push(call);
+          return ++step === 1
+            ? toolCalls({ id: "call", name: "echo", args: { text: "hi" } })
+            : "done";
+        }),
+      )
       .build()
       .run();
     const observed: ObserveEvent[] = [];

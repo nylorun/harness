@@ -8,6 +8,7 @@ describe("public API", () => {
       expect.arrayContaining([
         "Agent",
         "AgentBuilder",
+        "BoundAgentBuilder",
         "AgentBuildError",
         "AgentLifecycleError",
         "BuiltAgent",

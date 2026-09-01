@@ -1,17 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { Agent, type ModelConfigurationSnapshot } from "../src/index.js";
-import { model, tool, toolCalls, turn } from "./fixtures.js";
+import { type ModelConfigurationSnapshot } from "../src/index.js";
+import { testAgent, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("model configuration", () => {
   it("assembles named slots fresh for every model step", async () => {
     const snapshots: ModelConfigurationSnapshot[] = [];
     let calls = 0;
-    const agent = Agent(
-      model(async (_call, { request }) => {
-        snapshots.push(request.configuration);
-        return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
-      }),
-    )
+    const agent = testAgent()
       .use("baseline", async (request, next) => {
         if (request.stepNumber === 1) {
           request.configuration.instructions.set("policy", ["Discarded declaration"]);
@@ -21,6 +16,12 @@ describe("model configuration", () => {
         }
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          snapshots.push(request.configuration);
+          return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
+        }),
+      )
       .build();
 
     await turn(agent).handle.completed;
@@ -37,12 +38,7 @@ describe("model configuration", () => {
 
   it("orders same-step slots canonically and attributes them", async () => {
     let configuration!: ModelConfigurationSnapshot;
-    const agent = Agent(
-      model(async (_call, { request }) => {
-        configuration = request.configuration;
-        return "done";
-      }),
-    )
+    const agent = testAgent()
       .use("later", async (request, next) => {
         request.configuration.instructions.set("a", ["second"], { order: 20 });
         request.configuration.tools.set("late", [tool("late")], { order: 20 });
@@ -53,6 +49,12 @@ describe("model configuration", () => {
         request.configuration.tools.set("first", [tool("first")], { order: 10 });
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          configuration = request.configuration;
+          return "done";
+        }),
+      )
       .build();
     await turn(agent).handle.completed;
 
@@ -70,12 +72,7 @@ describe("model configuration", () => {
     const routes: string[] = [];
     const observedOwners: unknown[] = [];
     let calls = 0;
-    const agent = Agent(
-      model(async () => {
-        calls += 1;
-        return calls <= 2 ? toolCalls({ id: `call-${calls}`, name: "echo", args: {} }) : "done";
-      }),
-    )
+    const agent = testAgent()
       .use("tools", async (request, next) => {
         request.configuration.tools.set("echo", [
           tool("echo", async () => {
@@ -85,6 +82,12 @@ describe("model configuration", () => {
         ]);
         return next();
       })
+      .with(
+        model(async () => {
+          calls += 1;
+          return calls <= 2 ? toolCalls({ id: `call-${calls}`, name: "echo", args: {} }) : "done";
+        }),
+      )
       .build();
     const session = agent.run();
     session.observe((event) => {

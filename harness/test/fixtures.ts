@@ -1,8 +1,10 @@
 import { z } from "zod";
 import {
+  Agent,
   AgentBuildError,
   model as typedModel,
   tool as typedTool,
+  type AgentOptions,
   type BuiltAgent,
   type InputOptions,
   type JsonObject,
@@ -18,6 +20,14 @@ import {
 } from "../src/index.js";
 
 export const objectSchema = z.object({}).passthrough();
+
+export function testAgent(options: Partial<AgentOptions> = {}) {
+  return Agent({
+    id: options.id ?? "test",
+    name: options.name ?? "Test",
+    ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
+  });
+}
 
 export function tool(
   name = "echo",

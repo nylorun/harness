@@ -232,7 +232,7 @@ function manifest(agent: ExampleAgent) {
       provider: process.env.NYLO_PROVIDER ?? "unconfigured",
       id: process.env.NYLO_MODEL ?? "unconfigured",
     },
-    harness: { name: "@nylorun/harness", version: "0.7.0-beta.1", manifest: agent.agent.manifest },
+    harness: { name: "@nylorun/harness", version: "0.8.0-beta.1", manifest: agent.agent.manifest },
     endpoints: {
       agUi: `/agents/${agent.id}/v1/ag-ui`,
       sessions: `/agents/${agent.id}/v1/sessions`,

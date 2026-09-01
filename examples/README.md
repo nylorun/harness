@@ -1,7 +1,8 @@
 # Harness examples
 
 A public, direct-Harness multi-agent starter. There is no generator or hidden runtime: each
-`agents/*/agent.ts` builds one `Agent(adapter).use(...).build()` instance. This project owns its
+`agents/*/agent.ts` builds one `Agent({ id, name, instructions }).use(...).with(adapter).build()`
+instance. This project owns its
 Hono host, provider adapter, local persistence, and Studio protocol implementation.
 
 ## Requirements and install

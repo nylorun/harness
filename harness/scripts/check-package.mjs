@@ -86,6 +86,7 @@ try {
   const entry = await import(new URL("../dist/index.js", import.meta.url));
   for (const name of [
     "AgentBuilder",
+    "BoundAgentBuilder",
     "AgentBuildError",
     "AgentLifecycleError",
     "HarnessError",

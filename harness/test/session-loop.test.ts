@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { Agent } from "../src/index.js";
-import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { testAgent, execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("Session loop", () => {
   it("submits eagerly and processes overlapping inputs FIFO", async () => {
     const seen: string[] = [];
-    const result = Agent(
-      model(async (_call, { request }) => {
-        const arrival = request.arrivals[0];
-        const text =
-          arrival?.kind === "user-message" || arrival?.kind === "interrupt" ? arrival.text : "";
-        await new Promise((resolve) => setTimeout(resolve, text === "one" ? 20 : 0));
-        seen.push(text);
-        return text;
-      }),
-    ).build();
+    const result = testAgent()
+      .with(
+        model(async (_call, { request }) => {
+          const arrival = request.arrivals[0];
+          const text =
+            arrival?.kind === "user-message" || arrival?.kind === "interrupt" ? arrival.text : "";
+          await new Promise((resolve) => setTimeout(resolve, text === "one" ? 20 : 0));
+          seen.push(text);
+          return text;
+        }),
+      )
+      .build();
     const { session, handle: one } = turn(result, "one");
     const two = session.input("two");
     const three = session.interrupt("three");
@@ -32,13 +33,7 @@ describe("Session loop", () => {
 
   it("does not impose a native model-step ceiling", async () => {
     let modelCalls = 0;
-    const result = Agent(
-      model(async () =>
-        ++modelCalls <= 33
-          ? toolCalls({ id: `call-${modelCalls}`, name: "echo", args: {} })
-          : "done",
-      ),
-    )
+    const result = testAgent()
       .use(
         "test",
         offer(
@@ -46,6 +41,13 @@ describe("Session loop", () => {
             "echo",
             execution(async () => ({ kind: "completed", output: "ok" })),
           ),
+        ),
+      )
+      .with(
+        model(async () =>
+          ++modelCalls <= 33
+            ? toolCalls({ id: `call-${modelCalls}`, name: "echo", args: {} })
+            : "done",
         ),
       )
       .build();
@@ -63,12 +65,14 @@ describe("Session loop", () => {
   });
 
   it("quarantines a late model result after stop", async () => {
-    const result = Agent(
-      model(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        return "late";
-      }),
-    ).build();
+    const result = testAgent()
+      .with(
+        model(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return "late";
+        }),
+      )
+      .build();
     const { session, handle } = turn(result, "go");
     await session.stop();
     const completion = await handle.completed;
@@ -91,12 +95,13 @@ describe("Session loop", () => {
       await adapterGate;
       return { kind: "completed", output: "late" };
     });
-    const result = Agent(
-      model(async () =>
-        ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "next",
-      ),
-    )
+    const result = testAgent()
       .use("test", offer(tool("echo", local)))
+      .with(
+        model(async () =>
+          ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "next",
+        ),
+      )
       .build();
     const controller = new AbortController();
     const { session, handle: active } = turn(result, "first", { signal: controller.signal });
@@ -137,16 +142,7 @@ describe("Session loop", () => {
     });
     const arrivals: string[][] = [];
     let modelStep = 0;
-    const result = Agent(
-      model(async (_call, { request }) => {
-        arrivals.push(
-          request.arrivals.map((item) =>
-            item.kind === "user-message" || item.kind === "interrupt" ? item.text : item.kind,
-          ),
-        );
-        return ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
-      }),
-    )
+    const result = testAgent()
       .use(
         "test",
         offer(
@@ -159,6 +155,16 @@ describe("Session loop", () => {
             }),
           ),
         ),
+      )
+      .with(
+        model(async (_call, { request }) => {
+          arrivals.push(
+            request.arrivals.map((item) =>
+              item.kind === "user-message" || item.kind === "interrupt" ? item.text : item.kind,
+            ),
+          );
+          return ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
+        }),
       )
       .build();
     const { session, handle } = turn(result, "go");
@@ -199,14 +205,16 @@ describe("Session loop", () => {
   });
 
   it("starts a new turn when interrupt arrives after the current turn has finalized", async () => {
-    const result = Agent(
-      model(async (_call, { request }) => {
-        const arrival = request.arrivals[0];
-        return arrival?.kind === "user-message" || arrival?.kind === "interrupt"
-          ? arrival.text
-          : "done";
-      }),
-    ).build();
+    const result = testAgent()
+      .with(
+        model(async (_call, { request }) => {
+          const arrival = request.arrivals[0];
+          return arrival?.kind === "user-message" || arrival?.kind === "interrupt"
+            ? arrival.text
+            : "done";
+        }),
+      )
+      .build();
     const { session, handle } = turn(result, "one");
     await handle.completed;
     const later = await session.interrupt("two").completed;
@@ -223,16 +231,7 @@ describe("Session loop", () => {
   it("keeps an interrupt queued while waiting, then claims it on the next step after approve", async () => {
     const arrivals: string[][] = [];
     let modelStep = 0;
-    const result = Agent(
-      model(async (_call, { request }) => {
-        arrivals.push(
-          request.arrivals.map((item) =>
-            item.kind === "user-message" || item.kind === "interrupt" ? item.text : item.kind,
-          ),
-        );
-        return ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
-      }),
-    )
+    const result = testAgent()
       .use("approval", async (_request, next) => {
         const response = await next();
         response.requireInteraction("call", { kind: "approval", prompt: "approve" });
@@ -246,6 +245,16 @@ describe("Session loop", () => {
             execution(async () => ({ kind: "completed" as const, output: "ok" })),
           ),
         ),
+      )
+      .with(
+        model(async (_call, { request }) => {
+          arrivals.push(
+            request.arrivals.map((item) =>
+              item.kind === "user-message" || item.kind === "interrupt" ? item.text : item.kind,
+            ),
+          );
+          return ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
+        }),
       )
       .build();
     const { session, handle } = turn(result, "go");
@@ -268,7 +277,9 @@ describe("Session loop", () => {
   });
 
   it("replays the Session conversation log from the start and is not input()", async () => {
-    const result = Agent(model(async () => "hello")).build();
+    const result = testAgent()
+      .with(model(async () => "hello"))
+      .build();
     const session = result.run();
     const handle = session.input("go");
     expect(Symbol.asyncIterator in handle).toBe(false);

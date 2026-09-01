@@ -17,11 +17,11 @@ export type AgentDependencies = Readonly<{
   dataRoot: string;
 }>;
 
+export const exampleInstructions =
+  "Use tools when they are the most reliable way to answer. Be concise and report tool results.";
+
 export const modelSelection = (provider: string, model: string) =>
   ({
     id: "model",
     model: { id: `${provider}/${model}`, controls: { temperature: 0.1 } },
-    instructions: [
-      "Use tools when they are the most reliable way to answer. Be concise and report tool results.",
-    ],
   }) as const;
