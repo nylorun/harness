@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Agent } from "../src/index.js";
-import { model, turn } from "./fixtures.js";
+import { testAgent, model, turn } from "./fixtures.js";
 
 describe("lifecycle", () => {
   it("retains Session work until abort-ignoring model calls settle", async () => {
@@ -12,13 +11,15 @@ describe("lifecycle", () => {
     const modelGate = new Promise<void>((resolve) => {
       settleModel = resolve;
     });
-    const result = Agent(
-      model(async () => {
-        markStarted();
-        await modelGate;
-        return "late";
-      }),
-    ).build();
+    const result = testAgent()
+      .with(
+        model(async () => {
+          markStarted();
+          await modelGate;
+          return "late";
+        }),
+      )
+      .build();
 
     const { session, handle } = turn(result, "go");
     await modelStarted;
@@ -37,7 +38,7 @@ describe("lifecycle", () => {
   });
 
   it("lets middleware stop a Session with an application-owned turn policy", async () => {
-    const result = Agent(model(async () => "done"))
+    const result = testAgent()
       .use("max-one-turn", async (request, next) => {
         if (request.turnNumber > 1) {
           return request.tripwire({
@@ -48,6 +49,7 @@ describe("lifecycle", () => {
         }
         return next();
       })
+      .with(model(async () => "done"))
       .build();
     const { session, handle } = turn(result, "one");
     await handle.completed;
@@ -59,7 +61,7 @@ describe("lifecycle", () => {
   });
 
   it("keeps a Session usable after a step-scoped middleware tripwire", async () => {
-    const result = Agent(model(async () => "done"))
+    const result = testAgent()
       .use("step-tripwire", async (request, next) => {
         return request.tripwire({
           code: "policy.step",
@@ -67,6 +69,7 @@ describe("lifecycle", () => {
           scope: "step",
         });
       })
+      .with(model(async () => "done"))
       .build();
     const { session, handle: first } = turn(result, "one");
     await expect(first.completed).resolves.toMatchObject({

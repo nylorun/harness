@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Agent } from "../src/index.js";
-import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { testAgent, execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("interaction resume", () => {
   it("retains the plan and resumes an execution interaction with the same invocation", async () => {
@@ -19,11 +18,7 @@ describe("interaction resume", () => {
           };
     });
     let step = 0;
-    const result = Agent(
-      model(async () =>
-        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
-      ),
-    )
+    const result = testAgent()
       .use("policy", async (request, next) => {
         positions.push({
           turnNumber: request.turnNumber,
@@ -32,6 +27,11 @@ describe("interaction resume", () => {
         return next();
       })
       .use("test", offer(tool("echo", execution(execute))))
+      .with(
+        model(async () =>
+          ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
+        ),
+      )
       .build();
     const { session, handle: streamed } = turn(result, "go");
     const first = await streamed.completed;
@@ -55,7 +55,7 @@ describe("interaction resume", () => {
 
   it("rejects stale correlation without exposing it to the Model", async () => {
     const invoke = vi.fn(async () => "done");
-    const result = Agent(model(invoke)).build();
+    const result = testAgent().with(model(invoke)).build();
     const completion = await turn(result, {
       kind: "approve",
       interactionId: "stale",
@@ -67,22 +67,23 @@ describe("interaction resume", () => {
 
   it("pairs every unresolved call when cancelling an interaction wait, then preserves FIFO", async () => {
     let modelStep = 0;
-    const result = Agent(
-      model(async () =>
-        ++modelStep === 1
-          ? toolCalls(
-              { id: "first-call", name: "first", args: {} },
-              { id: "second-call", name: "second", args: {} },
-            )
-          : "after-cancel",
-      ),
-    )
+    const result = testAgent()
       .use("approval", async (_request, next) => {
         const response = await next();
         response.requireInteraction("first-call", { kind: "approval", prompt: "approve" });
         return response;
       })
       .use("test", offer(tool("first"), tool("second")))
+      .with(
+        model(async () =>
+          ++modelStep === 1
+            ? toolCalls(
+                { id: "first-call", name: "first", args: {} },
+                { id: "second-call", name: "second", args: {} },
+              )
+            : "after-cancel",
+        ),
+      )
       .build();
     const firstController = new AbortController();
     const firstRemove = vi.spyOn(firstController.signal, "removeEventListener");
@@ -117,17 +118,18 @@ describe("interaction resume", () => {
       await new Promise((resolve) => setTimeout(resolve, 35));
       return { kind: "completed", output: "too late" };
     });
-    const result = Agent(
-      model(async () =>
-        ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
-      ),
-    )
+    const result = testAgent()
       .use("approval", async (_request, next) => {
         const response = await next();
         response.requireInteraction("call", { kind: "approval", prompt: "approve" });
         return response;
       })
       .use("test", offer(tool("echo", local)))
+      .with(
+        model(async () =>
+          ++modelStep === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
+        ),
+      )
       .build();
     const { session, handle: streamed } = turn(result, "go");
     const first = await streamed.completed;

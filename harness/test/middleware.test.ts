@@ -1,16 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { Agent } from "../src/index.js";
-import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { testAgent, execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("middleware", () => {
   it("runs as an outward-to-inward request onion and inward-to-outward response onion", async () => {
     const order: string[] = [];
-    const result = Agent(
-      model(async (_call, { request }) => {
-        order.push(`model:${request.instructions.at(-1)}`);
-        return "done";
-      }),
-    )
+    const result = testAgent()
       .use("one", async (request, next) => {
         order.push("enter-one");
         request.configuration.instructions.set("extra", ["extra"]);
@@ -24,6 +18,12 @@ describe("middleware", () => {
         order.push("exit-two");
         return response;
       })
+      .with(
+        model(async (_call, { request }) => {
+          order.push(`model:${request.instructions.at(-1)}`);
+          return "done";
+        }),
+      )
       .build();
     await turn(result, "go").handle.completed;
     expect(order).toEqual(["enter-one", "enter-two", "model:extra", "exit-two", "exit-one"]);
@@ -32,16 +32,17 @@ describe("middleware", () => {
   it("exposes the same Session identity to middleware across a tool loop", async () => {
     const sessionIds: string[] = [];
     let calls = 0;
-    const result = Agent(
-      model(async () =>
-        ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
-      ),
-    )
+    const result = testAgent()
       .use("durability", async (request, next) => {
         sessionIds.push(request.sessionId);
         return next();
       })
       .use("tools", offer(tool()))
+      .with(
+        model(async () =>
+          ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
+        ),
+      )
       .build();
 
     await turn(result, "go", { id: "durable-session" }).handle.completed;
@@ -50,7 +51,7 @@ describe("middleware", () => {
   });
 
   it("tripwires conflicting model selection", async () => {
-    const result = Agent(model(async () => "done"))
+    const result = testAgent()
       .use("a", async (request, next) => {
         request.configuration.model.select({ id: "haiku" });
         return next();
@@ -59,6 +60,7 @@ describe("middleware", () => {
         request.configuration.model.select({ id: "opus" });
         return next();
       })
+      .with(model(async () => "done"))
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
@@ -71,16 +73,7 @@ describe("middleware", () => {
     const execute = vi.fn(async () => ({ kind: "completed" as const, output: "unexpected" }));
     const facadeChecks: boolean[] = [];
     let step = 0;
-    const result = Agent(
-      model(async (_call, { request }) => {
-        if (++step > 1) return "done";
-        expect(request.tools.map((item) => item.name)).toEqual(["echo"]);
-        return toolCalls(
-          { id: "hidden", name: "hidden", args: {} },
-          { id: "deny", name: "echo", args: {} },
-        );
-      }),
-    )
+    const result = testAgent()
       .use("attacker", async (request, next) => {
         const raw = request as unknown as Record<string, unknown>;
         facadeChecks.push(Object.isFrozen(request), raw.hiddenTools === undefined);
@@ -105,6 +98,16 @@ describe("middleware", () => {
         response.requireInteraction("deny", { kind: "approval", prompt: "approve" });
         return response;
       })
+      .with(
+        model(async (_call, { request }) => {
+          if (++step > 1) return "done";
+          expect(request.tools.map((item) => item.name)).toEqual(["echo"]);
+          return toolCalls(
+            { id: "hidden", name: "hidden", args: {} },
+            { id: "deny", name: "echo", args: {} },
+          );
+        }),
+      )
       .build();
 
     const { session, handle: streamed } = turn(result, "go");
@@ -124,18 +127,20 @@ describe("middleware", () => {
 
   it("rejects missing, double, and forged middleware responses", async () => {
     const invoke = vi.fn(async () => "done");
-    const omitted = Agent(model(invoke))
+    const omitted = testAgent()
       .use("omitted", async () => undefined as never)
+      .with(model(invoke))
       .build();
     expect((await turn(omitted, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "middleware.invalid-response" } },
     ]);
 
-    const omittedNextReturn = Agent(model(invoke))
+    const omittedNextReturn = testAgent()
       .use("omitted-next-return", async (_request, next) => {
         await next();
       })
+      .with(model(invoke))
       .build();
     const omittedNextReturnTurn = turn(omittedNextReturn, "go");
     expect((await omittedNextReturnTurn.handle.completed).events).toMatchObject([
@@ -148,11 +153,12 @@ describe("middleware", () => {
     ]);
     expect(omittedNextReturnTurn.session.state.status).toBe("idle");
 
-    const doubled = Agent(model(invoke))
+    const doubled = testAgent()
       .use("double", async (_request, next) => {
         void next();
         return next();
       })
+      .with(model(invoke))
       .build();
     await expect(turn(doubled, "go").handle.completed).resolves.toMatchObject({
       events: [
@@ -163,10 +169,11 @@ describe("middleware", () => {
     });
     expect(doubled.run().state.status).toBe("idle");
 
-    const spoofed = Agent(model(invoke))
+    const spoofed = testAgent()
       .use("spoof", async () => {
         throw new Error("Middleware 'spoof' called next() more than once");
       })
+      .with(model(invoke))
       .build();
     const spoofedTurn = turn(spoofed, "go");
     expect((await spoofedTurn.handle.completed).events).toMatchObject([
@@ -178,17 +185,7 @@ describe("middleware", () => {
 
   it("copies context contributions before their source can mutate", async () => {
     const source = { type: "fixture", value: { nested: { value: 1 } } };
-    const result = Agent(
-      model(async (_call, { request }) => {
-        expect(request.context.items).toEqual([
-          { type: "fixture", value: { nested: { value: 1 } } },
-        ]);
-        expect(
-          Object.isFrozen((request.context.items[0]?.value as { nested: object }).nested),
-        ).toBe(true);
-        return "done";
-      }),
-    )
+    const result = testAgent()
       .use("context", async (request, next) => {
         request.context.set("fixture", [source]);
         queueMicrotask(() => {
@@ -196,6 +193,17 @@ describe("middleware", () => {
         });
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          expect(request.context.items).toEqual([
+            { type: "fixture", value: { nested: { value: 1 } } },
+          ]);
+          expect(
+            Object.isFrozen((request.context.items[0]?.value as { nested: object }).nested),
+          ).toBe(true);
+          return "done";
+        }),
+      )
       .build();
     await turn(result, "go").handle.completed;
   });
@@ -203,13 +211,14 @@ describe("middleware", () => {
   it("offers tools only for the Step that added them", async () => {
     let step = 0;
     const seen: string[][] = [];
-    const result = Agent(
-      model(async (_call, { request }) => {
-        seen.push(request.tools.map((item) => item.name));
-        return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
-      }),
-    )
+    const result = testAgent()
       .use("test", offer(tool()))
+      .with(
+        model(async (_call, { request }) => {
+          seen.push(request.tools.map((item) => item.name));
+          return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
+        }),
+      )
       .build();
     await turn(result, "go").handle.completed;
     expect(seen).toEqual([["echo"], ["echo"]]);
@@ -217,12 +226,7 @@ describe("middleware", () => {
 
   it("forwards a selected model directive and omits it when nobody selects", async () => {
     const seen: unknown[] = [];
-    const selected = Agent(
-      model(async (_call, { request }) => {
-        seen.push(request.model);
-        return "done";
-      }),
-    )
+    const selected = testAgent()
       .use("route", async (request, next) => {
         request.configuration.model.select({
           id: "test-model",
@@ -231,6 +235,12 @@ describe("middleware", () => {
         });
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          seen.push(request.model);
+          return "done";
+        }),
+      )
       .build();
     await turn(selected, "go").handle.completed;
     expect(seen).toEqual([
@@ -242,24 +252,21 @@ describe("middleware", () => {
     ]);
 
     seen.length = 0;
-    const omitted = Agent(
-      model(async (_call, { request }) => {
-        seen.push(request.model);
-        return "done";
-      }),
-    ).build();
+    const omitted = testAgent()
+      .with(
+        model(async (_call, { request }) => {
+          seen.push(request.model);
+          return "done";
+        }),
+      )
+      .build();
     await turn(omitted, "go").handle.completed;
     expect(seen).toEqual([undefined]);
   });
 
   it("treats select({}) as an explicit empty directive and allows an identical select", async () => {
     const seen: unknown[] = [];
-    const result = Agent(
-      model(async (_call, { request }) => {
-        seen.push(request.model);
-        return "done";
-      }),
-    )
+    const result = testAgent()
       .use("outer", async (request, next) => {
         request.configuration.model.select({ id: undefined });
         return next();
@@ -268,13 +275,19 @@ describe("middleware", () => {
         request.configuration.model.select({});
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          seen.push(request.model);
+          return "done";
+        }),
+      )
       .build();
     await turn(result, "go").handle.completed;
     expect(seen).toEqual([{}]);
   });
 
   it("tripwires a partial-merge select and invalid directives", async () => {
-    const merge = Agent(model(async () => "done"))
+    const merge = testAgent()
       .use("id", async (request, next) => {
         request.configuration.model.select({ id: "haiku" });
         return next();
@@ -283,39 +296,43 @@ describe("middleware", () => {
         request.configuration.model.select({ config: { reasoning: "high" } });
         return next();
       })
+      .with(model(async () => "done"))
       .build();
     expect((await turn(merge, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "configuration.model-selection-conflict" } },
     ]);
 
-    const unknownKey = Agent(model(async () => "done"))
+    const unknownKey = testAgent()
       .use("bad", async (request, next) => {
         request.configuration.model.select({ id: "haiku", extra: true } as never);
         return next();
       })
+      .with(model(async () => "done"))
       .build();
     expect((await turn(unknownKey, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.invalid-directive" } },
     ]);
 
-    const emptyId = Agent(model(async () => "done"))
+    const emptyId = testAgent()
       .use("empty", async (request, next) => {
         request.configuration.model.select({ id: "" });
         return next();
       })
+      .with(model(async () => "done"))
       .build();
     expect((await turn(emptyId, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "model.invalid-directive" } },
     ]);
 
-    const unknownControl = Agent(model(async () => "done"))
+    const unknownControl = testAgent()
       .use("bad-control", async (request, next) => {
         request.configuration.model.select({ controls: { topP: 0.5 } } as never);
         return next();
       })
+      .with(model(async () => "done"))
       .build();
     expect((await turn(unknownControl, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
@@ -325,35 +342,28 @@ describe("middleware", () => {
 
   it("deep-copies and freezes directive config so source mutation cannot leak in", async () => {
     const source = { reasoning: "low", nested: { n: 1 } };
-    const result = Agent(
-      model(async (_call, { request }) => {
-        expect(request.model?.config).toEqual({ reasoning: "low", nested: { n: 1 } });
-        expect(Object.isFrozen(request.model?.config)).toBe(true);
-        expect(Object.isFrozen((request.model?.config as { nested: object }).nested)).toBe(true);
-        return "done";
-      }),
-    )
+    const result = testAgent()
       .use("route", async (request, next) => {
         request.configuration.model.select({ id: "test-model", config: source });
         source.nested.n = 9;
         source.reasoning = "high";
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          expect(request.model?.config).toEqual({ reasoning: "low", nested: { n: 1 } });
+          expect(Object.isFrozen(request.model?.config)).toBe(true);
+          expect(Object.isFrozen((request.model?.config as { nested: object }).nested)).toBe(true);
+          return "done";
+        }),
+      )
       .build();
     await turn(result, "go").handle.completed;
   });
 
   it("exposes a frozen pre-call transcript and starts the next Step without a prior directive", async () => {
     const seen: Array<{ model?: unknown; transcriptKinds: string[] }> = [];
-    const result = Agent(
-      model(async (_call, { request }) => {
-        seen.push({
-          model: request.model,
-          transcriptKinds: request.transcript.map((entry) => entry.kind),
-        });
-        return seen.length === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
-      }),
-    )
+    const result = testAgent()
       .use("route", async (request, next) => {
         expect(Object.isFrozen(request.transcript)).toBe(true);
         expect(() => {
@@ -364,6 +374,15 @@ describe("middleware", () => {
         return next();
       })
       .use("test", offer(tool()))
+      .with(
+        model(async (_call, { request }) => {
+          seen.push({
+            model: request.model,
+            transcriptKinds: request.transcript.map((entry) => entry.kind),
+          });
+          return seen.length === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
+        }),
+      )
       .build();
     await turn(result, "go").handle.completed;
     expect(seen).toEqual([
@@ -375,7 +394,7 @@ describe("middleware", () => {
   it("revokes model.select after next() without stopping a settled Session", async () => {
     const observed: string[] = [];
     let lateError = "";
-    const result = Agent(model(async () => "done"))
+    const result = testAgent()
       .use("late", async (request, next) => {
         const response = await next();
         try {
@@ -385,6 +404,7 @@ describe("middleware", () => {
         }
         return response;
       })
+      .with(model(async () => "done"))
       .build();
     const session = result.run();
     session.observe((event) => observed.push(event.type));
@@ -398,13 +418,14 @@ describe("middleware", () => {
   it("declares a model through middleware on every Step", async () => {
     const seen: unknown[] = [];
     const configurations: unknown[] = [];
-    const agent = Agent(
-      model(async (_call, { request }) => {
-        seen.push(request.model);
-        return "done";
-      }),
-    )
+    const agent = testAgent()
       .use({ id: "model", model: { id: "opus", controls: { temperature: 0.2 } } })
+      .with(
+        model(async (_call, { request }) => {
+          seen.push(request.model);
+          return "done";
+        }),
+      )
       .build();
     const session = agent.run();
     session.observe((event) => {
@@ -423,7 +444,7 @@ describe("middleware", () => {
 
   it("exposes stable session and unique turn/step identities on the middleware lease", async () => {
     const seen: Array<{ sessionId: string; turnId: string; stepId: string }> = [];
-    const session = Agent(model(async () => "done"))
+    const session = testAgent()
       .use("identity", async (request, next) => {
         seen.push({
           sessionId: request.sessionId,
@@ -432,6 +453,7 @@ describe("middleware", () => {
         });
         return next();
       })
+      .with(model(async () => "done"))
       .build()
       .run({ id: "session-identity" });
     await session.input("first").completed;
@@ -445,47 +467,50 @@ describe("middleware", () => {
 
   it("lets middleware replace or clear a declared directive and rejects a conflicting select", async () => {
     const replaced: unknown[] = [];
-    const replaceAgent = Agent(
-      model(async (_call, { request }) => {
-        replaced.push(request.model);
-        return "done";
-      }),
-    )
+    const replaceAgent = testAgent()
       .use({ id: "model", model: { id: "opus" } })
       .use("route", async (request, next) => {
         request.configuration.model.select({ id: "opus" });
         request.configuration.model.replace({ id: "haiku" });
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          replaced.push(request.model);
+          return "done";
+        }),
+      )
       .build();
     await turn(replaceAgent, "go").handle.completed;
     expect(replaced).toEqual([{ id: "haiku" }]);
 
     const cleared: unknown[] = [];
-    const clearAgent = Agent(
-      model(async (_call, { request }) => {
-        cleared.push(request.model);
-        return request.toolResults.length === 0
-          ? toolCalls({ id: "call", name: "echo", args: {} })
-          : "done";
-      }),
-    )
+    const clearAgent = testAgent()
       .use({ id: "model", model: { id: "opus" } })
       .use("route", async (request, next) => {
         if (request.stepNumber === 2) request.configuration.model.clear();
         return next();
       })
       .use("tools", offer(tool()))
+      .with(
+        model(async (_call, { request }) => {
+          cleared.push(request.model);
+          return request.toolResults.length === 0
+            ? toolCalls({ id: "call", name: "echo", args: {} })
+            : "done";
+        }),
+      )
       .build();
     await turn(clearAgent, "go").handle.completed;
     expect(cleared).toEqual([{ id: "opus" }, undefined]);
 
-    const conflict = Agent(model(async () => "done"))
+    const conflict = testAgent()
       .use({ id: "model", model: { id: "opus" } })
       .use("route", async (request, next) => {
         request.configuration.model.select({ id: "haiku" });
         return next();
       })
+      .with(model(async () => "done"))
       .build();
     expect((await turn(conflict, "go").handle.completed).events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },

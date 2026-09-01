@@ -10,6 +10,24 @@ import { HarnessError } from "../errors.js";
 import type { BuiltAgent } from "./agent.js";
 import { assembleAgent } from "./assemble.js";
 
+export interface AgentOptions {
+  readonly id: string;
+  readonly name: string;
+  readonly instructions?: string | readonly string[];
+}
+
+interface BuilderState {
+  readonly id: string;
+  readonly name: string;
+  readonly middleware: BoundMiddleware[];
+  invoke?: ModelAdapter;
+  bound: boolean;
+  sealed: boolean;
+  agent?: BuiltAgent;
+  error?: AgentBuildError;
+  middlewareSeq: number;
+}
+
 export class AgentBuildError extends HarnessError {
   constructor(readonly diagnostics: readonly BuildDiagnostic[]) {
     super(
@@ -27,18 +45,12 @@ export class AgentLifecycleError extends HarnessError {
   }
 }
 
-export function Agent(model: ModelAdapter): AgentBuilder {
-  return new AgentBuilder(model);
+export function Agent(options: AgentOptions): AgentBuilder {
+  return new AgentBuilder(createState(options));
 }
 
 export class AgentBuilder {
-  private readonly middleware: BoundMiddleware[] = [];
-  private sealed = false;
-  private agent?: BuiltAgent;
-  private error?: AgentBuildError;
-  private middlewareSeq = 0;
-
-  constructor(private readonly invoke: ModelAdapter) {}
+  constructor(private readonly state: BuilderState) {}
 
   use(middleware: StepMiddleware): this;
   use(id: string, middleware: StepMiddleware): this;
@@ -54,34 +66,72 @@ export class AgentBuilder {
     return this.push({ id: idOrMiddleware, handle: middleware! });
   }
 
-  build(): BuiltAgent {
-    if (this.agent) return this.agent;
-    if (this.error) throw this.error;
-    this.sealed = true;
-    const result = assembleAgent(this.middleware, this.invoke);
-    if (!result.ok) {
-      this.error = new AgentBuildError(result.diagnostics);
-      throw this.error;
-    }
-    this.agent = result.agent;
-    return this.agent;
+  with(onModelCall: ModelAdapter): BoundAgentBuilder {
+    this.assertOpen("with()");
+    this.state.bound = true;
+    this.state.invoke = onModelCall;
+    return new BoundAgentBuilder(this.state);
   }
 
   private nextMiddlewareId(): string {
-    const taken = new Set(this.middleware.map((item) => item.id));
+    const taken = new Set(this.state.middleware.map((item) => item.id));
     let id: string;
     do {
-      this.middlewareSeq += 1;
-      id = `middleware-${this.middlewareSeq}`;
+      this.state.middlewareSeq += 1;
+      id = `middleware-${this.state.middlewareSeq}`;
     } while (taken.has(id));
     return id;
   }
 
   private push(entry: BoundMiddleware): this {
-    if (this.sealed) throw new AgentLifecycleError("AgentBuilder cannot be changed after build()");
-    this.middleware.push(entry);
+    this.assertOpen("build()");
+    this.state.middleware.push(entry);
     return this;
   }
+
+  private assertOpen(after: "with()" | "build()"): void {
+    if (this.state.bound)
+      throw new AgentLifecycleError("AgentBuilder cannot be changed after with()");
+    if (this.state.sealed)
+      throw new AgentLifecycleError(`AgentBuilder cannot be changed after ${after}`);
+  }
+}
+
+export class BoundAgentBuilder {
+  constructor(private readonly state: BuilderState) {}
+
+  build(): BuiltAgent {
+    if (this.state.agent) return this.state.agent;
+    if (this.state.error) throw this.state.error;
+    this.state.sealed = true;
+    const result = assembleAgent(this.state.middleware, this.state.invoke as ModelAdapter, {
+      id: this.state.id,
+      name: this.state.name,
+    });
+    if (!result.ok) {
+      this.state.error = new AgentBuildError(result.diagnostics);
+      throw this.state.error;
+    }
+    this.state.agent = result.agent;
+    return this.state.agent;
+  }
+}
+
+function createState(options: AgentOptions): BuilderState {
+  const middleware: BoundMiddleware[] = [];
+  if (options.instructions !== undefined) {
+    const instructions =
+      typeof options.instructions === "string" ? [options.instructions] : options.instructions;
+    middleware.push(compileDeclaration({ id: "agent", instructions }));
+  }
+  return {
+    id: options.id,
+    name: options.name,
+    middleware,
+    bound: false,
+    sealed: false,
+    middlewareSeq: 0,
+  };
 }
 
 function compileDeclaration<State>(declaration: CapabilityDeclaration<State>): BoundMiddleware {

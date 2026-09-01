@@ -1,18 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { Agent, tool as authoredTool } from "../src/index.js";
-import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { tool as authoredTool } from "../src/index.js";
+import { testAgent, execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 import { z } from "zod";
 
 describe("step pipeline", () => {
   it("short-circuits with zero Model calls", async () => {
     const invoke = vi.fn(async () => "done");
-    const result = Agent(model(invoke))
+    const result = testAgent()
       .use("turn-budget", async (request, next) => {
         if (request.turnNumber > 0) {
           return request.tripwire({ code: "turn.limit", message: "Limit reached" });
         }
         return next();
       })
+      .with(model(invoke))
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
@@ -25,16 +26,17 @@ describe("step pipeline", () => {
   it("does not retain a named tool slot on the next Step", async () => {
     let step = 0;
     const seen: string[][] = [];
-    const result = Agent(
-      model(async (_call, { request }) => {
-        seen.push(request.tools.map((item) => item.name));
-        return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
-      }),
-    )
+    const result = testAgent()
       .use("once", async (request, next) => {
         if (request.stepNumber === 1) request.configuration.tools.set("once", [tool()]);
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          seen.push(request.tools.map((item) => item.name));
+          return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
+        }),
+      )
       .build();
     await turn(result, "go").handle.completed;
     expect(seen).toEqual([["echo"], []]);
@@ -42,11 +44,12 @@ describe("step pipeline", () => {
 
   it("tripwires duplicate dynamic tools before the Model runs", async () => {
     const invoke = vi.fn(async () => "done");
-    const result = Agent(model(invoke))
+    const result = testAgent()
       .use("dup", async (request, next) => {
         request.configuration.tools.set("dup", [tool("echo"), tool("echo")]);
         return next();
       })
+      .with(model(invoke))
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
@@ -59,15 +62,7 @@ describe("step pipeline", () => {
   it("keeps canonical IDs and monotonic denials across replace", async () => {
     const execute = vi.fn(async () => ({ kind: "completed" as const, output: "nope" }));
     let step = 0;
-    const result = Agent(
-      model(async () => {
-        if (++step > 1) return "done";
-        return toolCalls(
-          { id: "keep", name: "echo", args: { n: 1 } },
-          { id: "drop", name: "echo", args: { n: 2 } },
-        );
-      }),
-    )
+    const result = testAgent()
       .use("outer", async (_request, next) => {
         const response = await next();
         response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 1 } }));
@@ -80,6 +75,15 @@ describe("step pipeline", () => {
         response.deny("keep", "blocked");
         return response;
       })
+      .with(
+        model(async () => {
+          if (++step > 1) return "done";
+          return toolCalls(
+            { id: "keep", name: "echo", args: { n: 1 } },
+            { id: "drop", name: "echo", args: { n: 2 } },
+          );
+        }),
+      )
       .build();
     const { session, handle } = turn(result, "go");
     await handle.completed;
@@ -95,17 +99,18 @@ describe("step pipeline", () => {
 
   it("tripwires replace that changes a retained call identity", async () => {
     let step = 0;
-    const result = Agent(
-      model(async () =>
-        ++step === 1 ? toolCalls({ id: "keep", name: "echo", args: { n: 1 } }) : "done",
-      ),
-    )
+    const result = testAgent()
       .use("rewrite", async (request, next) => {
         request.configuration.tools.set("rewrite", [tool()]);
         const response = await next();
         response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 99 } }));
         return response;
       })
+      .with(
+        model(async () =>
+          ++step === 1 ? toolCalls({ id: "keep", name: "echo", args: { n: 1 } }) : "done",
+        ),
+      )
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
@@ -118,7 +123,7 @@ describe("step pipeline", () => {
   it("throws on late lease mutation without stopping a settled Session", async () => {
     const observed: string[] = [];
     let lateError = "";
-    const result = Agent(model(async () => "done"))
+    const result = testAgent()
       .use("late", async (request, next) => {
         setTimeout(() => {
           try {
@@ -129,6 +134,7 @@ describe("step pipeline", () => {
         }, 0);
         return next();
       })
+      .with(model(async () => "done"))
       .build();
     const session = result.run();
     session.observe((event) => observed.push(event.type));
@@ -150,17 +156,18 @@ describe("step pipeline", () => {
       },
     });
     const schemas: unknown[] = [];
-    const result = Agent(
-      model(async (_call, { request }) => {
-        schemas.push(request.tools[0]?.parameters.jsonSchema);
-        return "done";
-      }),
-    )
+    const result = testAgent()
       .use("snapshot", async (request, next) => {
         request.configuration.tools.set("snapshot", [definition]);
         (definition as { parameters: unknown }).parameters = z.object({ admin: z.string() });
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          schemas.push(request.tools[0]?.parameters.jsonSchema);
+          return "done";
+        }),
+      )
       .build();
     await turn(result, "go").handle.completed;
     expect(schemas).toMatchObject([{ type: "object", properties: { text: { type: "string" } } }]);
@@ -169,12 +176,13 @@ describe("step pipeline", () => {
   it("emits step.started before middleware and model.requested, and tool.sealed after the onion", async () => {
     const types: string[] = [];
     let step = 0;
-    const result = Agent(
-      model(async () =>
-        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
-      ),
-    )
+    const result = testAgent()
       .use("test", offer(tool()))
+      .with(
+        model(async () =>
+          ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
+        ),
+      )
       .build();
     const session = result.run();
     session.observe((event) => types.push(event.type));
@@ -187,7 +195,7 @@ describe("step pipeline", () => {
   });
 
   it("keeps a sibling Session running after a session-scoped tripwire", async () => {
-    const agent = Agent(model(async () => "ok"))
+    const agent = testAgent()
       .use("boom", async (request, next) => {
         if (request.session.userId === "a") {
           return request.tripwire({
@@ -198,6 +206,7 @@ describe("step pipeline", () => {
         }
         return next();
       })
+      .with(model(async () => "ok"))
       .build();
     const a = turn(agent, "go", { userId: "a" });
     const b = turn(agent, "go", { userId: "b" });
@@ -225,12 +234,14 @@ describe("step pipeline", () => {
       return next();
     };
     const seen: string[][] = [];
-    const builder = Agent(
-      model(async (_call, { request }) => {
-        seen.push(request.tools.map((item) => item.name));
-        return "done";
-      }),
-    ).use("nylorun-folder", folder(false));
+    const builder = testAgent()
+      .use("nylorun-folder", folder(false))
+      .with(
+        model(async (_call, { request }) => {
+          seen.push(request.tools.map((item) => item.name));
+          return "done";
+        }),
+      );
     await turn(builder.build(), "go").handle.completed;
     expect(seen).toEqual([[]]);
     expect(builder.build().manifest.middleware.map((item) => item.id)).toEqual(["nylorun-folder"]);

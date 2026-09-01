@@ -2,6 +2,8 @@ import type { BoundMiddleware } from "./middleware.js";
 import type { BuildDiagnostic } from "./shared.js";
 
 export interface AgentManifest {
+  readonly id: string;
+  readonly name: string;
   readonly middleware: readonly { readonly id: string }[];
 }
 

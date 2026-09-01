@@ -4,6 +4,23 @@ All notable changes to `@nylorun/harness` are documented in this file.
 
 The project follows [Semantic Versioning](https://semver.org/). Before 1.0, the public API is experimental: breaking changes may occur in minor releases, while patch releases are reserved for compatible fixes.
 
+## [0.8.0-beta.1] - 2026-08-31
+
+### Breaking changes
+
+- `Agent()` now takes identity options instead of a model adapter. Migrate
+  `Agent(adapter).use(...).build()` to
+  `Agent({ id, name, instructions }).use(...).with(adapter).build()`.
+- `.build()` exists only on `BoundAgentBuilder`, the type returned by a single `.with(onModelCall)`.
+  `AgentBuilder` has `.use()` and `.with()` only.
+- `AgentManifest` now includes `id` and `name`. Built agents expose the same fields as `agent.id`
+  and `agent.name`.
+
+### Added
+
+- Optional constructor `instructions` compile as reserved `agent` middleware. A string is
+  normalized to one instruction. Capability-specific instructions still go through `.use()`.
+
 ## [0.7.0-beta.1] - 2026-08-30
 
 ### Breaking changes
@@ -75,3 +92,4 @@ The project follows [Semantic Versioning](https://semver.org/). Before 1.0, the 
 [0.5.0-beta.1]: https://github.com/nylorun/harness/tree/main/harness
 [0.6.0-beta.1]: https://github.com/nylorun/harness/tree/main/harness
 [0.7.0-beta.1]: https://github.com/nylorun/harness/tree/main/harness
+[0.8.0-beta.1]: https://github.com/nylorun/harness/tree/main/harness

@@ -1,17 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { Agent, HarnessError, type SessionRecord } from "../src/index.js";
-import { model, offer, tool, toolCalls } from "./fixtures.js";
+import { HarnessError, type SessionRecord } from "../src/index.js";
+import { testAgent, model, offer, tool, toolCalls } from "./fixtures.js";
 
 describe("structural seeds and recording", () => {
   it("accepts incomplete, unrelated, duplicated, and out-of-order typed tool history", async () => {
     const seen: unknown[] = [];
     const observed: string[] = [];
-    const agent = Agent(
-      model(async (call) => {
-        seen.push(call.prompt);
-        return "continued";
-      }),
-    ).build();
+    const agent = testAgent()
+      .with(
+        model(async (call) => {
+          seen.push(call.prompt);
+          return "continued";
+        }),
+      )
+      .build();
     const transcript = [
       {
         kind: "candidate" as const,
@@ -55,7 +57,9 @@ describe("structural seeds and recording", () => {
         event: { kind: "user-message" as const, text: "before" },
       },
     ];
-    const agent = Agent(model(async () => "done")).build();
+    const agent = testAgent()
+      .with(model(async () => "done"))
+      .build();
     const session = agent.run({ seed: { transcript } });
     transcript[0]!.event.text = "after";
     expect(session.state.transcript[0]).toMatchObject({ event: { text: "before" } });
@@ -90,12 +94,7 @@ describe("structural seeds and recording", () => {
     const records: SessionRecord[] = [];
     const order: string[] = [];
     let step = 0;
-    const agent = Agent(
-      model(async () => {
-        order.push("model");
-        return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
-      }),
-    )
+    const agent = testAgent()
       .use(
         "tools",
         offer(
@@ -104,6 +103,12 @@ describe("structural seeds and recording", () => {
             return { kind: "completed", output: "ok" };
           }),
         ),
+      )
+      .with(
+        model(async () => {
+          order.push("model");
+          return ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
+        }),
       )
       .build();
     const session = agent.run({
@@ -138,7 +143,8 @@ describe("structural seeds and recording", () => {
 
   it("continues recording from a seed revision", async () => {
     const records: SessionRecord[] = [];
-    const session = Agent(model(async () => "done"))
+    const session = testAgent()
+      .with(model(async () => "done"))
       .build()
       .run({
         seed: { id: "session", revision: 7, transcript: [] },
@@ -155,19 +161,20 @@ describe("structural seeds and recording", () => {
 
   it("leaves provider-history rejection to the model adapter before network invocation", async () => {
     const network = vi.fn(async () => "unexpected");
-    const session = Agent(
-      model(async (call) => {
-        const calls = call.prompt.flatMap((item) =>
-          item.kind === "message" && item.role === "assistant"
-            ? item.content.filter((part) => part.type === "tool-call")
-            : [],
-        );
-        const results = call.prompt.filter((item) => item.kind === "tool-result");
-        if (calls.length !== results.length)
-          throw new Error("Provider projection rejected transcript entry 0");
-        return network();
-      }),
-    )
+    const session = testAgent()
+      .with(
+        model(async (call) => {
+          const calls = call.prompt.flatMap((item) =>
+            item.kind === "message" && item.role === "assistant"
+              ? item.content.filter((part) => part.type === "tool-call")
+              : [],
+          );
+          const results = call.prompt.filter((item) => item.kind === "tool-result");
+          if (calls.length !== results.length)
+            throw new Error("Provider projection rejected transcript entry 0");
+          return network();
+        }),
+      )
       .build()
       .run({
         seed: {
@@ -200,7 +207,8 @@ describe("structural seeds and recording", () => {
   it("fences model execution when recording fails", async () => {
     const invoke = vi.fn(async () => "done");
     const failure = new Error("database unavailable");
-    const session = Agent(model(invoke))
+    const session = testAgent()
+      .with(model(invoke))
       .build()
       .run({
         recorder: {
@@ -220,8 +228,9 @@ describe("structural seeds and recording", () => {
   it("preserves the last good revision and prevents tools and queued work after failure", async () => {
     const execute = vi.fn(async () => ({ kind: "completed" as const, output: "no" }));
     const failure = new Error("candidate write failed");
-    const session = Agent(model(async () => toolCalls({ id: "call", name: "echo", args: {} })))
+    const session = testAgent()
       .use("tools", offer(tool("echo", execute)))
+      .with(model(async () => toolCalls({ id: "call", name: "echo", args: {} })))
       .build()
       .run({
         recorder: {
@@ -246,14 +255,15 @@ describe("structural seeds and recording", () => {
   it("records deferred tool handoff without committing partial results", async () => {
     const records: SessionRecord[] = [];
     let step = 0;
-    const session = Agent(
-      model(async () =>
-        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "unexpected",
-      ),
-    )
+    const session = testAgent()
       .use(
         "tools",
         offer(tool("echo", async () => ({ kind: "deferred", token: { jobId: "job" } }))),
+      )
+      .with(
+        model(async () =>
+          ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "unexpected",
+        ),
       )
       .build()
       .run({
@@ -287,12 +297,13 @@ describe("structural seeds and recording", () => {
     const records: SessionRecord[] = [];
     const observed: string[] = [];
     let invocationId: string | undefined;
-    const session = Agent(
-      model(async (_call, context) => {
-        invocationId = context.invocationId;
-        return { kind: "deferred", token: { requestId: "request" } };
-      }),
-    )
+    const session = testAgent()
+      .with(
+        model(async (_call, context) => {
+          invocationId = context.invocationId;
+          return { kind: "deferred", token: { requestId: "request" } };
+        }),
+      )
       .build()
       .run({
         recorder: {
@@ -313,7 +324,8 @@ describe("structural seeds and recording", () => {
 
   it("rejects explicit stop when its stopped record fails", async () => {
     const cause = new Error("write failed");
-    const session = Agent(model(async () => "done"))
+    const session = testAgent()
+      .with(model(async () => "done"))
       .build()
       .run({
         recorder: {

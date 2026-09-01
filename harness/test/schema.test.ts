@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
-import { Agent, tool } from "../src/index.js";
+import { tool } from "../src/index.js";
 import { normalizedSchemaFor } from "../src/build/schema.js";
-import { model, toolCalls, turn } from "./fixtures.js";
+import { testAgent, model, toolCalls, turn } from "./fixtures.js";
 
 describe("Zod schemas", () => {
   it("executes a tool with Zod's parsed object output", async () => {
@@ -16,18 +16,19 @@ describe("Zod schemas", () => {
         return { kind: "completed", output: args };
       },
     });
-    const result = Agent(
-      model(async () => {
-        call += 1;
-        return call === 1
-          ? toolCalls({ id: "convert", name: "convert", args: { count: "2" } })
-          : "done";
-      }),
-    )
+    const result = testAgent()
       .use("parsed", async (request, next) => {
         request.configuration.tools.set("parsed", [convert]);
         return next();
       })
+      .with(
+        model(async () => {
+          call += 1;
+          return call === 1
+            ? toolCalls({ id: "convert", name: "convert", args: { count: "2" } })
+            : "done";
+        }),
+      )
       .build();
 
     await turn(result, "go").handle.completed;
@@ -43,19 +44,20 @@ describe("Zod schemas", () => {
         return { kind: "completed", output: args };
       },
     });
-    const result = Agent(
-      model(async (_call, { request }) => {
-        expect(request.tools[0]?.parameters.jsonSchema).toMatchObject({
-          type: "object",
-          properties: { text: { type: "string" } },
-        });
-        return "done";
-      }),
-    )
+    const result = testAgent()
       .use("zod", async (request, next) => {
         request.configuration.tools.set("zod", [echo]);
         return next();
       })
+      .with(
+        model(async (_call, { request }) => {
+          expect(request.tools[0]?.parameters.jsonSchema).toMatchObject({
+            type: "object",
+            properties: { text: { type: "string" } },
+          });
+          return "done";
+        }),
+      )
       .build();
 
     await turn(result, "go").handle.completed;
@@ -77,18 +79,19 @@ describe("Zod schemas", () => {
       },
     };
     let calls = 0;
-    const result = Agent(
-      model(async () => {
-        calls += 1;
-        return calls === 1
-          ? toolCalls({ id: "prepared", name: "prepared", args: { value: "x" } })
-          : "done";
-      }),
-    )
+    const result = testAgent()
       .use("tools", async (request, next) => {
         request.configuration.tools.set("tools", [prepared, raw]);
         return next();
       })
+      .with(
+        model(async () => {
+          calls += 1;
+          return calls === 1
+            ? toolCalls({ id: "prepared", name: "prepared", args: { value: "x" } })
+            : "done";
+        }),
+      )
       .build();
 
     await turn(result, "go").handle.completed;
@@ -110,7 +113,7 @@ describe("Zod schemas", () => {
 
   it("tripwires an invalid raw tool literal when it is first bound", async () => {
     const invoke = vi.fn(async () => "done");
-    const result = Agent(model(invoke))
+    const result = testAgent()
       .use("bad", async (request, next) => {
         request.configuration.tools.set("bad", [
           {
@@ -123,6 +126,7 @@ describe("Zod schemas", () => {
         ]);
         return next();
       })
+      .with(model(invoke))
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
@@ -135,7 +139,7 @@ describe("Zod schemas", () => {
   it("tripwires declared asynchronous Zod checks before the Model runs", async () => {
     const invoke = vi.fn(async () => "done");
     const parameters = z.object({ text: z.string() }).refine(async () => true);
-    const result = Agent(model(invoke))
+    const result = testAgent()
       .use("async", async (request, next) => {
         request.configuration.tools.set("async", [
           tool({
@@ -148,6 +152,7 @@ describe("Zod schemas", () => {
         ]);
         return next();
       })
+      .with(model(invoke))
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
@@ -159,7 +164,7 @@ describe("Zod schemas", () => {
 
   it("tripwires a Zod object that cannot convert to JSON Schema before the Model runs", async () => {
     const invoke = vi.fn(async () => "done");
-    const result = Agent(model(invoke))
+    const result = testAgent()
       .use("unconvertible", async (request, next) => {
         request.configuration.tools.set("unconvertible", [
           tool({
@@ -172,6 +177,7 @@ describe("Zod schemas", () => {
         ]);
         return next();
       })
+      .with(model(invoke))
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
@@ -183,12 +189,7 @@ describe("Zod schemas", () => {
 
   it("seals invalid Zod arguments as tool.invalid-arguments", async () => {
     let call = 0;
-    const result = Agent(
-      model(async () => {
-        call += 1;
-        return call === 1 ? toolCalls({ id: "echo", name: "echo", args: { text: 1 } }) : "done";
-      }),
-    )
+    const result = testAgent()
       .use("typed", async (request, next) => {
         request.configuration.tools.set("typed", [
           tool({
@@ -201,6 +202,12 @@ describe("Zod schemas", () => {
         ]);
         return next();
       })
+      .with(
+        model(async () => {
+          call += 1;
+          return call === 1 ? toolCalls({ id: "echo", name: "echo", args: { text: 1 } }) : "done";
+        }),
+      )
       .build();
 
     const { session, handle } = turn(result, "go");

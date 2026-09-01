@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Agent } from "../src/index.js";
-import { model, offer, tool, toolCalls, turn } from "./fixtures.js";
+import { testAgent, model, offer, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("central tool concurrency", () => {
   it("starts sibling calls concurrently and commits their results in model order", async () => {
@@ -13,17 +12,18 @@ describe("central tool concurrency", () => {
       return { kind: "completed" as const, output: id };
     };
     let step = 0;
-    const agent = Agent(
-      model(async () =>
-        ++step === 1
-          ? toolCalls(
-              { id: "first", name: "echo", args: { id: "first" } },
-              { id: "second", name: "echo", args: { id: "second" } },
-            )
-          : "done",
-      ),
-    )
+    const agent = testAgent()
       .use("tools", offer(tool("echo", execute as never)))
+      .with(
+        model(async () =>
+          ++step === 1
+            ? toolCalls(
+                { id: "first", name: "echo", args: { id: "first" } },
+                { id: "second", name: "echo", args: { id: "second" } },
+              )
+            : "done",
+        ),
+      )
       .build();
 
     const running = turn(agent, "go");

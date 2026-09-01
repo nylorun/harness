@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { Agent, tool } from "../src/index.js";
-import { model, toolCalls } from "./fixtures.js";
+import { tool } from "../src/index.js";
+import { testAgent, model, toolCalls } from "./fixtures.js";
 
 const schema = z.object({});
 
@@ -9,12 +9,7 @@ describe("capability declarations", () => {
   it("contributes static surface and can route dynamically from its inline middleware", async () => {
     const seen: unknown[] = [];
     const contributors: Array<{ readonly middlewareId: string; readonly slot: string }> = [];
-    const agent = Agent(
-      model(async (call) => {
-        seen.push(call.model);
-        return "done";
-      }),
-    )
+    const agent = testAgent()
       .use({
         id: "routing",
         instructions: ["Use the declared route."],
@@ -23,6 +18,12 @@ describe("capability declarations", () => {
           return next();
         },
       })
+      .with(
+        model(async (call) => {
+          seen.push(call.model);
+          return "done";
+        }),
+      )
       .build();
 
     const session = agent.run();
@@ -61,16 +62,7 @@ describe("capability declarations", () => {
       },
     });
     let step = 0;
-    const agent = Agent(
-      model(async () =>
-        ++step === 1
-          ? toolCalls(
-              { id: "first", name: "increment", args: {} },
-              { id: "second", name: "increment", args: {} },
-            )
-          : "done",
-      ),
-    )
+    const agent = testAgent()
       .use({
         id: "counter",
         state: {
@@ -87,6 +79,16 @@ describe("capability declarations", () => {
           return next();
         },
       })
+      .with(
+        model(async () =>
+          ++step === 1
+            ? toolCalls(
+                { id: "first", name: "increment", args: {} },
+                { id: "second", name: "increment", args: {} },
+              )
+            : "done",
+        ),
+      )
       .build();
 
     const session = agent.run({ id: "counter-session" });
@@ -119,7 +121,7 @@ describe("capability declarations", () => {
 
   it("turns state creation failure into a Step tripwire without partial disposal", async () => {
     const dispose = vi.fn();
-    const agent = Agent(model(async () => "unreachable"))
+    const agent = testAgent()
       .use({
         id: "broken",
         state: {
@@ -133,6 +135,7 @@ describe("capability declarations", () => {
           return next();
         },
       })
+      .with(model(async () => "unreachable"))
       .build();
 
     const session = agent.run();
@@ -150,7 +153,7 @@ describe("capability declarations", () => {
     let started = false;
     let observedAbort = false;
     const dispose = vi.fn();
-    const agent = Agent(model(async () => "unreachable"))
+    const agent = testAgent()
       .use({
         id: "slow",
         state: {
@@ -169,6 +172,7 @@ describe("capability declarations", () => {
           return next();
         },
       })
+      .with(model(async () => "unreachable"))
       .build();
 
     const session = agent.run();
@@ -182,7 +186,7 @@ describe("capability declarations", () => {
 
   it("recreates state for a cold seed instead of restoring prior in-memory values", async () => {
     const created: string[] = [];
-    const agent = Agent(model(async () => "done"))
+    const agent = testAgent()
       .use({
         id: "cache",
         state: {
@@ -196,6 +200,7 @@ describe("capability declarations", () => {
           return next();
         },
       })
+      .with(model(async () => "done"))
       .build();
 
     const initial = agent.run({ id: "original" });
@@ -215,7 +220,7 @@ describe("capability declarations", () => {
       throw new Error("cleanup failed");
     });
     const observed: string[] = [];
-    const agent = Agent(model(async () => "unreachable"))
+    const agent = testAgent()
       .use({
         id: "recorded-state",
         state: { create: () => ({ opened: true }), dispose },
@@ -224,6 +229,7 @@ describe("capability declarations", () => {
           return next();
         },
       })
+      .with(model(async () => "unreachable"))
       .build();
 
     const session = agent.run({

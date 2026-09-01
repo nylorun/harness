@@ -1,23 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
-import { Agent } from "../src/index.js";
-import { execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
+import { testAgent, execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("sealing", () => {
   it("turns invalid calls into paired failures and dispatches only sealed calls", async () => {
     const execute = vi.fn(async (call) => ({ kind: "completed" as const, output: call.args }));
     let calls = 0;
-    const result = Agent(
-      model(async (_call, { request }) => {
-        calls += 1;
-        return calls === 1
-          ? toolCalls(
-              { id: "unknown", name: "missing", args: {} },
-              { id: "valid", name: "echo", args: { value: 1 } },
-            )
-          : `results:${request.toolResults.map((item) => item.kind).join(",")}`;
-      }),
-    )
+    const result = testAgent()
       .use("test", offer(tool("echo", execution(execute))))
+      .with(
+        model(async (_call, { request }) => {
+          calls += 1;
+          return calls === 1
+            ? toolCalls(
+                { id: "unknown", name: "missing", args: {} },
+                { id: "valid", name: "echo", args: { value: 1 } },
+              )
+            : `results:${request.toolResults.map((item) => item.kind).join(",")}`;
+        }),
+      )
       .build();
     const output = (await turn(result, "go").handle.completed).events;
     expect(output).toMatchObject([
@@ -34,17 +34,7 @@ describe("sealing", () => {
     const candidateArgs = { value: 1 };
     const implementationOutput = { nested: { value: 1 } };
     let step = 0;
-    const result = Agent(
-      model(async (_call, { request }) => {
-        if (++step > 1) return "done";
-        return toolCalls(
-          { id: "", name: "echo", args: candidateArgs },
-          { id: "duplicate", name: "echo", args: candidateArgs },
-          { id: "duplicate", name: "echo", args: candidateArgs },
-          { id: "valid", name: "echo", args: candidateArgs },
-        );
-      }),
-    )
+    const result = testAgent()
       .use(
         "test",
         offer(
@@ -53,6 +43,17 @@ describe("sealing", () => {
             execution(async () => ({ kind: "completed", output: implementationOutput })),
           ),
         ),
+      )
+      .with(
+        model(async (_call, { request }) => {
+          if (++step > 1) return "done";
+          return toolCalls(
+            { id: "", name: "echo", args: candidateArgs },
+            { id: "duplicate", name: "echo", args: candidateArgs },
+            { id: "duplicate", name: "echo", args: candidateArgs },
+            { id: "valid", name: "echo", args: candidateArgs },
+          );
+        }),
       )
       .build();
     const { session, handle } = turn(result, "go");
@@ -86,7 +87,9 @@ describe("sealing", () => {
   });
 
   it("normalizes malformed JavaScript model and tool outcome scalar fields into failures", async () => {
-    const malformedModel = Agent(model(async () => ({ output: "invalid" }) as never)).build();
+    const malformedModel = testAgent()
+      .with(model(async () => ({ output: "invalid" }) as never))
+      .build();
     const modelCompletion = await turn(malformedModel, "go").handle.completed;
     expect(modelCompletion.events).toMatchObject([
       { type: "input", event: { kind: "user-message", text: "go" } },
@@ -94,11 +97,7 @@ describe("sealing", () => {
     ]);
 
     let step = 0;
-    const malformedAdapter = Agent(
-      model(async () =>
-        ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
-      ),
-    )
+    const malformedAdapter = testAgent()
       .use(
         "test",
         offer(
@@ -106,6 +105,11 @@ describe("sealing", () => {
             "echo",
             execution(async () => ({ kind: "denied", reason: { mutable: true } }) as never),
           ),
+        ),
+      )
+      .with(
+        model(async () =>
+          ++step === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done",
         ),
       )
       .build();

@@ -44,15 +44,18 @@ tool({
   },
 });
 
-Agent(async () => "done")
+Agent({ id: "echo", name: "Echo" })
   .use("echo", async (_request, next) => next())
+  .with(async () => "done")
   .build()
   .run();
 
 // @ts-expect-error bind-time model directives were removed; use a declaration.
-Agent(async () => "done", { id: "opus" });
+Agent({ id: "echo", name: "Echo" }, { id: "opus" });
 
 declare const manifest: AgentManifest;
+void manifest.id;
+void manifest.name;
 // @ts-expect-error model selection is no longer build-time manifest state.
 void manifest.model;
 
@@ -76,7 +79,7 @@ const counterCapability: CapabilityDeclaration<CounterState> = {
     return next();
   },
 };
-Agent(async () => "done").use(counterCapability);
+Agent({ id: "counter", name: "Counter" }).use(counterCapability);
 const statelessCapability: CapabilityDeclaration = {
   id: "stateless",
   middleware: async (request, next) => {
@@ -87,20 +90,38 @@ const statelessCapability: CapabilityDeclaration = {
 };
 void statelessCapability;
 
-// @ts-expect-error model is required
+// @ts-expect-error identity options are required
 Agent();
 
-// @ts-expect-error Agent takes a model adapter function, not an invoker object
+// @ts-expect-error Agent takes identity options, not an invoker object
 Agent({ invoke: async () => "done" });
 
-// @ts-expect-error Agent takes a model adapter function, not a create-options bag
+// @ts-expect-error Agent takes identity options, not a create-options bag
 Agent({ model: { invoke: async () => "done" } });
 
+// @ts-expect-error build belongs on BoundAgentBuilder after with()
+Agent({ id: "echo", name: "Echo" }).build();
+
+Agent({ id: "echo", name: "Echo" })
+  .use("echo", async (_request, next) => next())
+  // @ts-expect-error build belongs on BoundAgentBuilder after with()
+  .build();
+
+Agent({ id: "echo", name: "Echo" })
+  .with(async () => "done")
+  // @ts-expect-error use belongs on AgentBuilder, not BoundAgentBuilder
+  .use("echo", async (_request, next) => next());
+
+Agent({ id: "echo", name: "Echo" })
+  .with(async () => "done")
+  // @ts-expect-error with may be called only once
+  .with(async () => "other");
+
 // @ts-expect-error run belongs on BuiltAgent, not the builder
-Agent(async () => "done").run();
+Agent({ id: "echo", name: "Echo" }).run();
 
 // @ts-expect-error Agent is a factory, not a constructable class
-new Agent(async () => "done");
+new Agent({ id: "echo", name: "Echo" });
 
 declare const session: Session;
 session.interrupt("ok");
@@ -109,6 +130,9 @@ session.interrupt({ text: "ok" });
 session.input({ kind: "interrupt", text: "x" });
 
 declare const agent: BuiltAgent;
+const agentId: string = agent.id;
+const agentName: string = agent.name;
+void [agentId, agentName];
 
 const seed: SessionSeed = { transcript: [], revision: 4 };
 const recorder: SessionRecorder = { async record(_value: SessionRecord) {} };

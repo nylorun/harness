@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  Agent,
   type ContextItem,
   type ContextSnapshot,
   type ModelCall,
@@ -8,7 +7,7 @@ import {
   type ModelConfigurationSnapshot,
 } from "../src/index.js";
 import { projectModelCall } from "../src/step/project.js";
-import { execution, model, offer, tool, toolCalls, turn } from "./fixtures.js";
+import { testAgent, execution, model, offer, tool, toolCalls, turn } from "./fixtures.js";
 
 function configuration(
   overrides: Partial<ModelConfigurationSnapshot> = {},
@@ -268,20 +267,21 @@ describe("projectModelCall", () => {
     let seen!: ModelCall;
     let requestSessionId!: string;
     let sawSignal = false;
-    const result = Agent(
-      model(async (call, { request, signal }) => {
-        seen = call;
-        requestSessionId = request.sessionId;
-        sawSignal = signal instanceof AbortSignal;
-        return "done";
-      }),
-    )
+    const result = testAgent()
       .use("echo", async (step, next) => {
         step.configuration.instructions.set("policy", ["Echo the user text."]);
         step.context.set("fixture", [{ type: "fixture", value: { n: 1 } }]);
         return next();
       })
       .use("tools", offer(tool()))
+      .with(
+        model(async (call, { request, signal }) => {
+          seen = call;
+          requestSessionId = request.sessionId;
+          sawSignal = signal instanceof AbortSignal;
+          return "done";
+        }),
+      )
       .build();
     await turn(result, "Echo hello", { id: "durable-session" }).handle.completed;
     expect(seen.sessionId).toBe("durable-session");
@@ -314,15 +314,7 @@ describe("projectModelCall", () => {
       kind: "completed" as const,
       output: { echoed: call.args.text },
     }));
-    const result = Agent(
-      model(async (call, { request }) => {
-        calls.push(call);
-        requests.push(request);
-        return requests.length === 1
-          ? toolCalls({ id: "call_1", name: "echo", args: { text: "hello" } })
-          : "Completed with echoed hello.";
-      }),
-    )
+    const result = testAgent()
       .use({ id: "model", model: { id: "haiku" } })
       .use("echo", async (step, next) => {
         // Declarations are deliberately repeated: each model call redraws configuration and context.
@@ -331,6 +323,15 @@ describe("projectModelCall", () => {
         step.context.set("example", [{ type: "example", value: { step: step.stepNumber } }]);
         return next();
       })
+      .with(
+        model(async (call, { request }) => {
+          calls.push(call);
+          requests.push(request);
+          return requests.length === 1
+            ? toolCalls({ id: "call_1", name: "echo", args: { text: "hello" } })
+            : "Completed with echoed hello.";
+        }),
+      )
       .build();
 
     await turn(result, "Echo hello", {

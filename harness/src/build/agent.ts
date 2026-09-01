@@ -18,6 +18,8 @@ let createBoundAgent: (
 ) => BuiltAgent;
 
 export class BuiltAgent {
+  readonly id: string;
+  readonly name: string;
   readonly #loopAgent: LoopAgent;
 
   private constructor(
@@ -25,6 +27,8 @@ export class BuiltAgent {
     invoke: ModelAdapter,
     readonly manifest: AgentManifest,
   ) {
+    this.id = manifest.id;
+    this.name = manifest.name;
     this.#loopAgent = Object.freeze({
       middleware,
       invoke,

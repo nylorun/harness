@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { Agent, type SessionRecord, type SessionSeed } from "../src/index.js";
-import { model, offer, tool, toolCalls } from "./fixtures.js";
+import { type SessionRecord, type SessionSeed } from "../src/index.js";
+import { testAgent, model, offer, tool, toolCalls } from "./fixtures.js";
 
 /** A deterministic stand-in for the persistence responsibilities outside Harness core. */
 class DurabilityRuntime {
@@ -90,7 +90,7 @@ describe("durability runtime integration", () => {
   it("uses a lease and compare-and-set records to fence a competing resumer", async () => {
     const runtime = new DurabilityRuntime();
     const invoked = vi.fn(async () => "winner");
-    const agent = Agent(model(invoked)).build();
+    const agent = testAgent().with(model(invoked)).build();
     const sessionId = "competing-resumer";
 
     expect(runtime.acquire(sessionId, "worker-a")).toBe(true);
@@ -117,13 +117,7 @@ describe("durability runtime integration", () => {
   it("reconciles an effect that completed before the tool-results record failed", async () => {
     const runtime = new DurabilityRuntime();
     const sessionId = "ambiguous-effect";
-    const agent = Agent(
-      model(async (call) =>
-        call.prompt.some((item) => item.kind === "tool-result")
-          ? "reconciled"
-          : toolCalls({ id: "charge", name: "charge", args: { amount: 7 } }),
-      ),
-    )
+    const agent = testAgent()
       .use(
         "tools",
         offer(
@@ -131,6 +125,13 @@ describe("durability runtime integration", () => {
             kind: "completed",
             output: runtime.effect(context.invocationId, Number(args.amount)),
           })),
+        ),
+      )
+      .with(
+        model(async (call) =>
+          call.prompt.some((item) => item.kind === "tool-result")
+            ? "reconciled"
+            : toolCalls({ id: "charge", name: "charge", args: { amount: 7 } }),
         ),
       )
       .build();
@@ -165,21 +166,22 @@ describe("durability runtime integration", () => {
   it("persists mixed settled and deferred siblings without a partial result batch", async () => {
     const runtime = new DurabilityRuntime();
     const sessionId = "mixed-deferred";
-    const agent = Agent(
-      model(async (call) =>
-        call.prompt.some((item) => item.kind === "tool-result")
-          ? "all settled"
-          : toolCalls(
-              { id: "fast", name: "fast", args: {} },
-              { id: "slow", name: "slow", args: {} },
-            ),
-      ),
-    )
+    const agent = testAgent()
       .use(
         "tools",
         offer(
           tool("fast", async () => ({ kind: "completed", output: "fast-result" })),
           tool("slow", async () => ({ kind: "deferred", token: { jobId: "slow-job" } })),
+        ),
+      )
+      .with(
+        model(async (call) =>
+          call.prompt.some((item) => item.kind === "tool-result")
+            ? "all settled"
+            : toolCalls(
+                { id: "fast", name: "fast", args: {} },
+                { id: "slow", name: "slow", args: {} },
+              ),
         ),
       )
       .build();
@@ -222,13 +224,7 @@ describe("durability runtime integration", () => {
   it("recovers an interaction wait from an authenticated host-constructed tool result", async () => {
     const runtime = new DurabilityRuntime();
     const sessionId = "interaction-recovery";
-    const agent = Agent(
-      model(async (call) =>
-        call.prompt.some((item) => item.kind === "tool-result")
-          ? "approved after recovery"
-          : toolCalls({ id: "charge", name: "charge", args: {} }),
-      ),
-    )
+    const agent = testAgent()
       .use(
         "tools",
         offer(
@@ -237,6 +233,13 @@ describe("durability runtime integration", () => {
             interaction: { kind: "approval", prompt: "approve charge" },
             token: { approvalRequest: "request-1" },
           })),
+        ),
+      )
+      .with(
+        model(async (call) =>
+          call.prompt.some((item) => item.kind === "tool-result")
+            ? "approved after recovery"
+            : toolCalls({ id: "charge", name: "charge", args: {} }),
         ),
       )
       .build();

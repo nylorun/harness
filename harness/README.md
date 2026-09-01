@@ -18,8 +18,13 @@ const echo = tool({
   execute: async ({ text }) => ({ kind: "completed", output: text }),
 });
 
-const agent = Agent(adapter)
-  .use({ id: "echo", instructions: ["Use echo when asked."], tools: [echo] })
+const agent = Agent({
+  id: "echo",
+  name: "Echo",
+  instructions: "Use echo when asked.",
+})
+  .use({ id: "echo", tools: [echo] })
+  .with(adapter)
   .build();
 
 const result = await agent.run().input("Echo hello").completed;
