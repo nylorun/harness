@@ -1,8 +1,7 @@
 import { serve } from "@hono/node-server";
+import "./env.js";
 import { createAgentServer } from "./server.js";
-import { loadDotEnv } from "../services/pi.js";
 
-loadDotEnv();
 const port = Number(process.env.PORT ?? "4111");
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error("PORT must be a valid TCP port.");

@@ -56,7 +56,10 @@ Agent({ id: "echo", name: "Echo" }, { id: "opus" });
 declare const manifest: AgentManifest;
 void manifest.id;
 void manifest.name;
-// @ts-expect-error model selection is no longer build-time manifest state.
+void manifest.middleware[0]?.instructions;
+void manifest.middleware[0]?.tools;
+void manifest.middleware[0]?.model;
+// @ts-expect-error model selection is no longer top-level manifest state.
 void manifest.model;
 
 type CounterState = { count: number };

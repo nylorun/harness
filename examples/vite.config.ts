@@ -8,8 +8,8 @@ export default defineConfig({
     rollupOptions: {
       external: [
         "@nylorun/harness",
-        "@earendil-works/pi-ai",
         "@modelcontextprotocol/sdk",
+        "dotenv",
         "hono",
         "@hono/node-server",
       ],

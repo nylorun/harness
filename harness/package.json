@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/harness",
-  "version": "0.8.0-beta.1",
+  "version": "0.9.0-beta.1",
   "description": "A provider-neutral, in-memory agent loop for TypeScript.",
   "type": "module",
   "license": "Apache-2.0",
@@ -27,6 +27,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./model/adapters": {
+      "types": "./dist/model/adapters.d.ts",
+      "import": "./dist/model/adapters.js"
     }
   },
   "files": [

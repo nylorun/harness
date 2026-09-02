@@ -107,8 +107,15 @@ export interface CapabilityDeclaration<State = never> {
   readonly middleware?: StepMiddleware<State>;
 }
 
+export interface MiddlewareContributions {
+  readonly instructions?: readonly string[];
+  readonly tools?: readonly { readonly name: string; readonly description?: string }[];
+  readonly model?: Pick<ModelDirective, "id" | "controls">;
+}
+
 export interface BoundMiddleware {
   readonly id: string;
   readonly handle: StepMiddleware;
   readonly state?: CapabilityState<unknown>;
+  readonly contributions?: MiddlewareContributions;
 }

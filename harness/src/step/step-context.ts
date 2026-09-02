@@ -19,7 +19,7 @@ import {
   identityKey,
   type CanonicalCall,
 } from "./canonicalize.js";
-import { normalizeCandidate } from "../model-normalize.js";
+import { normalizeCandidate } from "../model/normalize.js";
 import { ContextDraft } from "./context-draft.js";
 import { ModelConfigurationDraft } from "./model-configuration.js";
 import type { CapabilityStateRegistry } from "../session/capability-state.js";

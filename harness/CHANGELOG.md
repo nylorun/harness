@@ -4,6 +4,15 @@ All notable changes to `@nylorun/harness` are documented in this file.
 
 The project follows [Semantic Versioning](https://semver.org/). Before 1.0, the public API is experimental: breaking changes may occur in minor releases, while patch releases are reserved for compatible fixes.
 
+## [0.9.0-beta.1] - 2026-09-02
+
+### Added
+
+- Public provider translator helpers under `@nylorun/harness/model/adapters` for OpenAI-compatible
+  Chat Completions, OpenAI Responses, and Anthropic Messages model loops.
+- `MiddlewareManifest` and declared middleware contributions in `AgentManifest`, including static
+  instructions, tool metadata, and model controls for host tooling such as Studio.
+
 ## [0.8.0-beta.1] - 2026-08-31
 
 ### Breaking changes
@@ -93,3 +102,4 @@ The project follows [Semantic Versioning](https://semver.org/). Before 1.0, the 
 [0.6.0-beta.1]: https://github.com/nylorun/harness/tree/main/harness
 [0.7.0-beta.1]: https://github.com/nylorun/harness/tree/main/harness
 [0.8.0-beta.1]: https://github.com/nylorun/harness/tree/main/harness
+[0.9.0-beta.1]: https://github.com/nylorun/harness/tree/main/harness

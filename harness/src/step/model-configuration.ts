@@ -9,7 +9,7 @@ import type {
 import type { BoundToolDefinition, ToolDefinition } from "../types/tool.js";
 import { bindTool } from "../build/bind-tool.js";
 import { HarnessError, isHarnessError } from "../errors.js";
-import { normalizeDirective, sameDirective } from "../model-normalize.js";
+import { normalizeDirective, sameDirective } from "../model/normalize.js";
 import { digest } from "../utils/digest.js";
 import { copyJson } from "../utils/immutable.js";
 import { checkedReason, slotOwner, SlotDraft, type SlotOwner } from "./slot-assembly.js";

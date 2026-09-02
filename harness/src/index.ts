@@ -11,7 +11,18 @@ export type { HarnessErrorCode, HarnessErrorDetails, HarnessErrorOptions } from 
 export { BuiltAgent } from "./build/agent.js";
 export { middleware, model, tool } from "./build/helpers.js";
 
-export type { AgentManifest } from "./types/manifest.js";
+export type { AgentManifest, MiddlewareManifest } from "./types/manifest.js";
+export type {
+  BoundMiddleware,
+  CapabilityDeclaration,
+  CapabilityItems,
+  CapabilityState,
+  MiddlewareContributions,
+  StepInput,
+  StepMiddleware,
+  StepRequest,
+  StepResponse,
+} from "./types/middleware.js";
 export type {
   ModelCandidate,
   ModelControls,
@@ -37,16 +48,6 @@ export type {
   ModelToolCall,
   ModelUsage,
 } from "./types/model.js";
-export type {
-  BoundMiddleware,
-  CapabilityDeclaration,
-  CapabilityItems,
-  CapabilityState,
-  StepInput,
-  StepMiddleware,
-  StepRequest,
-  StepResponse,
-} from "./types/middleware.js";
 export type {
   BuildDiagnostic,
   ContextItem,

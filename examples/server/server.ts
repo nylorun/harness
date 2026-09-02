@@ -70,9 +70,16 @@ export async function createAgentServer(
 
   app.get("/agents/:agentId/v1/sessions", async (context) => {
     const agent = requireAgent(context.req.param("agentId"));
-    return agent === undefined
-      ? context.json({ error: "unknown agent" }, 404)
-      : context.json({ sessions: await journal.list(agent.id) });
+    if (agent === undefined) return context.json({ error: "unknown agent" }, 404);
+    const listed = await journal.list(agent.id);
+    return context.json({
+      sessions: listed.map((summary) => {
+        const found = live.get(keyOf(agent.id, summary.session));
+        if (found?.status === "running") return { ...summary, status: "running" as const };
+        if (found?.status === "waiting") return { ...summary, status: "waiting" as const };
+        return summary;
+      }),
+    });
   });
 
   app.get("/agents/:agentId/v1/sessions/:session", async (context) => {
@@ -96,20 +103,31 @@ export async function createAgentServer(
     if (!found) return context.json({ error: "session is no longer live" }, 409);
     const payload = await context.req.json<Record<string, unknown>>().catch(() => undefined);
     const interaction = payload?.interaction as Record<string, unknown> | undefined;
-    if (
-      !interaction ||
-      interaction.kind !== "approval" ||
-      typeof interaction.id !== "string" ||
-      typeof interaction.approved !== "boolean"
-    )
-      return context.json({ error: "expected approval interaction" }, 400);
-    found.status = "running";
-    await found.session.input({
-      kind: "approve",
-      interactionId: interaction.id,
-      approved: interaction.approved,
-    }).completed;
-    return context.json({ session_id: context.req.param("session"), state: found.status }, 202);
+    if (!interaction || typeof interaction.id !== "string")
+      return context.json({ error: "expected interaction" }, 400);
+    if (interaction.kind === "approval") {
+      if (typeof interaction.approved !== "boolean")
+        return context.json({ error: "expected approval interaction" }, 400);
+      found.status = "running";
+      await found.session.input({
+        kind: "approve",
+        interactionId: interaction.id,
+        approved: interaction.approved,
+      }).completed;
+      return context.json({ session_id: context.req.param("session"), state: found.status }, 202);
+    }
+    if (interaction.kind === "respond") {
+      if (!("value" in interaction))
+        return context.json({ error: "expected respond interaction" }, 400);
+      found.status = "running";
+      await found.session.input({
+        kind: "respond",
+        interactionId: interaction.id,
+        value: interaction.value as never,
+      }).completed;
+      return context.json({ session_id: context.req.param("session"), state: found.status }, 202);
+    }
+    return context.json({ error: "expected approval or respond interaction" }, 400);
   });
 
   app.get("/agents/:agentId/v1/sessions/:session/events", async (context) => {
@@ -203,6 +221,7 @@ export async function createAgentServer(
             input_kind: event.event.kind,
             input: "text" in event.event ? event.event.text : undefined,
             approved: "approved" in event.event ? event.event.approved : undefined,
+            value: "value" in event.event ? event.event.value : undefined,
           });
         }
       }
@@ -223,21 +242,13 @@ export async function createAgentServer(
 function manifest(agent: ExampleAgent) {
   return {
     protocolVersion: 1,
-    id: agent.id,
-    name: agent.name,
-    description: agent.description,
-    capabilities: agent.capabilities,
-    ...(agent.requirements === undefined ? {} : { requirements: agent.requirements }),
-    model: {
-      provider: process.env.NYLO_PROVIDER ?? "unconfigured",
-      id: process.env.NYLO_MODEL ?? "unconfigured",
-    },
-    harness: { name: "@nylorun/harness", version: "0.8.0-beta.1", manifest: agent.agent.manifest },
+    id: agent.agent.manifest.id,
+    name: agent.agent.manifest.name,
+    harness: { manifest: agent.agent.manifest },
     endpoints: {
       agUi: `/agents/${agent.id}/v1/ag-ui`,
       sessions: `/agents/${agent.id}/v1/sessions`,
     },
-    records: { path: `.data/sessions/${agent.id}` },
   };
 }
 

@@ -13,7 +13,7 @@ const server = serve({
 process.stdout.write(`Vite HMR Agent Server on http://127.0.0.1:${port}\n`);
 
 vite.watcher.on("change", async (file) => {
-  if (!/\/(agents|capabilities|services|skills|server)\//u.test(file)) return;
+  if (!/\/(agents|capabilities|services|server)\//u.test(file)) return;
   try {
     const replacement = await load();
     current = replacement;

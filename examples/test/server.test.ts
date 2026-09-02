@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { model } from "@nylorun/harness";
 import { createAgentServer } from "../server/server.js";
+import { exampleInstructions } from "../agents/types.js";
 
 const deterministic = model(async (call) => {
   const user = call.prompt.find((item) => item.kind === "message" && item.role === "user");
@@ -24,6 +25,68 @@ const deterministic = model(async (call) => {
 });
 
 describe("multi-agent Hono host", () => {
+  it("exposes harness identity and static middleware surface", async () => {
+    const root = await mkdtemp(join(tmpdir(), "studio-manifest-test-"));
+    const runtime = await createAgentServer({
+      root,
+      adapter: deterministic,
+      provider: "test",
+      model: "deterministic",
+    });
+    try {
+      const response = await runtime.app.request("http://local/agents/interactions/manifest.json");
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        protocolVersion: 1,
+        id: "interactions",
+        name: "Interactions",
+        harness: {
+          manifest: {
+            id: "interactions",
+            name: "Interactions",
+            middleware: [
+              { id: "agent", instructions: [exampleInstructions] },
+              { id: "model", model: { id: "test/deterministic", controls: { temperature: 0.1 } } },
+              {
+                id: "notes",
+                instructions: [
+                  "Use write_note only when the user asks to save a note. A human approval is required before the write.",
+                ],
+                tools: [
+                  { name: "read_notes", description: "Read the most recent locally stored notes." },
+                  {
+                    name: "write_note",
+                    description: "Write a local JSONL note after the user approves.",
+                  },
+                ],
+              },
+              {
+                id: "ask-user",
+                instructions: [
+                  "Use ask_user when you need a short fact from the human before continuing.",
+                ],
+                tools: [
+                  {
+                    name: "ask_user",
+                    description: "Ask the human a question and wait for their reply.",
+                  },
+                ],
+              },
+              { id: "review-writes" },
+            ],
+          },
+        },
+      });
+      expect(body).not.toHaveProperty("description");
+      expect(body).not.toHaveProperty("capabilities");
+      expect(body).not.toHaveProperty("model");
+      expect(body).not.toHaveProperty("records");
+    } finally {
+      await runtime.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("discovers manifests and projects a tool call, result, and final answer", async () => {
     const root = await mkdtemp(join(tmpdir(), "studio-agent-test-"));
     const runtime = await createAgentServer({
@@ -37,11 +100,12 @@ describe("multi-agent Hono host", () => {
       await expect(discovery.json()).resolves.toMatchObject({
         protocolVersion: 1,
         agents: expect.arrayContaining([
-          expect.objectContaining({ id: "inprocess-tools" }),
+          expect.objectContaining({ id: "tool-use" }),
+          expect.objectContaining({ id: "interactions" }),
           expect.objectContaining({ id: "mcp" }),
         ]),
       });
-      const response = await runtime.app.request("http://local/agents/inprocess-tools/v1/ag-ui", {
+      const response = await runtime.app.request("http://local/agents/tool-use/v1/ag-ui", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -69,6 +133,16 @@ describe("multi-agent Hono host", () => {
         messageId: expect.any(String),
         toolCallId: "calc-1",
       });
+      const listed = await runtime.app.request("http://local/agents/tool-use/v1/sessions");
+      await expect(listed.json()).resolves.toMatchObject({
+        sessions: expect.arrayContaining([
+          expect.objectContaining({
+            session: "calculator",
+            title: "calculate two plus two",
+            status: "idle",
+          }),
+        ]),
+      });
     } finally {
       await runtime.close();
       await rm(root, { recursive: true, force: true });
@@ -84,7 +158,7 @@ describe("multi-agent Hono host", () => {
       model: "deterministic",
     });
     try {
-      await runtime.app.request("http://local/agents/inprocess-tools/v1/ag-ui", {
+      await runtime.app.request("http://local/agents/interactions/v1/ag-ui", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -94,11 +168,21 @@ describe("multi-agent Hono host", () => {
         }),
       });
       const waiting = await runtime.app.request(
-        "http://local/agents/inprocess-tools/v1/sessions/notes",
+        "http://local/agents/interactions/v1/sessions/notes",
       );
       const state = (await waiting.json()) as { pending_interaction?: { id: string } };
       expect(state.pending_interaction?.id).toBeTruthy();
-      await runtime.app.request("http://local/agents/inprocess-tools/v1/sessions/notes", {
+      const listed = await runtime.app.request("http://local/agents/interactions/v1/sessions");
+      await expect(listed.json()).resolves.toMatchObject({
+        sessions: expect.arrayContaining([
+          expect.objectContaining({
+            session: "notes",
+            title: "save a note",
+            status: "waiting",
+          }),
+        ]),
+      });
+      await runtime.app.request("http://local/agents/interactions/v1/sessions/notes", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -106,7 +190,7 @@ describe("multi-agent Hono host", () => {
         }),
       });
       await expect(
-        readFile(join(root, ".data", "inprocess-tools", "notes.jsonl"), "utf8"),
+        readFile(join(root, ".data", "interactions", "notes.jsonl"), "utf8"),
       ).resolves.toContain("verified note");
     } finally {
       await runtime.close();

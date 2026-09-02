@@ -1,5 +1,5 @@
 import type { ModelCandidate } from "../types/model.js";
-import { textFromOutput } from "../model-normalize.js";
+import { textFromOutput } from "../model/normalize.js";
 import type { Tripwire } from "../types/shared.js";
 import type {
   BoundToolDefinition,

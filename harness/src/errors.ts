@@ -18,6 +18,8 @@ export type HarnessErrorCode =
   | "middleware.next-called-twice"
   | "middleware.request-mutators-revoked"
   | "model.candidate-missing"
+  | "model.adapter-invalid-options"
+  | "model.adapter-invalid-response"
   | "model.invalid-candidate"
   | "model.invalid-directive"
   | "configuration.duplicate-tool-name"

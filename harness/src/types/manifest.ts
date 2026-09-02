@@ -1,10 +1,14 @@
-import type { BoundMiddleware } from "./middleware.js";
+import type { BoundMiddleware, MiddlewareContributions } from "./middleware.js";
 import type { BuildDiagnostic } from "./shared.js";
+
+export interface MiddlewareManifest extends MiddlewareContributions {
+  readonly id: string;
+}
 
 export interface AgentManifest {
   readonly id: string;
   readonly name: string;
-  readonly middleware: readonly { readonly id: string }[];
+  readonly middleware: readonly MiddlewareManifest[];
 }
 
 export type BuildResult<Agent> =

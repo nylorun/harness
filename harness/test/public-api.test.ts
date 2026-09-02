@@ -3,7 +3,7 @@ import * as api from "../src/index.js";
 import manifest from "../package.json";
 
 describe("public API", () => {
-  it("exports the documented construction helpers and only the root subpath", () => {
+  it("exports the documented construction helpers and model adapters subpath", () => {
     expect(Object.keys(api)).toEqual(
       expect.arrayContaining([
         "Agent",
@@ -19,7 +19,8 @@ describe("public API", () => {
     );
     expect(api).not.toHaveProperty("bindAgent");
     expect(manifest.exports).toHaveProperty(".");
-    expect(Object.keys(manifest.exports)).toEqual(["."]);
+    expect(manifest.exports).toHaveProperty("./model/adapters");
+    expect(Object.keys(manifest.exports)).toEqual([".", "./model/adapters"]);
     expect(manifest.dependencies).toEqual({ "@noble/hashes": "^2.3.0" });
   });
 });

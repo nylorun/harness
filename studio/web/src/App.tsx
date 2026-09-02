@@ -1,30 +1,33 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserRouter, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { HttpAgent } from "@ag-ui/client";
-import { Activity, CirclePlus, LoaderCircle, SendHorizontal, ServerOff, X } from "lucide-react";
+import dayjs from "dayjs";
+import { ChevronDown, CirclePlus, X } from "lucide-react";
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ChatComposer } from "@/components/chat-composer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { loadBrowserStudioConfig } from "./config";
 import { eventLabel, eventSummary, type CanonicalEvent } from "./event-presentation";
 
-export type AgentManifest = Readonly<{ protocolVersion: number; id: string; name: string; description: string; capabilities: readonly string[]; requirements?: Record<string, boolean>; model: { provider: string; id: string }; harness: { name: string; version: string; manifest: { middleware?: readonly { id: string }[] } }; endpoints: { agUi: string; sessions: string }; records?: { path: string } }>;
+export type MiddlewareManifest = Readonly<{ id: string; instructions?: readonly string[]; tools?: readonly Readonly<{ name: string; description?: string }>[]; model?: Readonly<{ id?: string; controls?: Readonly<{ temperature?: number; maxOutputTokens?: number }> }> }>;
+export type AgentManifest = Readonly<{ protocolVersion: number; id: string; name: string; harness: { manifest: { id: string; name: string; middleware: readonly MiddlewareManifest[] } }; endpoints: { agUi: string; sessions: string } }>;
 type Discovery = Readonly<{ protocolVersion: number; agents: readonly { id: string; manifestUrl: string }[] }>;
-export type SessionSummary = Readonly<{ session: string; status: string; startedAt: number; endedAt?: number; events: number }>;
+export type SessionSummary = Readonly<{ session: string; title?: string; status: string; startedAt: number; endedAt?: number }>;
 type PendingInteraction = Readonly<{ id: string; kind: "approval" | "response"; prompt: string }>;
 type ChatMessage = Readonly<{ id: string; role: string; content: string }>;
 export type Connection = Readonly<{ status: "Connecting" | "Running" | "Offline"; url?: string; agents: readonly AgentManifest[]; sessionsByAgent: Readonly<Record<string, readonly SessionSummary[]>> }>;
 
 function endpoint(base: string, value: string): string { return new URL(value, base + "/").toString(); }
 function shortId(id: string): string { return id.length > 12 ? id.slice(0, 8) + "…" + id.slice(-4) : id; }
-function date(value?: number | string): string { return value === undefined ? "—" : new Date(value).toLocaleString(); }
+function date(value?: number | string): string { return value === undefined ? "—" : dayjs(value).format("HH:mm:ss"); }
 function pretty(value: unknown): string { try { return JSON.stringify(value, null, 2); } catch { return "Unserializable value"; } }
 function requestError(cause: unknown, fallback: string): string {
   if (cause instanceof TypeError && cause.message === "Failed to fetch") {
@@ -89,29 +92,35 @@ function useConnection(): Connection {
 }
 
 function Empty({ title, detail, action }: Readonly<{ title: string; detail: string; action?: ReactNode }>) {
-  return <div className="grid h-full min-h-52 place-items-center p-8 text-center"><div><h2 className="font-medium">{title}</h2><p className="mt-1 max-w-md text-sm text-muted-foreground">{detail}</p>{action === undefined ? null : <div className="mt-4 flex justify-center">{action}</div>}</div></div>;
+  return <div className="relative grid h-full min-h-52 place-items-center p-8 text-center"><div className="absolute left-2 top-2"><SidebarTrigger /></div><div><h2 className="font-medium">{title}</h2><p className="mt-1 max-w-md text-sm text-muted-foreground">{detail}</p>{action === undefined ? null : <div className="mt-4 flex justify-center">{action}</div>}</div></div>;
 }
-function Tokens({ values }: Readonly<{ values: readonly string[] }>) { return values.length === 0 ? <p className="text-sm text-muted-foreground">None declared</p> : <div className="flex flex-wrap gap-2">{values.map((value) => <Badge key={value} variant="secondary">{value}</Badge>)}</div>; }
-function ConnectionIndicator({ connection }: Readonly<{ connection: Connection }>) {
-  const running = connection.status === "Running";
-  const className = running ? "bg-emerald-500" : connection.status === "Connecting" ? "bg-amber-500" : "bg-muted-foreground";
-  return <div className="flex items-center gap-2 text-sm text-muted-foreground"><span className={"size-2 rounded-full " + className} />{connection.status === "Connecting" ? <LoaderCircle className="size-3 animate-spin" /> : running ? <Activity className="size-3" /> : <ServerOff className="size-3" />}<span>{connection.status}</span></div>;
+function Tokens({ values }: Readonly<{ values: readonly string[] }>) { return <p className="text-sm">{values.length === 0 ? <span className="text-muted-foreground">None declared</span> : values.join(", ")}</p>; }
+function EmptyValue() { return <span className="text-muted-foreground">None declared</span>; }
+function constructorInstructions(middleware: readonly MiddlewareManifest[]): readonly string[] {
+  return middleware.find((entry) => entry.id === "agent")?.instructions ?? [];
 }
-function AppHeader({ connection }: Readonly<{ connection: Connection }>) {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const match = location.pathname.match(/^\/agents\/([^/]+)/u);
-  const agent = connection.agents.find((entry) => entry.id === decodeURIComponent(match?.[1] ?? ""));
-  const startSession = (): void => { if (agent !== undefined) navigate(sessionPath(agent.id, crypto.randomUUID())); };
-  return <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4"><SidebarTrigger /><div className="min-w-0"><p className="truncate text-sm font-medium">{agent === undefined ? "Nylorun Studio" : agent.name}</p><p className="truncate text-xs text-muted-foreground">{agent === undefined ? "Select an agent and session" : agent.id}</p></div><div className="ml-auto flex items-center gap-3"><Button variant="outline" size="sm" disabled={connection.status !== "Running" || agent === undefined} onClick={startSession}><CirclePlus className="size-4" />New session</Button><ConnectionIndicator connection={connection} /></div></header>;
+function InstructionList({ values }: Readonly<{ values: readonly string[] }>) {
+  if (values.length === 0) return <p className="mt-2 text-sm"><EmptyValue /></p>;
+  return <div className="mt-2 space-y-2">{values.map((text, index) => <p key={index} className="whitespace-pre-wrap text-sm">{text}</p>)}</div>;
+}
+function ToolList({ tools }: Readonly<{ tools: readonly Readonly<{ name: string; description?: string }>[] }>) {
+  if (tools.length === 0) return <EmptyValue />;
+  return <ul className="space-y-1">{tools.map((tool) => <li key={tool.name}><span className="font-mono text-xs">{tool.name}</span>{tool.description === undefined ? null : <span className="text-muted-foreground"> — {tool.description}</span>}</li>)}</ul>;
+}
+function CompactModel({ model }: Readonly<{ model?: MiddlewareManifest["model"] }>) {
+  if (model === undefined) return <EmptyValue />;
+  const details = [model.id, model.controls?.temperature === undefined ? undefined : `temperature ${model.controls.temperature}`, model.controls?.maxOutputTokens === undefined ? undefined : `max ${model.controls.maxOutputTokens}`].filter((item): item is string => item !== undefined);
+  return details.length === 0 ? <EmptyValue /> : <span>{details.join(" · ")}</span>;
 }
 
 function Chat({ agent, sessionId }: Readonly<{ agent: AgentManifest; sessionId: string }>) {
   const [messages, setMessages] = useState<readonly ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState<PendingInteraction | undefined>();
+  const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let cancelled = false;
     const load = async (): Promise<void> => {
@@ -124,8 +133,11 @@ function Chat({ agent, sessionId }: Readonly<{ agent: AgentManifest; sessionId: 
     const timer = window.setInterval(() => void load(), 1_000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [agent.endpoints.agUi, agent.endpoints.sessions, sessionId]);
-  const send = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
+  useEffect(() => {
+    if (!sending) return;
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [messages, sending]);
+  const send = async (): Promise<void> => {
     if (!input.trim() || sending) return;
     const text = input.trim();
     setInput(""); setSending(true); setError(undefined);
@@ -139,31 +151,42 @@ function Chat({ agent, sessionId }: Readonly<{ agent: AgentManifest; sessionId: 
       } });
     } catch (cause) { setError(requestError(cause, "Agent request failed.")); } finally { setSending(false); }
   };
-  const interact = async (approved: boolean): Promise<void> => {
+  const replyTo = async (body: Record<string, unknown>, failed: string): Promise<void> => {
     if (pending === undefined) return;
     setSending(true);
     try {
-      const response = await fetch(agent.endpoints.sessions.replace(/\/$/u, "") + "/" + encodeURIComponent(sessionId), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ interaction: { id: pending.id, kind: "approval", approved } }) });
-      if (!response.ok) throw new Error("Approval returned " + response.status + ".");
+      const response = await fetch(agent.endpoints.sessions.replace(/\/$/u, "") + "/" + encodeURIComponent(sessionId), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ interaction: { id: pending.id, ...body } }) });
+      if (!response.ok) throw new Error(failed + " returned " + response.status + ".");
       setPending(undefined);
-    } catch (cause) { setError(requestError(cause, "Approval failed.")); } finally { setSending(false); }
+      setReply("");
+    } catch (cause) { setError(requestError(cause, failed + " failed.")); } finally { setSending(false); }
   };
-  return <section className="flex min-h-0 flex-1 flex-col"><div className="flex h-12 shrink-0 items-center border-b px-4"><h1 className="text-sm font-medium">Chat</h1><span className="ml-auto font-mono text-xs text-muted-foreground">{shortId(sessionId)}</span></div><ScrollArea className="min-h-0 flex-1"><div className="space-y-4 p-4">{messages.length === 0 ? <p className="text-sm text-muted-foreground">Start the conversation to run this session.</p> : messages.map((message) => <article key={message.id} className={"max-w-3xl rounded-lg px-4 py-3 text-sm " + (message.role === "user" ? "ml-auto bg-primary text-primary-foreground" : "bg-muted")}><p className="mb-1 text-xs opacity-70">{message.role}</p><p className="whitespace-pre-wrap">{message.content}</p></article>)}{pending !== undefined && <section className="rounded-lg border border-amber-400/50 bg-amber-50 p-4 text-sm"><p className="font-medium">Approval required</p><p className="mt-1">{pending.prompt}</p><div className="mt-3 flex gap-2"><Button size="sm" onClick={() => void interact(true)}>Approve</Button><Button size="sm" variant="outline" onClick={() => void interact(false)}>Deny</Button></div></section>}{error !== undefined && <p role="alert" className="text-sm text-destructive">{error}</p>}</div></ScrollArea><form onSubmit={send} className="flex shrink-0 gap-2 border-t p-3"><Input value={input} onChange={(event) => setInput(event.target.value)} disabled={sending || pending !== undefined} placeholder="Message the agent…" /><Button type="submit" size="icon" disabled={sending || pending !== undefined || !input.trim()}><SendHorizontal className="size-4" /><span className="sr-only">Send message</span></Button></form></section>;
+  return <section className="flex h-full min-h-0 flex-col overflow-hidden"><div className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3"><SidebarTrigger className="-ml-0.5" /><h1 className="min-w-0 truncate text-sm font-medium">{agent.name}</h1><span className="ml-auto font-mono text-xs text-muted-foreground">{shortId(sessionId)}</span></div><ScrollArea className="min-h-0 flex-1"><div className="space-y-4 p-4">{messages.length === 0 ? <p className="text-sm text-muted-foreground">Start the conversation to run this session.</p> : messages.map((message) => <article key={message.id} className={"max-w-3xl rounded-lg px-4 py-3 text-sm " + (message.role === "user" ? "ml-auto bg-primary text-primary-foreground" : "bg-muted")}><p className="mb-1 text-xs opacity-70">{message.role}</p><p className="whitespace-pre-wrap">{message.content}</p></article>)}{pending !== undefined && <section className="rounded-lg border border-amber-400/50 bg-amber-50 p-4 text-sm"><p className="font-medium">{pending.kind === "response" ? "Response required" : "Approval required"}</p><p className="mt-1">{pending.prompt}</p>{pending.kind === "response" ? <div className="mt-3"><ChatComposer value={reply} onChange={setReply} onSubmit={() => void replyTo({ kind: "respond", value: reply.trim() }, "Reply")} sending={sending} placeholder="Your reply…" submitLabel="Send reply" /></div> : <div className="mt-3 flex gap-2"><Button size="sm" onClick={() => void replyTo({ kind: "approval", approved: true }, "Approval")}>Approve</Button><Button size="sm" variant="outline" onClick={() => void replyTo({ kind: "approval", approved: false }, "Approval")}>Deny</Button></div>}</section>}{error !== undefined && <p role="alert" className="text-sm text-destructive">{error}</p>}<div ref={bottomRef} /></div></ScrollArea><div className="shrink-0 border-t bg-background p-3"><ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} disabled={pending !== undefined} sending={sending} placeholder="Message the agent…" autoFocus /></div></section>;
 }
 
 function Manifest({ agent }: Readonly<{ agent: AgentManifest }>) {
-  const middleware = agent.harness.manifest.middleware ?? [];
-  const requirements = Object.entries(agent.requirements ?? {}).filter(([, enabled]) => enabled).map(([name]) => name);
-  return <ScrollArea className="min-h-0 flex-1"><div className="space-y-4 p-4"><section><h2 className="text-sm font-medium">{agent.name}</h2><p className="mt-1 text-sm text-muted-foreground">{agent.description}</p><p className="mt-2 font-mono text-xs text-muted-foreground">{agent.id}</p></section><section className="rounded-lg border p-4"><h3 className="text-sm font-medium">Model</h3><dl className="mt-3 grid gap-3 text-sm"><div><dt className="text-muted-foreground">Provider</dt><dd>{agent.model.provider}</dd></div><div><dt className="text-muted-foreground">Model</dt><dd>{agent.model.id}</dd></div></dl></section><section className="rounded-lg border p-4"><h3 className="text-sm font-medium">Capabilities</h3><div className="mt-3"><Tokens values={agent.capabilities} /></div></section><section className="rounded-lg border p-4"><h3 className="text-sm font-medium">Harness</h3><dl className="mt-3 grid gap-3 text-sm"><div><dt className="text-muted-foreground">Package</dt><dd>{agent.harness.name} {agent.harness.version}</dd></div><div><dt className="text-muted-foreground">Middleware</dt><dd className="mt-1"><Tokens values={middleware.map((entry) => entry.id)} /></dd></div></dl></section><section className="rounded-lg border p-4"><h3 className="text-sm font-medium">Requirements</h3><div className="mt-3"><Tokens values={requirements} /></div><p className="mt-4 text-xs text-muted-foreground">Records: {agent.records?.path ?? "not reported"}</p></section></div></ScrollArea>;
+  const declared = agent.harness.manifest.middleware ?? [];
+  const instructions = constructorInstructions(declared);
+  const middleware = declared.filter((entry) => entry.id !== "agent");
+  return <ScrollArea className="h-full"><div className="p-4"><section><h3 className="text-sm font-medium">ID</h3><p className="mt-2 font-mono text-xs">{agent.id}</p></section><Separator className="my-4" /><section><h3 className="text-sm font-medium">Name</h3><p className="mt-2 text-sm">{agent.name}</p></section><Separator className="my-4" /><section><h3 className="text-sm font-medium">Instructions</h3><InstructionList values={instructions} /></section><Separator className="my-4" /><section><h3 className="text-sm font-medium">Middleware</h3><div className="mt-3"><Tokens values={middleware.map((entry) => entry.id)} /></div></section>{middleware.map((entry) => <div key={entry.id}><Separator className="my-4" /><section><h3 className="font-mono text-sm font-medium">{entry.id}</h3><dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm"><dt className="text-muted-foreground">Instructions</dt><dd>{entry.instructions === undefined || entry.instructions.length === 0 ? <EmptyValue /> : <div className="space-y-1">{entry.instructions.map((text, index) => <p key={index} className="whitespace-pre-wrap">{text}</p>)}</div>}</dd><dt className="text-muted-foreground">Tools</dt><dd><ToolList tools={entry.tools ?? []} /></dd><dt className="text-muted-foreground">Context</dt><dd><EmptyValue /></dd><dt className="text-muted-foreground">Model</dt><dd><CompactModel model={entry.model} /></dd></dl></section></div>)}</div></ScrollArea>;
 }
 function EventTable({ events, selected, onSelect }: Readonly<{ events: readonly CanonicalEvent[]; selected?: CanonicalEvent; onSelect: (event: CanonicalEvent) => void }>) {
-  const [filter, setFilter] = useState("all");
+  const [selectedTypes, setSelectedTypes] = useState<readonly string[] | undefined>();
   const eventTypes = useMemo(() => [...new Set(events.map((event) => event.type))].sort(), [events]);
-  const visibleEvents = filter === "all" ? events : events.filter((event) => event.type === filter);
-  return <section className="flex min-h-0 flex-1 flex-col"><div className="flex h-12 shrink-0 items-center gap-3 border-b px-4"><h2 className="text-sm font-medium">Events</h2><Select value={filter} onValueChange={setFilter}><SelectTrigger size="sm" className="ml-auto w-44"><SelectValue placeholder="All event types" /></SelectTrigger><SelectContent><SelectItem value="all">All event types</SelectItem>{eventTypes.map((type) => <SelectItem key={type} value={type}>{eventLabel({ type } as CanonicalEvent)}</SelectItem>)}</SelectContent></Select></div><ScrollArea className="min-h-0 flex-1"><Table><TableHeader className="sticky top-0 z-10 bg-background"><TableRow><TableHead className="w-14">Seq</TableHead><TableHead className="w-40">Time</TableHead><TableHead className="w-40">Type</TableHead><TableHead>Summary</TableHead></TableRow></TableHeader><TableBody>{visibleEvents.length === 0 ? <TableRow><TableCell colSpan={4} className="h-28 text-center text-muted-foreground">{events.length === 0 ? "Events will appear when the agent runs." : "No events match this type."}</TableCell></TableRow> : visibleEvents.map((event) => <TableRow key={event.seq} data-state={selected?.seq === event.seq ? "selected" : undefined} className="cursor-pointer" onClick={() => onSelect(event)}><TableCell className="font-mono text-xs">{event.seq}</TableCell><TableCell className="text-xs text-muted-foreground">{date(event.ts)}</TableCell><TableCell><Badge variant="secondary">{eventLabel(event)}</Badge></TableCell><TableCell className="max-w-0 truncate text-xs text-muted-foreground">{eventSummary(event)}</TableCell></TableRow>)}</TableBody></Table></ScrollArea></section>;
+  const activeTypes = selectedTypes ?? eventTypes;
+  const visibleEvents = selectedTypes === undefined ? events : events.filter((event) => selectedTypes.includes(event.type));
+  const filterLabel = selectedTypes === undefined || selectedTypes.length === eventTypes.length ? "All event types" : selectedTypes.length === 0 ? "No event types" : selectedTypes.length === 1 ? eventLabel({ type: selectedTypes[0] } as CanonicalEvent) : selectedTypes.length + " event types";
+  const toggleType = (type: string, checked: boolean): void => {
+    setSelectedTypes((current) => {
+      const next = (current ?? eventTypes).filter((entry) => entry !== type);
+      if (checked) next.push(type);
+      return next.length === eventTypes.length && eventTypes.every((entry) => next.includes(entry)) ? undefined : next;
+    });
+  };
+  return <section className="flex h-full min-h-0 flex-col overflow-hidden"><div className="flex h-12 shrink-0 items-center gap-3 border-b bg-background px-4"><h2 className="text-sm font-medium">Events</h2><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="ml-auto w-44 justify-between font-normal"><span className="truncate">{filterLabel}</span><ChevronDown className="size-4 opacity-50" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-56">{eventTypes.length === 0 ? <p className="px-2 py-1.5 text-sm text-muted-foreground">No event types yet</p> : eventTypes.map((type) => <DropdownMenuCheckboxItem key={type} checked={activeTypes.includes(type)} onCheckedChange={(checked) => toggleType(type, checked === true)}>{eventLabel({ type } as CanonicalEvent)}</DropdownMenuCheckboxItem>)}</DropdownMenuContent></DropdownMenu></div><ScrollArea className="min-h-0 flex-1"><Table><TableHeader className="sticky top-0 z-10 bg-background"><TableRow><TableHead className="w-14">Seq</TableHead><TableHead className="w-20">Time</TableHead><TableHead className="w-40">Type</TableHead><TableHead>Summary</TableHead></TableRow></TableHeader><TableBody>{visibleEvents.length === 0 ? <TableRow><TableCell colSpan={4} className="h-28 text-center text-muted-foreground">{events.length === 0 ? "Events will appear when the agent runs." : "No events match this filter."}</TableCell></TableRow> : visibleEvents.map((event) => <TableRow key={event.seq} data-state={selected?.seq === event.seq ? "selected" : undefined} className="cursor-pointer" onClick={() => onSelect(event)}><TableCell className="font-mono text-xs">{event.seq}</TableCell><TableCell className="text-xs text-muted-foreground">{date(event.ts)}</TableCell><TableCell><Badge variant="secondary">{eventLabel(event)}</Badge></TableCell><TableCell className="max-w-0 truncate text-xs text-muted-foreground">{eventSummary(event)}</TableCell></TableRow>)}</TableBody></Table></ScrollArea></section>;
 }
 function EventDetails({ event, onClose }: Readonly<{ event: CanonicalEvent; onClose: () => void }>) {
-  return <section className="flex min-h-0 flex-1 flex-col"><header className="flex h-12 shrink-0 items-center gap-3 border-b px-4"><div className="min-w-0"><h2 className="truncate text-sm font-medium">{eventLabel(event)}</h2><p className="font-mono text-xs text-muted-foreground">Event {event.seq}</p></div><Button className="ml-auto" size="icon" variant="ghost" onClick={onClose}><X className="size-4" /><span className="sr-only">Close event details</span></Button></header><ScrollArea className="min-h-0 flex-1"><div className="space-y-4 p-4"><dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm"><dt className="text-muted-foreground">Sequence</dt><dd>{event.seq}</dd><dt className="text-muted-foreground">Timestamp</dt><dd>{date(event.ts)}</dd><dt className="text-muted-foreground">Type</dt><dd>{event.type}</dd></dl><section><h3 className="text-sm font-medium">Canonical event</h3><pre className="mt-2 overflow-auto rounded-md bg-muted p-3 text-xs leading-5">{pretty(event)}</pre></section></div></ScrollArea></section>;
+  return <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"><header className="flex h-12 shrink-0 items-center gap-3 border-b bg-background px-4"><div className="min-w-0"><h2 className="truncate text-sm font-medium">{eventLabel(event)}</h2><p className="font-mono text-xs text-muted-foreground">Event {event.seq}</p></div><Button className="ml-auto" size="icon" variant="ghost" onClick={onClose}><X className="size-4" /><span className="sr-only">Close event details</span></Button></header><ScrollArea className="min-h-0 min-w-0 flex-1"><div className="min-w-0 max-w-full space-y-4 overflow-hidden p-4"><dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm"><dt className="text-muted-foreground">Sequence</dt><dd>{event.seq}</dd><dt className="text-muted-foreground">Timestamp</dt><dd>{date(event.ts)}</dd><dt className="text-muted-foreground">Type</dt><dd>{event.type}</dd></dl><section className="min-w-0 max-w-full"><h3 className="text-sm font-medium">Canonical event</h3><pre className="mt-2 w-full max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs leading-5">{pretty(event)}</pre></section></div></ScrollArea></section>;
 }
 
 function SessionWorkspace({ agent, sessionId }: Readonly<{ agent: AgentManifest; sessionId: string }>) {
@@ -189,7 +212,7 @@ function SessionWorkspace({ agent, sessionId }: Readonly<{ agent: AgentManifest;
   const openEvent = (event: CanonicalEvent): void => { setSelectedEvent(event); setDetailsOpen(true); };
   const changeTab = (value: string): void => { const nextTab = value as "events" | "manifest"; setActiveTab(nextTab); if (nextTab === "manifest") setDetailsOpen(false); };
   const showDetails = activeTab === "events" && detailsOpen && selectedEvent !== undefined;
-  return <ResizablePanelGroup key={showDetails ? "details" : "workspace"} orientation="horizontal" className="min-h-0 flex-1"><ResizablePanel defaultSize={showDetails ? 38 : 50} minSize={28}><Chat agent={agent} sessionId={sessionId} /></ResizablePanel><ResizableHandle withHandle /><ResizablePanel defaultSize={showDetails ? 37 : 50} minSize={28}><TabsPrimitive.Root value={activeTab} onValueChange={changeTab} className="flex min-h-0 flex-1 flex-col"><div className="flex h-12 shrink-0 items-end border-b px-4"><TabsPrimitive.List className="flex h-full items-end gap-5"><TabsPrimitive.Trigger value="events" className="border-b-2 border-transparent px-0 pb-3 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground">Events</TabsPrimitive.Trigger><TabsPrimitive.Trigger value="manifest" className="border-b-2 border-transparent px-0 pb-3 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground">Agent Manifest</TabsPrimitive.Trigger></TabsPrimitive.List></div><TabsPrimitive.Content value="events" className="min-h-0 flex-1 outline-none"><EventTable events={events} selected={selectedEvent} onSelect={openEvent} /></TabsPrimitive.Content><TabsPrimitive.Content value="manifest" className="min-h-0 flex-1 outline-none"><Manifest agent={agent} /></TabsPrimitive.Content></TabsPrimitive.Root></ResizablePanel>{showDetails ? <><ResizableHandle withHandle /><ResizablePanel defaultSize={25} minSize={20}><EventDetails event={selectedEvent} onClose={() => { setDetailsOpen(false); setSelectedEvent(undefined); }} /></ResizablePanel></> : null}</ResizablePanelGroup>;
+  return <ResizablePanelGroup key={showDetails ? "details" : "workspace"} orientation="horizontal" className="h-full min-h-0 overflow-hidden"><ResizablePanel defaultSize={showDetails ? 24 : 32} minSize={20}><Chat agent={agent} sessionId={sessionId} /></ResizablePanel><ResizableHandle withHandle /><ResizablePanel defaultSize={showDetails ? 40 : 68} minSize={28}><TabsPrimitive.Root value={activeTab} onValueChange={changeTab} className="flex h-full min-h-0 flex-col overflow-hidden"><div className="flex h-12 shrink-0 items-end border-b bg-background px-4"><TabsPrimitive.List className="flex h-full items-end gap-5"><TabsPrimitive.Trigger value="events" className="border-b-2 border-transparent px-0 pb-3 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground">Events</TabsPrimitive.Trigger><TabsPrimitive.Trigger value="manifest" className="border-b-2 border-transparent px-0 pb-3 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground">Agent Manifest</TabsPrimitive.Trigger></TabsPrimitive.List></div><TabsPrimitive.Content value="events" className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none"><EventTable events={events} selected={selectedEvent} onSelect={openEvent} /></TabsPrimitive.Content><TabsPrimitive.Content value="manifest" className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none"><Manifest agent={agent} /></TabsPrimitive.Content></TabsPrimitive.Root></ResizablePanel>{showDetails ? <><ResizableHandle withHandle /><ResizablePanel defaultSize={36} minSize={26}><EventDetails event={selectedEvent} onClose={() => { setDetailsOpen(false); setSelectedEvent(undefined); }} /></ResizablePanel></> : null}</ResizablePanelGroup>;
 }
 function StudioWorkspace({ connection }: Readonly<{ connection: Connection }>) {
   const { agentId = "", sessionId } = useParams();
@@ -198,7 +221,7 @@ function StudioWorkspace({ connection }: Readonly<{ connection: Connection }>) {
   if (agentId === "") return <Empty title="Choose an agent" detail="Select an agent and one of its sessions from the navigation." />;
   if (agent === undefined) return <Empty title="Agent not found" detail="This agent is not currently exposed by the connected agent server." />;
   if (sessionId === undefined) return <Empty title="Choose a session" detail="Select a saved session from the navigation, or start a new conversation with this agent." action={<Button onClick={() => navigate(sessionPath(agent.id, crypto.randomUUID()))}><CirclePlus className="size-4" />New session</Button>} />;
-  return <SessionWorkspace agent={agent} sessionId={sessionId} />;
+  return <div className="h-full min-h-0 overflow-hidden"><SessionWorkspace agent={agent} sessionId={sessionId} /></div>;
 }
 function Shell() {
   const connection = useConnection();
@@ -206,6 +229,6 @@ function Shell() {
   const match = location.pathname.match(/^\/agents\/([^/]+)(?:\/sessions\/([^/]+))?/u);
   const activeAgentId = match === null ? undefined : decodeURIComponent(match[1]);
   const activeSessionId = match?.[2];
-  return <SidebarProvider><AppSidebar connection={connection} activeAgentId={activeAgentId} activeSessionId={activeSessionId} /><SidebarInset className="h-svh min-w-0"><AppHeader connection={connection} /><div className="flex min-h-0 flex-1"><Routes><Route path="/" element={<StudioWorkspace connection={connection} />} /><Route path="/agents/:agentId" element={<StudioWorkspace connection={connection} />} /><Route path="/agents/:agentId/sessions/:sessionId" element={<StudioWorkspace connection={connection} />} /></Routes></div></SidebarInset></SidebarProvider>;
+  return <SidebarProvider className="h-svh overflow-hidden"><AppSidebar connection={connection} activeAgentId={activeAgentId} activeSessionId={activeSessionId} /><SidebarInset className="h-svh min-h-0 min-w-0 overflow-hidden"><Routes><Route path="/" element={<StudioWorkspace connection={connection} />} /><Route path="/agents/:agentId" element={<StudioWorkspace connection={connection} />} /><Route path="/agents/:agentId/sessions/:sessionId" element={<StudioWorkspace connection={connection} />} /></Routes></SidebarInset></SidebarProvider>;
 }
 export default function App() { return <BrowserRouter><Shell /></BrowserRouter>; }

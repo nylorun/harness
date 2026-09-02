@@ -41,3 +41,44 @@ const result = await agent.run().input("Echo hello").completed;
 
 See [Examples](../examples/README.md) for complete agents and [CHANGELOG.md](./CHANGELOG.md) for
 release notes.
+
+## Model adapter translators
+
+For OpenAI-compatible endpoints, keep transport and credentials in host code while Harness maps its
+canonical model call and candidate:
+
+```ts
+import { chatCompletionsAdapter } from "@nylorun/harness/model/adapters";
+
+const adapter = chatCompletionsAdapter(async (body, call, { signal }) => {
+  const response = await fetch("https://example.com/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: "my-model", ...call.model?.config, ...body }),
+    signal,
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+});
+```
+
+`toResponses` / `fromResponses` / `responsesAdapter` support direct OpenAI Responses transport.
+`toMessages` / `fromMessages` / `anthropicAdapter` support direct Anthropic Messages transport;
+`anthropicAdapter` requires an explicit `defaultMaxOutputTokens`. These translators support text and
+JSON tool loops only. Provider-native continuation state, streaming, images, and cache controls stay
+in application integrations.
+
+```ts
+const responses = responsesAdapter((body, call, { signal }) =>
+  openai.responses.create({ model: "gpt-5.6", ...call.model?.config, ...body }, { signal }),
+);
+
+const messages = anthropicAdapter({
+  defaultMaxOutputTokens: 1_024,
+  send: (body, call, { signal }) =>
+    anthropic.messages.create(
+      { model: "claude-sonnet-4-5", ...call.model?.config, ...body },
+      { signal },
+    ),
+});
+```

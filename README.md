@@ -9,7 +9,7 @@ This repository contains the core package, a loopback-only Studio dashboard, and
 
 - [`@nylorun/harness`](./harness) — model/tool loop and capability composition.
 - [`@nylorun/studio`](./studio) — local dashboard for compatible agent servers.
-- [`examples`](./examples) — direct-Harness multi-agent starter with Hono, MCP, Docker, skills, and code mode.
+- [`examples`](./examples) — direct-Harness multi-agent starter with Hono, MCP, Docker, skills, Codex, and code mode.
 
 ## Develop
 

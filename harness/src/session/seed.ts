@@ -1,5 +1,5 @@
 import { HarnessError } from "../errors.js";
-import { normalizeCandidate } from "../model-normalize.js";
+import { normalizeCandidate } from "../model/normalize.js";
 import type {
   InputEvent,
   SessionSeed,
