@@ -48,6 +48,7 @@ export function assembleAgent(
           id: item.id,
           handle: item.handle,
           ...(item.state === undefined ? {} : { state: item.state }),
+          ...(item.contributions === undefined ? {} : { contributions: item.contributions }),
         }),
       );
     }

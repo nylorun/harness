@@ -9,5 +9,11 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["agents/**/*.ts", "capabilities/**/*.ts", "services/**/*.ts", "server/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "agents/**/*.ts",
+    "capabilities/**/*.ts",
+    "services/**/*.ts",
+    "server/**/*.ts",
+    "test/**/*.ts"
+  ]
 }

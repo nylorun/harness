@@ -8,7 +8,7 @@ import type {
 import type { ActiveModelExecutionRecord, InputEvent, SessionSnapshot } from "../types/session.js";
 import type { BoundToolDefinition } from "../types/tool.js";
 import type { LoopAgent } from "../build/agent.js";
-import { normalizeCandidate } from "../model-normalize.js";
+import { normalizeCandidate } from "../model/normalize.js";
 import { HarnessError, isHarnessError } from "../errors.js";
 import { copyJson } from "../utils/immutable.js";
 import type { ObserveEmit } from "../utils/observe.js";

@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/studio",
-  "version": "0.2.0-rc.2",
+  "version": "0.2.0-rc.3",
   "description": "Developer-only local Studio for Nylo agents.",
   "type": "module",
   "license": "Apache-2.0",
@@ -51,6 +51,7 @@
     "@assistant-ui/react-markdown": "^0.14.12",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dayjs": "^1.11.23",
     "lucide-react": "^1.33.0",
     "radix-ui": "^1.6.7",
     "react": "^19.2.8",

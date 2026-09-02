@@ -2,9 +2,10 @@ import type {
   BoundMiddleware,
   CapabilityDeclaration,
   CapabilityItems,
+  MiddlewareContributions,
   StepMiddleware,
 } from "../types/middleware.js";
-import type { ModelAdapter } from "../types/model.js";
+import type { ModelAdapter, ModelDirective } from "../types/model.js";
 import type { BuildDiagnostic } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
 import type { BuiltAgent } from "./agent.js";
@@ -138,6 +139,7 @@ function compileDeclaration<State>(declaration: CapabilityDeclaration<State>): B
   const tools = copyItems(declaration.tools, declaration.id);
   const instructions = copyItems(declaration.instructions, declaration.id);
   const model = declaration.model;
+  const contributions = snapshotContributions(instructions?.items, tools?.items, model);
   const handle: StepMiddleware = async (request, next) => {
     if (tools) request.configuration.tools.set(tools.slot, tools.items);
     if (instructions) request.configuration.instructions.set(instructions.slot, instructions.items);
@@ -150,7 +152,44 @@ function compileDeclaration<State>(declaration: CapabilityDeclaration<State>): B
     ...(declaration.state === undefined
       ? {}
       : { state: declaration.state as CapabilityDeclaration["state"] }),
+    ...(contributions === undefined ? {} : { contributions }),
   };
+}
+
+function snapshotContributions(
+  instructions: readonly string[] | undefined,
+  tools: readonly { readonly name: string; readonly description?: string }[] | undefined,
+  model: ModelDirective | undefined,
+): MiddlewareContributions | undefined {
+  const snapInstructions =
+    instructions === undefined ? undefined : Object.freeze([...instructions]);
+  const snapTools =
+    tools === undefined
+      ? undefined
+      : Object.freeze(
+          tools.map((tool) =>
+            Object.freeze({
+              name: tool.name,
+              ...(tool.description === undefined ? {} : { description: tool.description }),
+            }),
+          ),
+        );
+  const snapModel = model === undefined ? undefined : snapshotModel(model);
+  if (snapInstructions === undefined && snapTools === undefined && snapModel === undefined) {
+    return undefined;
+  }
+  return Object.freeze({
+    ...(snapInstructions === undefined ? {} : { instructions: snapInstructions }),
+    ...(snapTools === undefined ? {} : { tools: snapTools }),
+    ...(snapModel === undefined ? {} : { model: snapModel }),
+  });
+}
+
+function snapshotModel(model: ModelDirective): Pick<ModelDirective, "id" | "controls"> {
+  return Object.freeze({
+    ...(model.id === undefined ? {} : { id: model.id }),
+    ...(model.controls === undefined ? {} : { controls: Object.freeze({ ...model.controls }) }),
+  });
 }
 
 function copyItems<Item>(

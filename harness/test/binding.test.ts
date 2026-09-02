@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Agent } from "../src/index.js";
-import { expectBuildError, model, testAgent, turn } from "./fixtures.js";
+import { expectBuildError, model, testAgent, tool, turn } from "./fixtures.js";
 
 describe("build", () => {
   it("seals middleware order and returns a frozen adapter-free manifest", () => {
@@ -44,9 +44,29 @@ describe("build", () => {
     expect(agent.manifest).toEqual({
       id: "test",
       name: "Test",
-      middleware: [{ id: "model" }],
+      middleware: [{ id: "model", model: { id: "opus", controls: { temperature: 0.2 } } }],
     });
     expect(agent.manifest).not.toHaveProperty("model");
+  });
+
+  it("snapshots static declaration instructions, tools, and model onto middleware entries", () => {
+    const agent = testAgent()
+      .use({
+        id: "notes",
+        instructions: ["Write notes."],
+        tools: [tool("write_note")],
+        model: { id: "opus", controls: { temperature: 0.2 } },
+      })
+      .with(model(async () => "done"))
+      .build();
+    expect(agent.manifest.middleware).toEqual([
+      {
+        id: "notes",
+        instructions: ["Write notes."],
+        tools: [{ name: "write_note" }],
+        model: { id: "opus", controls: { temperature: 0.2 } },
+      },
+    ]);
   });
 
   it("reports a missing model callback", () => {
@@ -140,7 +160,7 @@ describe("build", () => {
     expect(contributors).toContainEqual(
       expect.objectContaining({ middlewareId: "agent", slot: "agent" }),
     );
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual(["agent"]);
+    expect(agent.manifest.middleware).toEqual([{ id: "agent", instructions: ["Be concise."] }]);
     await session.stop();
   });
 

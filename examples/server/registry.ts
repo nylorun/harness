@@ -1,30 +1,50 @@
 import { join } from "node:path";
-import { createPiAdapter, providerConfig } from "../services/pi.js";
-import { createCodeMode } from "../agents/code-mode/agent.js";
-import { createDockerSkills } from "../agents/docker-skills/agent.js";
-import { createDockerWorkspace } from "../agents/docker-workspace/agent.js";
-import { createInprocessTools } from "../agents/inprocess-tools/agent.js";
-import { createMcpAgent } from "../agents/mcp/agent.js";
+import { providerConfig } from "./env.js";
+import { createOpenAICompatibleAdapter } from "../services/openai-compatible.js";
+import { createCodeMode } from "../agents/code-mode.js";
+import { createCodingAgent } from "../agents/coding-agent.js";
+import { createGuardrails } from "../agents/guardrails.js";
+import { createInteractions } from "../agents/interactions.js";
+import { createMcpAgent } from "../agents/mcp.js";
+import { createSandbox } from "../agents/sandbox.js";
+import { createInstructions } from "../agents/instructions.js";
+import { createSkills } from "../agents/skills.js";
+import { createSubagents } from "../agents/subagents.js";
+import { createToolUse } from "../agents/tool-use.js";
 import type { ExampleAgent } from "../agents/types.js";
 import type { ModelAdapter } from "@nylorun/harness";
 
 export async function createRegistry(
   root: string,
   override:
-    Readonly<{ adapter: ModelAdapter; provider: string; model: string }> | undefined = undefined,
+    | Readonly<{ adapter: ModelAdapter; provider: string; model: string }>
+    | undefined = undefined,
 ): Promise<readonly ExampleAgent[]> {
-  const config = override ?? providerConfig();
+  const configured = override === undefined ? providerConfig() : undefined;
+  const { provider, model } = override ?? configured!;
   const deps = {
-    adapter: "adapter" in config ? config.adapter : await createPiAdapter(config),
-    provider: config.provider,
-    model: config.model,
+    adapter:
+      override?.adapter ??
+      createOpenAICompatibleAdapter({
+        baseUrl: configured!.baseUrl,
+        apiKey: configured!.apiKey,
+        model,
+        headers: configured!.headers,
+      }),
+    provider,
+    model,
     dataRoot: join(root, ".data"),
   };
   return Object.freeze([
-    createInprocessTools(deps),
+    createInstructions(deps),
+    await createSkills(deps),
+    await createToolUse(deps),
+    await createGuardrails(deps),
+    createInteractions(deps),
     createMcpAgent(deps),
-    createDockerWorkspace(deps),
-    await createDockerSkills(deps),
+    createSandbox(deps),
     await createCodeMode(deps),
+    await createSubagents(deps),
+    createCodingAgent(deps),
   ]);
 }

@@ -42,7 +42,7 @@ export function eventLabel(event: CanonicalEvent): string {
     case "tool.started": return "Tool started";
     case "tool.completed": return "Tool completed";
     case "tool.deferred": return "Tool deferred";
-    case "interaction.required": return "Approval required";
+    case "interaction.required": return record(record(event.payload).interaction).kind === "response" ? "Response required" : "Approval required";
     case "session.run.started": return "Session input received";
     case "final": return "Final answer";
     case "error": return "Run failed";
@@ -67,6 +67,9 @@ export function eventSummary(event: CanonicalEvent): string {
   if (event.type === "model.requested") return text(payload.requestedModelId, "Preparing a model request.");
   if (event.type === "model.completed") return "Candidate received.";
   if (event.type === "session.run.started" && payload.input_kind === "approve") return payload.approved === true ? "Approval granted." : "Approval denied.";
+  if (event.type === "session.run.started" && payload.input_kind === "respond") return "Response submitted.";
+  if (event.type === "middleware.entered" || event.type === "middleware.completed") return text(payload.middlewareId, "middleware");
+  if (event.type === "middleware.lease-violation") return `${text(payload.middlewareId, "middleware")}: ${text(payload.reason, "lease violated")}`;
   return "Canonical agent event.";
 }
 
@@ -83,11 +86,13 @@ export function activitiesForEvents(events: readonly CanonicalEvent[]): readonly
       case "model.completed": return activity("Model response received", "completed");
       case "tool.started": return activity(`Running ${text(event.payload.toolName, "tool")}`, "running");
       case "tool.completed": return activity(`${text(event.payload.toolName, "Tool")} ${text(event.payload.outcome, "completed")}`, event.payload.outcome === "failed" ? "failed" : "completed");
-      case "interaction.required": return activity("Waiting for approval", "waiting");
+      case "interaction.required": return activity(record(event.payload.interaction).kind === "response" ? "Waiting for a response" : "Waiting for approval", "waiting");
       case "session.run.started":
         return event.payload.input_kind === "approve"
           ? activity(event.payload.approved === true ? "Approval granted" : "Approval denied", event.payload.approved === true ? "approved" : "denied")
-          : [];
+          : event.payload.input_kind === "respond"
+            ? activity("Response submitted", "completed")
+            : [];
       case "error": return activity("Run failed", "failed");
       case "final": return activity("Final answer ready", "completed");
       default: return [];

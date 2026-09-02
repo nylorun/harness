@@ -67,6 +67,7 @@
 }
 
 * { @apply border-border; }
+html, body, #root { height: 100%; overflow: hidden; }
 body { @apply bg-background text-foreground; }
 
 .dark {

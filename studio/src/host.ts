@@ -17,6 +17,7 @@ const MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
   ".json": "application/json; charset=utf-8",
   ".map": "application/json; charset=utf-8",
   ".png": "image/png",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".webp": "image/webp",
   ".woff2": "font/woff2"

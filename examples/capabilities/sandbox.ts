@@ -12,7 +12,7 @@ export function sandboxTools(workspaces: Map<string, DockerWorkspace>) {
   };
 
   return {
-    id: "docker-workspace",
+    id: "sandbox",
     instructions: [
       "All workspace commands run in an isolated, network-disabled Docker container. Use safe relative paths only.",
     ],

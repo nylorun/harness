@@ -14,16 +14,24 @@ export type StudioEndpointSet = Readonly<{
   sessions: string;
 }>;
 
+export type StudioMiddlewareManifest = Readonly<{
+  id: string;
+  instructions?: readonly string[];
+  tools?: readonly Readonly<{ name: string; description?: string }>[];
+  model?: Readonly<{ id?: string; controls?: Readonly<{ temperature?: number; maxOutputTokens?: number }> }>;
+}>;
+
 /** A generated, JSON-safe description of one direct Harness agent. */
 export type StudioAgentManifest = Readonly<{
   protocolVersion: 1;
   id: string;
   name: string;
-  description: string;
-  capabilities: readonly string[];
-  requirements?: Readonly<Record<string, boolean>>;
-  model: Readonly<{ provider: string; id: string }>;
-  harness: Readonly<{ name: "@nylorun/harness"; version: string; manifest: Readonly<{ middleware: readonly Readonly<{ id: string }>[] }> }>;
+  harness: Readonly<{
+    manifest: Readonly<{
+      id: string;
+      name: string;
+      middleware: readonly StudioMiddlewareManifest[];
+    }>;
+  }>;
   endpoints: StudioEndpointSet;
-  records?: Readonly<{ path: string }>;
 }>;

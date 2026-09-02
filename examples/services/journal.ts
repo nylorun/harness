@@ -11,10 +11,10 @@ export type CanonicalEvent = Readonly<{
 
 export type SessionSummary = Readonly<{
   session: string;
-  status: string;
+  title?: string;
+  status: "idle" | "waiting";
   startedAt: number;
   endedAt?: number;
-  events: number;
 }>;
 
 /** Explicit local-only JSONL persistence. Raw provider payloads never enter this service. */
@@ -55,18 +55,14 @@ export class JsonlJournal {
       const summaries = await Promise.all(
         ids.map(async (session) => {
           const events = await this.events(agent, session);
-          const final = events.at(-1);
+          const final = events.findLast((event) => event.type === "final");
+          const title = sessionTitle(events);
           return {
             session,
-            status:
-              final?.type === "final"
-                ? "completed"
-                : events.some((event) => event.type === "interaction.required")
-                  ? "waiting"
-                  : "running",
+            ...(title === undefined ? {} : { title }),
+            status: sessionStatus(events),
             startedAt: events[0] ? Date.parse(events[0].ts) : 0,
-            ...(final?.type === "final" ? { endedAt: Date.parse(final.ts) } : {}),
-            events: events.length,
+            ...(final === undefined ? {} : { endedAt: Date.parse(final.ts) }),
           };
         }),
       );
@@ -79,6 +75,25 @@ export class JsonlJournal {
   private file(agent: string, session: string): string {
     return join(this.root, safe(agent), safe(session), "events.jsonl");
   }
+}
+
+function sessionTitle(events: readonly CanonicalEvent[]): string | undefined {
+  for (const event of events) {
+    if (event.type !== "session.run.started" || typeof event.payload.input !== "string") continue;
+    const title = event.payload.input.replace(/\s+/gu, " ").trim();
+    if (title) return title;
+  }
+  return undefined;
+}
+
+function sessionStatus(events: readonly CanonicalEvent[]): "idle" | "waiting" {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!;
+    if (event.type === "final") return "idle";
+    if (event.type === "interaction.required") return "waiting";
+    if (event.type === "session.run.started" && typeof event.payload.approved === "boolean") return "idle";
+  }
+  return "idle";
 }
 
 function safe(value: string): string {

@@ -14,17 +14,18 @@
     "start": "node --env-file-if-exists=.env dist/main.js",
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "docker:preflight": "node scripts/docker-preflight.mjs"
+    "docker:preflight": "node scripts/docker-preflight.mjs",
+    "codex:preflight": "node scripts/codex-preflight.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.84.2",
     "@hono/node-server": "^1.19.10",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@nylorun/harness": "file:../harness",
     "@nylorun/studio": "file:../studio",
+    "dotenv": "^17.4.2",
     "hono": "^4.11.10",
-    "zod-from-json-schema": "^0.5.6",
-    "zod": "^4.1.12"
+    "zod": "^4.1.12",
+    "zod-from-json-schema": "^0.5.6"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",

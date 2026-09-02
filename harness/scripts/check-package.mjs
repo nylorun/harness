@@ -80,10 +80,13 @@ try {
     "LICENSE",
     "dist/index.js",
     "dist/index.d.ts",
+    "dist/model/adapters.js",
+    "dist/model/adapters.d.ts",
   ]) {
     if (!files.includes(required)) throw new Error(`Missing tarball file: ${required}`);
   }
   const entry = await import(new URL("../dist/index.js", import.meta.url));
+  const adapters = await import(new URL("../dist/model/adapters.js", import.meta.url));
   for (const name of [
     "AgentBuilder",
     "BoundAgentBuilder",
@@ -98,6 +101,19 @@ try {
     "middleware",
   ]) {
     if (!(name in entry)) throw new Error(`Missing public export: ${name}`);
+  }
+  for (const name of [
+    "toChatCompletions",
+    "fromChatCompletions",
+    "chatCompletionsAdapter",
+    "toResponses",
+    "fromResponses",
+    "responsesAdapter",
+    "toMessages",
+    "fromMessages",
+    "anthropicAdapter",
+  ]) {
+    if (!(name in adapters)) throw new Error(`Missing model adapter export: ${name}`);
   }
   console.log(`Tarball and dependency boundary passed (${files.length} files).`);
 } finally {
