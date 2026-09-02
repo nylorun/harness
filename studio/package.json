@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/studio",
-  "version": "0.2.0-rc.2",
+  "version": "0.2.0-rc.3",
   "description": "Developer-only local Studio for Nylo agents.",
   "type": "module",
   "license": "Apache-2.0",
