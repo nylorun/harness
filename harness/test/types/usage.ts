@@ -2,10 +2,13 @@ import { z } from "zod";
 import {
   Agent,
   HarnessError,
+  preparedModel,
   tool,
   type CapabilityDeclaration,
   type AgentManifest,
   type HarnessErrorCode,
+  type InputEvent,
+  type InputCompletion,
   type BuiltAgent,
   type BoundToolSchema,
   type BuildDiagnostic,
@@ -29,7 +32,7 @@ import { bindAgent } from "../../src/index.js";
 
 tool({
   name: "echo",
-  parameters: z.object({ text: z.string().trim() }),
+  inputSchema: z.object({ text: z.string().trim() }),
   async execute(args) {
     return { kind: "completed", output: { text: args.text } };
   },
@@ -37,8 +40,16 @@ tool({
 
 tool({
   name: "invalid-root",
-  // @ts-expect-error Harness accepts Zod object roots only.
-  parameters: z.string(),
+  inputSchema: z.string(),
+  async execute() {
+    return { kind: "completed", output: null };
+  },
+});
+
+tool({
+  name: "removed-parameters",
+  // @ts-expect-error parameters was replaced by inputSchema in v1.
+  parameters: z.object({}),
   async execute() {
     return { kind: "completed", output: null };
   },
@@ -66,7 +77,7 @@ type CounterState = { count: number };
 const counterSchema = z.object({});
 const counterTool = tool<typeof counterSchema, CounterState>({
   name: "counter",
-  parameters: counterSchema,
+  inputSchema: counterSchema,
   async execute(_args, context) {
     const state: CounterState = await context.state;
     return { kind: "completed", output: state.count };
@@ -129,6 +140,20 @@ new Agent({ id: "echo", name: "Echo" });
 declare const session: Session;
 session.interrupt("ok");
 session.interrupt({ text: "ok" });
+session.input({
+  content: [
+    { type: "text", text: "Inspect this." },
+    { type: "media", mediaType: "image/png", reference: { url: "https://example.test/chart.png" } },
+  ],
+});
+const structuredHandle = session.input("Extract", {
+  outputSchema: z.object({ summary: z.string(), count: z.number() }),
+});
+const structuredCompletion: Promise<InputCompletion<{ summary: string; count: number }>> =
+  structuredHandle.completed;
+void structuredCompletion;
+// @ts-expect-error output schemas belong to ordinary input turns.
+session.continue({ outputSchema: z.object({}) });
 // @ts-expect-error input() does not accept interrupt
 session.input({ kind: "interrupt", text: "x" });
 
@@ -173,7 +198,6 @@ request.selectModel("opus");
 request.prefix;
 
 declare const configuration: ModelConfigurationSnapshot;
-void configuration.digests.request;
 // @ts-expect-error Model configuration no longer exposes globally withheld tools.
 configuration.withheldTools;
 
@@ -210,12 +234,29 @@ void invoke(call, {
   request: modelRequest,
   invocationId: "invocation",
   signal: new AbortController().signal,
+  reportPreparedCall: () => undefined,
 });
 // @ts-expect-error ModelAdapter receives the projected call before its context object
 void invoke(call, modelRequest, new AbortController().signal);
 
 declare const sessionInput: SessionInput;
 void sessionInput;
+
+declare const inputEvent: InputEvent;
+if (inputEvent.kind === "user-message" || inputEvent.kind === "interrupt") void inputEvent.text;
+
+preparedModel({
+  adapter: "example",
+  async prepare() {
+    return { request: { provider: "example" }, observed: { provider: "example" } };
+  },
+  async send() {
+    return { text: "done" };
+  },
+  decode(response) {
+    return (response as { text: string }).text;
+  },
+});
 
 declare const inputHandle: import("../../src/index.js").InputHandle;
 // @ts-expect-error completed replaced the redundant consume alias

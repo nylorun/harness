@@ -53,7 +53,7 @@ function loadSkillTool(roster: SkillRoster, listed: readonly Skill[]) {
   return tool({
     name: "load_skill",
     description: "Load the full instructions for a named skill.",
-    parameters: z.object({ name: skillNameSchema(listed) }),
+    inputSchema: z.object({ name: skillNameSchema(listed) }),
     async execute({ name }) {
       const skill = roster.get(name);
       if (!skill) {
@@ -71,7 +71,7 @@ function readSkillResourceTool(roster: SkillRoster, listed: readonly Skill[]) {
   return tool({
     name: "read_skill_resource",
     description: "Read a supporting file from a skill directory after load_skill.",
-    parameters: z.object({
+    inputSchema: z.object({
       name: skillNameSchema(listed),
       path: z.string().min(1),
     }),

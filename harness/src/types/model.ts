@@ -1,4 +1,4 @@
-import type { ContextItem, DeferredOutcome, JsonObject } from "./shared.js";
+import type { ContextItem, DeferredOutcome, JsonObject, JsonValue } from "./shared.js";
 import type { InputEvent, TranscriptEntry } from "./session.js";
 import type { BoundToolDefinition, ToolResult } from "./tool.js";
 
@@ -11,6 +11,7 @@ export interface ModelToolCall {
 export type ModelOutputBlock =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "reasoning"; readonly text: string }
+  | { readonly type: "json"; readonly value: JsonValue }
   | {
       readonly type: "tool-call";
       readonly id: string;
@@ -65,7 +66,6 @@ export interface ModelConfigurationContributor {
   readonly middlewareId: string;
   readonly slot: string;
   readonly order: number;
-  readonly digest: string;
   readonly reason?: string;
 }
 
@@ -73,13 +73,12 @@ export interface ModelConfigurationTool {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema: JsonObject;
-  readonly digest: string;
+  readonly outputSchema?: JsonObject;
   readonly contributor: ModelConfigurationContributor;
 }
 
 export interface ModelConfigurationInstruction {
   readonly text: string;
-  readonly digest: string;
   readonly contributor: ModelConfigurationContributor;
 }
 
@@ -87,15 +86,10 @@ export interface ModelConfigurationSnapshot {
   readonly version: 1;
   readonly model?: ModelDirective;
   readonly instructions: readonly ModelConfigurationInstruction[];
-  /** Bound tools are retained for execution; their digest covers only their provider-visible contract. */
+  /** Bound tools are retained for execution. */
   readonly tools: readonly BoundToolDefinition[];
   readonly toolContracts: readonly ModelConfigurationTool[];
   readonly contributors: readonly ModelConfigurationContributor[];
-  readonly digests: Readonly<{
-    readonly logical: string;
-    readonly model: string;
-    readonly request: string;
-  }>;
 }
 
 /** A middleware-owned declaration for this model call's runtime context. */
@@ -108,15 +102,13 @@ export interface ContextContributor {
   readonly middlewareId: string;
   readonly slot: string;
   readonly order: number;
-  readonly digest: string;
   readonly reason?: string;
 }
 
-/** Canonical runtime context for one model call. Not part of the configuration digest. */
+/** Canonical runtime context for one model call. */
 export interface ContextSnapshot {
   readonly items: readonly ContextItem[];
   readonly contributors: readonly ContextContributor[];
-  readonly digest: string;
 }
 
 export interface ModelRequest {
@@ -133,10 +125,13 @@ export interface ModelRequest {
   readonly toolResults: readonly ToolResult[];
   /** Tools are normalized and immutable by the time a Model sees them. */
   readonly tools: readonly BoundToolDefinition[];
+  /** Optional portable contract for this turn's terminal JSON result. */
+  readonly outputSchema?: JsonObject;
 }
 
 export type PromptContentPart =
   | { readonly type: "text"; readonly text: string }
+  | { readonly type: "media"; readonly mediaType: string; readonly reference: JsonValue }
   | {
       readonly type: "tool-call";
       readonly id: string;
@@ -178,6 +173,8 @@ export interface ModelCall {
   readonly model?: ModelDirective;
   readonly prompt: readonly PromptItem[];
   readonly tools: readonly ModelCallTool[];
+  /** Optional portable contract for this turn's terminal JSON result. */
+  readonly outputSchema?: JsonObject;
   readonly sessionId: string;
 }
 
@@ -185,6 +182,13 @@ export interface ModelAdapterContext {
   readonly request: ModelRequest;
   readonly invocationId: string;
   readonly signal: AbortSignal;
+  /** Publishes one JSON-safe provider request derived from the canonical ModelCall. */
+  reportPreparedCall(prepared: ModelPreparedCall): void;
+}
+
+export interface ModelPreparedCall {
+  readonly adapter: string;
+  readonly call: JsonValue;
 }
 
 export type ModelAdapter = (

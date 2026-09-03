@@ -42,7 +42,7 @@ function runCodeTool(roster: readonly ToolDefinition[]) {
     name: "run_code",
     description:
       "Execute a JavaScript program against the available tools. Pass the body of an async function as `code`. Call tools as `await tools.name(args)`. Only printed lines and the return value come back.",
-    parameters: z.object({
+    inputSchema: z.object({
       code: z.string().min(1).max(8_000),
       description: z.string().min(1).max(200),
     }),

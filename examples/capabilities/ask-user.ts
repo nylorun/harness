@@ -8,7 +8,7 @@ export const askUser = {
     tool({
       name: "ask_user",
       description: "Ask the human a question and wait for their reply.",
-      parameters: z.object({ question: z.string().min(1).max(500) }),
+      inputSchema: z.object({ question: z.string().min(1).max(500) }),
       async execute({ question }, context) {
         if (context.resume?.kind === "response") {
           return { kind: "completed" as const, output: { answer: context.resume.value ?? null } };

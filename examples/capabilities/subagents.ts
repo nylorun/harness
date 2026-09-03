@@ -12,7 +12,7 @@ export function delegateTo(agents: Readonly<Record<string, BuiltAgent>>) {
       tool({
         name: "delegate",
         description: `Run a specialist subagent to completion and return its final answer. Specialists: ${names.join(", ")}.`,
-        parameters: z.object({
+        inputSchema: z.object({
           name: z.string(),
           task: z.string().min(1).max(2_000),
         }),

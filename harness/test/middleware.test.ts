@@ -286,6 +286,29 @@ describe("middleware", () => {
     expect(seen).toEqual([{}]);
   });
 
+  it("allows identical model configs with different object key order", async () => {
+    const seen: unknown[] = [];
+    const result = testAgent()
+      .use("outer", async (request, next) => {
+        request.configuration.model.select({ config: { beta: 2, alpha: 1 } });
+        return next();
+      })
+      .use("inner", async (request, next) => {
+        request.configuration.model.select({ config: { alpha: 1, beta: 2 } });
+        return next();
+      })
+      .with(
+        model(async (_call, { request }) => {
+          seen.push(request.model);
+          return "done";
+        }),
+      )
+      .build();
+
+    await turn(result, "go").handle.completed;
+    expect(seen).toEqual([{ config: { beta: 2, alpha: 1 } }]);
+  });
+
   it("tripwires a partial-merge select and invalid directives", async () => {
     const merge = testAgent()
       .use("id", async (request, next) => {

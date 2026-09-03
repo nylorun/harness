@@ -23,11 +23,12 @@ export function projectModelCall(request: ModelRequest): ModelCall {
         Object.freeze({
           name: tool.name,
           ...(tool.description === undefined ? {} : { description: tool.description }),
-          inputSchema: copyJson(tool.parameters.jsonSchema),
+          inputSchema: copyJson(tool.inputSchema.jsonSchema),
         }),
       ),
     ),
     ...(request.model === undefined ? {} : { model: copyJson(request.model) }),
+    ...(request.outputSchema === undefined ? {} : { outputSchema: copyJson(request.outputSchema) }),
     sessionId: request.sessionId,
   });
 }
@@ -66,11 +67,29 @@ function renderContext(items: readonly ContextItem[]): string {
 function projectEntry(entry: TranscriptEntry): readonly PromptItem[] {
   if (entry.kind === "input") {
     if (entry.event.kind !== "user-message" && entry.event.kind !== "interrupt") return [];
-    return [freezeItem({ kind: "message", role: "user", content: [textPart(entry.event.text)] })];
+    return [
+      freezeItem({
+        kind: "message",
+        role: "user",
+        content:
+          "content" in entry.event
+            ? entry.event.content.map((part): PromptContentPart =>
+                part.type === "text"
+                  ? textPart(part.text)
+                  : Object.freeze({
+                      type: "media" as const,
+                      mediaType: part.mediaType,
+                      reference: copyJson(part.reference),
+                    }),
+              )
+            : [textPart(entry.event.text)],
+      }),
+    ];
   }
   if (entry.kind === "candidate") {
     const content = entry.candidate.output.flatMap((block): PromptContentPart[] => {
       if (block.type === "text") return [textPart(block.text)];
+      if (block.type === "json") return [textPart(JSON.stringify(block.value))];
       if (block.type === "tool-call")
         return [
           Object.freeze({
@@ -102,7 +121,12 @@ function projectToolResult(result: ToolResult): PromptItem {
 function toolResultPayload(result: ToolResult): unknown {
   if (result.kind === "completed") return result.output;
   if (result.kind === "denied") return { kind: result.kind, reason: result.reason };
-  return { kind: result.kind, code: result.code, message: result.message };
+  return {
+    kind: result.kind,
+    code: result.code,
+    message: result.message,
+    ...(result.details === undefined ? {} : { details: result.details }),
+  };
 }
 
 function textPart(text: string): PromptContentPart {

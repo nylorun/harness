@@ -1,4 +1,6 @@
 import type { BuiltAgent, ModelAdapter } from "@nylorun/harness";
+import type { MediaStore } from "../services/media.js";
+import type { ImageEditor } from "../services/openai-image.js";
 
 export type ExampleAgent = Readonly<{
   id: string;
@@ -15,6 +17,8 @@ export type AgentDependencies = Readonly<{
   provider: string;
   model: string;
   dataRoot: string;
+  media: MediaStore;
+  imageEditor?: ImageEditor;
 }>;
 
 export const exampleInstructions =

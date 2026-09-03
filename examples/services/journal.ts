@@ -30,7 +30,10 @@ export class JsonlJournal {
     await appendFile(file, `${JSON.stringify(scrub(event, this.secrets))}\n`);
   }
 
-  async events(agent: string, session: string): Promise<readonly CanonicalEvent[]> {
+  async events(
+    agent: string,
+    session: string,
+  ): Promise<readonly CanonicalEvent[]> {
     try {
       return Object.freeze(
         (await readFile(this.file(agent, session), "utf8"))
@@ -79,7 +82,11 @@ export class JsonlJournal {
 
 function sessionTitle(events: readonly CanonicalEvent[]): string | undefined {
   for (const event of events) {
-    if (event.type !== "session.run.started" || typeof event.payload.input !== "string") continue;
+    if (
+      event.type !== "session.run.started" ||
+      typeof event.payload.input !== "string"
+    )
+      continue;
     const title = event.payload.input.replace(/\s+/gu, " ").trim();
     if (title) return title;
   }
@@ -91,7 +98,11 @@ function sessionStatus(events: readonly CanonicalEvent[]): "idle" | "waiting" {
     const event = events[index]!;
     if (event.type === "final") return "idle";
     if (event.type === "interaction.required") return "waiting";
-    if (event.type === "session.run.started" && typeof event.payload.approved === "boolean") return "idle";
+    if (
+      event.type === "session.run.started" &&
+      typeof event.payload.approved === "boolean"
+    )
+      return "idle";
   }
   return "idle";
 }
@@ -106,8 +117,12 @@ function safe(value: string): string {
 function scrub(value: unknown, secrets: readonly string[]): unknown {
   if (typeof value === "string")
     return secrets.reduce(
-      (text, secret) => (secret.length >= 8 ? text.split(secret).join("[redacted]") : text),
-      value,
+      (text, secret) =>
+        secret.length >= 8 ? text.split(secret).join("[redacted]") : text,
+      value.replace(
+        /data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/giu,
+        "[inline image data redacted]",
+      ),
     );
   if (Array.isArray(value)) return value.map((item) => scrub(item, secrets));
   if (value && typeof value === "object")

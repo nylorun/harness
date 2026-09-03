@@ -20,3 +20,7 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run check --workspace @nylorun/harness
+      - run: npm ci --prefix examples
+      - run: npm run check --prefix examples
+      - run: npm test --prefix examples
+      - run: npm run check --workspace @nylorun/studio

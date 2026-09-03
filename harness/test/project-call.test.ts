@@ -18,7 +18,6 @@ function configuration(
     tools: [],
     toolContracts: [],
     contributors: [],
-    digests: Object.freeze({ logical: "", model: "", request: "" }),
     ...overrides,
   });
 }
@@ -27,7 +26,6 @@ function contextSnapshot(items: readonly ContextItem[] = []): ContextSnapshot {
   return Object.freeze({
     items: Object.freeze([...items]),
     contributors: Object.freeze([]),
-    digest: "",
   });
 }
 
@@ -194,7 +192,7 @@ describe("projectModelCall", () => {
               description: "Echo a message",
               execute: async () => ({ kind: "completed", output: null }),
               owner: { middlewareId: "tools", slot: "echo" },
-              parameters: {
+              inputSchema: {
                 jsonSchema: { type: "object", properties: { text: { type: "string" } } },
                 validate: () => ({ ok: true, value: {} }),
               },
@@ -353,10 +351,6 @@ describe("projectModelCall", () => {
     expect(requests.map((request) => request.configuration.tools.map((item) => item.name))).toEqual(
       [["echo"], ["echo"]],
     );
-    expect(firstRequest.configuration.digests.request).toBe(
-      secondRequest.configuration.digests.request,
-    );
-    expect(firstRequest.context.digest).not.toBe(secondRequest.context.digest);
     expect(requests.map((request) => request.context.items)).toEqual([
       [
         { type: "session", value: { user: "ada" } },

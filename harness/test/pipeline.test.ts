@@ -147,10 +147,10 @@ describe("step pipeline", () => {
     expect(session.state.status).toBe("idle");
   });
 
-  it("freezes the tool snapshot so later mutations do not change the bound parameters", async () => {
+  it("freezes the tool snapshot so later mutations do not change the bound input schema", async () => {
     const definition = authoredTool({
       name: "echo",
-      parameters: z.object({ text: z.string() }),
+      inputSchema: z.object({ text: z.string() }),
       async execute(args) {
         return { kind: "completed", output: args };
       },
@@ -159,12 +159,12 @@ describe("step pipeline", () => {
     const result = testAgent()
       .use("snapshot", async (request, next) => {
         request.configuration.tools.set("snapshot", [definition]);
-        (definition as { parameters: unknown }).parameters = z.object({ admin: z.string() });
+        (definition as { inputSchema: unknown }).inputSchema = z.object({ admin: z.string() });
         return next();
       })
       .with(
         model(async (_call, { request }) => {
-          schemas.push(request.tools[0]?.parameters.jsonSchema);
+          schemas.push(request.tools[0]?.inputSchema.jsonSchema);
           return "done";
         }),
       )

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 import { tool } from "../src/index.js";
-import { normalizedSchemaFor } from "../src/build/schema.js";
+import { defineSchema, normalizedSchemasFor } from "../src/build/schema.js";
 import { testAgent, model, toolCalls, turn } from "./fixtures.js";
 
 describe("Zod schemas", () => {
@@ -10,7 +10,7 @@ describe("Zod schemas", () => {
     let executed: unknown;
     const convert = tool({
       name: "convert",
-      parameters: z.object({ count: z.coerce.number() }),
+      inputSchema: z.object({ count: z.coerce.number() }),
       async execute(args) {
         executed = args;
         return { kind: "completed", output: args };
@@ -36,12 +36,13 @@ describe("Zod schemas", () => {
   });
 
   it("binds a Zod object onto the offered Model request", async () => {
-    const parameters = z.object({ text: z.string() });
+    const inputSchema = z.object({ text: z.string() });
     const echo = tool({
       name: "echo",
-      parameters,
+      inputSchema,
+      outputSchema: z.object({ echoed: z.string() }),
       async execute(args) {
-        return { kind: "completed", output: args };
+        return { kind: "completed", output: { echoed: args.text } };
       },
     });
     const result = testAgent()
@@ -51,29 +52,55 @@ describe("Zod schemas", () => {
       })
       .with(
         model(async (_call, { request }) => {
-          expect(request.tools[0]?.parameters.jsonSchema).toMatchObject({
+          expect(request.tools[0]?.inputSchema.jsonSchema).toMatchObject({
             type: "object",
             properties: { text: { type: "string" } },
+          });
+          expect(request.configuration.toolContracts[0]?.outputSchema).toMatchObject({
+            type: "object",
+            properties: { echoed: { type: "string" } },
           });
           return "done";
         }),
       )
       .build();
 
-    await turn(result, "go").handle.completed;
+    const session = result.run();
+    const observed: import("../src/index.js").ObserveEvent[] = [];
+    session.observe((event) => observed.push(event));
+    await session.input("go").completed;
+    const requested = observed.find((event) => event.type === "model.requested");
+    expect(requested).toMatchObject({
+      attributes: {
+        configuration: {
+          tools: [
+            {
+              inputSchema: { jsonSchema: { type: "object" } },
+              outputSchema: { jsonSchema: { type: "object" } },
+            },
+          ],
+          toolContracts: [
+            {
+              inputSchema: { type: "object" },
+              outputSchema: { type: "object" },
+            },
+          ],
+        },
+      },
+    });
   });
 
   it("prepares authored and raw schemas once across repeated step declarations", async () => {
     const prepared = tool({
       name: "prepared",
-      parameters: z.object({ value: z.string() }),
+      inputSchema: z.object({ value: z.string() }),
       async execute(args) {
         return { kind: "completed", output: args };
       },
     });
     const raw = {
       name: "raw",
-      parameters: z.object({ value: z.string() }),
+      inputSchema: z.object({ value: z.string() }),
       async execute(args: { value: string }) {
         return { kind: "completed" as const, output: args };
       },
@@ -95,20 +122,20 @@ describe("Zod schemas", () => {
       .build();
 
     await turn(result, "go").handle.completed;
-    expect(normalizedSchemaFor(prepared)).toBe(normalizedSchemaFor(prepared));
-    expect(normalizedSchemaFor(raw)).toBe(normalizedSchemaFor(raw));
+    expect(normalizedSchemasFor(prepared)).toBe(normalizedSchemasFor(prepared));
+    expect(normalizedSchemasFor(raw)).toBe(normalizedSchemasFor(raw));
   });
 
   it("rejects invalid authored schemas when tool() defines them", () => {
     expect(() =>
       tool({
         name: "bad",
-        parameters: z.string() as never,
+        inputSchema: z.string() as never,
         async execute() {
           return { kind: "completed", output: null };
         },
       }),
-    ).toThrow(/Zod object schema/);
+    ).toThrow(/inputSchema JSON Schema root type must be object/);
   });
 
   it("tripwires an invalid raw tool literal when it is first bound", async () => {
@@ -118,7 +145,7 @@ describe("Zod schemas", () => {
         request.configuration.tools.set("bad", [
           {
             name: "bad",
-            parameters: z.string() as never,
+            inputSchema: z.string() as never,
             async execute() {
               return { kind: "completed" as const, output: null };
             },
@@ -138,13 +165,13 @@ describe("Zod schemas", () => {
 
   it("tripwires declared asynchronous Zod checks before the Model runs", async () => {
     const invoke = vi.fn(async () => "done");
-    const parameters = z.object({ text: z.string() }).refine(async () => true);
+    const inputSchema = z.object({ text: z.string() }).refine(async () => true);
     const result = testAgent()
       .use("async", async (request, next) => {
         request.configuration.tools.set("async", [
           tool({
             name: "async",
-            parameters,
+            inputSchema,
             async execute(args) {
               return { kind: "completed", output: args };
             },
@@ -169,7 +196,7 @@ describe("Zod schemas", () => {
         request.configuration.tools.set("unconvertible", [
           tool({
             name: "bigint",
-            parameters: z.object({ value: z.bigint() }),
+            inputSchema: z.object({ value: z.bigint() }),
             async execute() {
               return { kind: "completed", output: null };
             },
@@ -194,7 +221,7 @@ describe("Zod schemas", () => {
         request.configuration.tools.set("typed", [
           tool({
             name: "echo",
-            parameters: z.object({ text: z.string() }),
+            inputSchema: z.object({ text: z.string() }),
             async execute(args) {
               return { kind: "completed", output: args };
             },
@@ -220,8 +247,162 @@ describe("Zod schemas", () => {
           callId: "echo",
           kind: "failed",
           code: "tool.invalid-arguments",
+          details: {
+            phase: "input",
+            issues: [expect.objectContaining({ path: ["text"] })],
+          },
         }),
       ]);
     }
+  });
+
+  it("accepts synchronous Standard Schema contracts", async () => {
+    let executed: unknown;
+    const standard = {
+      "~standard": {
+        validate(value: unknown) {
+          if (
+            !value ||
+            typeof value !== "object" ||
+            typeof (value as { id?: unknown }).id !== "string"
+          )
+            return { issues: [{ path: ["id"], code: "invalid_type", message: "Expected string" }] };
+          return { value: { id: (value as { id: string }).id.trim() } };
+        },
+        jsonSchema: {
+          input: () => ({
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          }),
+          output: () => ({
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          }),
+        },
+      },
+    };
+    const result = testAgent()
+      .use("standard", async (request, next) => {
+        request.configuration.tools.set("standard", [
+          tool({
+            name: "standard",
+            inputSchema: standard,
+            async execute(args) {
+              executed = args;
+              return { kind: "completed", output: args };
+            },
+          }),
+        ]);
+        return next();
+      })
+      .with(
+        model(async () =>
+          executed === undefined
+            ? toolCalls({ id: "call", name: "standard", args: { id: " 42 " } })
+            : "done",
+        ),
+      )
+      .build();
+
+    await turn(result).handle.completed;
+    expect(executed).toEqual({ id: "42" });
+  });
+
+  it("accepts explicit raw JSON Schema contracts with a local validator", async () => {
+    const inputSchema = defineSchema({
+      jsonSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+      validate(value) {
+        if (
+          !value ||
+          typeof value !== "object" ||
+          typeof (value as { id?: unknown }).id !== "string"
+        )
+          return {
+            ok: false as const,
+            issues: [{ path: ["id"], code: "invalid_type", message: "Expected string" }],
+          };
+        return { ok: true as const, value: { id: (value as { id: string }).id } };
+      },
+    });
+    expect(inputSchema.jsonSchema).toEqual({
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    });
+    expect(inputSchema.validate({ id: "42" })).toEqual({ ok: true, value: { id: "42" } });
+  });
+
+  it("validates, transforms, records, and projects the one completed output", async () => {
+    let call = 0;
+    const result = testAgent()
+      .use("output", async (request, next) => {
+        request.configuration.tools.set("output", [
+          tool({
+            name: "output",
+            inputSchema: z.object({}),
+            outputSchema: z.object({ count: z.coerce.number() }),
+            async execute() {
+              return { kind: "completed", output: { count: "2" } as never };
+            },
+          }),
+        ]);
+        return next();
+      })
+      .with(
+        model(async (_call, { request }) => {
+          call += 1;
+          if (call === 1) return toolCalls({ id: "output", name: "output", args: {} });
+          const results = request.transcript.find((entry) => entry.kind === "tool-results");
+          expect(results).toMatchObject({ results: [{ kind: "completed", output: { count: 2 } }] });
+          return "done";
+        }),
+      )
+      .build();
+
+    const { session, handle } = turn(result);
+    await handle.completed;
+    const entry = session.state.transcript.find((item) => item.kind === "tool-results");
+    expect(entry).toMatchObject({ results: [{ kind: "completed", output: { count: 2 } }] });
+  });
+
+  it("turns invalid output into a model-visible failed result", async () => {
+    let call = 0;
+    const result = testAgent()
+      .use("output", async (request, next) => {
+        request.configuration.tools.set("output", [
+          tool({
+            name: "output",
+            inputSchema: z.object({}),
+            outputSchema: z.object({ count: z.number() }),
+            async execute() {
+              return { kind: "completed", output: { count: "bad" } as never };
+            },
+          }),
+        ]);
+        return next();
+      })
+      .with(
+        model(async (_call, { request }) => {
+          call += 1;
+          if (call === 1) return toolCalls({ id: "output", name: "output", args: {} });
+          expect(request.transcript).toContainEqual(
+            expect.objectContaining({
+              kind: "tool-results",
+              results: [
+                expect.objectContaining({
+                  code: "tool.invalid-output",
+                  details: { phase: "output" },
+                }),
+              ],
+            }),
+          );
+          return "done";
+        }),
+      )
+      .build();
+
+    await turn(result).handle.completed;
   });
 });

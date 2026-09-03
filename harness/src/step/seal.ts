@@ -5,6 +5,7 @@ import type {
   BoundToolDefinition,
   RequiredInteraction,
   SealedToolCall,
+  ToolValidationFailureDetails,
   ToolOwner,
   ToolOutcome,
   ToolResult,
@@ -14,12 +15,14 @@ import { HarnessError, isHarnessError } from "../errors.js";
 import { assertJson, copyJson } from "../utils/immutable.js";
 import type { CanonicalCall } from "./canonicalize.js";
 import type { StepContext } from "./step-context.js";
+import type { TurnOutputContract } from "../session/output-contract.js";
 
 export interface ExecutablePlanEntry {
   readonly call: SealedToolCall;
   readonly invocationId: string;
   readonly owner: ToolOwner;
   readonly execute: BoundToolDefinition["execute"];
+  readonly outputSchema?: BoundToolDefinition["outputSchema"];
   readonly interaction?: RequiredInteraction;
 }
 
@@ -32,7 +35,7 @@ export interface InternalToolPlan {
 
 export type SealedStepOutput =
   | { readonly kind: "tripwire"; readonly tripwire: Tripwire }
-  | { readonly kind: "final"; readonly output: string }
+  | { readonly kind: "final"; readonly output: import("../types/shared.js").JsonValue }
   | {
       readonly kind: "deferred-model";
       readonly active: import("../types/session.js").ActiveModelExecutionRecord;
@@ -46,21 +49,39 @@ interface SealedCall {
   readonly immediate?: ToolResult;
 }
 
-const failed = (callId: string, toolName: string, code: string, message: string): ToolResult =>
-  Object.freeze({ kind: "failed", callId, toolName, code, message });
+const failed = (
+  callId: string,
+  toolName: string,
+  code: string,
+  message: string,
+  details?: ToolValidationFailureDetails,
+): ToolResult =>
+  Object.freeze({
+    kind: "failed",
+    callId,
+    toolName,
+    code,
+    message,
+    ...(details ? { details } : {}),
+  });
 
 /** Converts the reviewed canonical candidate into either a final response or an executable tool plan. */
-export function sealStep(context: StepContext): SealedStepOutput {
+export function sealStep(
+  context: StepContext,
+  outputContract?: TurnOutputContract,
+): SealedStepOutput {
   if (context.currentTripwire)
     return Object.freeze({ kind: "tripwire", tripwire: context.currentTripwire });
   if (context.currentModelDeferred)
     return Object.freeze({ kind: "deferred-model", active: context.currentModelDeferred });
   const calls = context.canonicalCalls();
-  if (!calls.length)
+  if (!calls.length) {
+    if (outputContract) return sealStructuredOutput(context, outputContract);
     return Object.freeze({
       kind: "final",
       output: textFromOutput(context.currentCandidate?.output ?? []),
     });
+  }
 
   const catalog = context.catalogByName;
   const sealed = calls.map((call) => sealCall(context, catalog, call));
@@ -78,6 +99,38 @@ export function sealStep(context: StepContext): SealedStepOutput {
         sealed.flatMap((item) => (item.immediate ? [item.immediate] : [])),
       ),
     }),
+  });
+}
+
+function sealStructuredOutput(
+  context: StepContext,
+  contract: TurnOutputContract,
+): SealedStepOutput {
+  const output = context.currentCandidate?.output ?? [];
+  const json = output.filter(
+    (block): block is Extract<(typeof output)[number], { type: "json" }> => block.type === "json",
+  );
+  if (json.length !== 1 || output.some((block) => block.type === "text"))
+    return invalidOutput(
+      "Structured terminal output must contain exactly one JSON block and no text blocks",
+    );
+  const validation = contract.schema.validate(json[0]!.value);
+  if (!validation.ok)
+    return invalidOutput(
+      `Structured terminal output failed validation: ${validation.issues.map(renderIssue).join("; ")}`,
+    );
+  try {
+    assertJson(validation.value, "structured terminal output");
+    return Object.freeze({ kind: "final", output: copyJson(validation.value) });
+  } catch (error) {
+    return invalidOutput(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function invalidOutput(message: string): SealedStepOutput {
+  return Object.freeze({
+    kind: "tripwire",
+    tripwire: Object.freeze({ code: "output.invalid", message }),
   });
 }
 
@@ -128,11 +181,17 @@ function sealCall(
       ),
     };
   const args = validatedArguments(tool, candidate);
-  if (isHarnessError(args))
+  if (!args.ok)
     return {
       order,
       canonical,
-      immediate: failed(candidate.id, candidate.name, args.code, args.message),
+      immediate: failed(
+        candidate.id,
+        candidate.name,
+        "tool.invalid-arguments",
+        args.message,
+        args.details,
+      ),
     };
   const denial = context.denialFor(candidate.id);
   if (denial)
@@ -158,11 +217,12 @@ function sealCall(
       call: Object.freeze({
         callId: candidate.id,
         toolName: candidate.name,
-        args,
+        args: args.value,
       }),
       invocationId: createId("invocation"),
       owner: tool.owner,
       execute: tool.execute,
+      ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
       ...(interaction ? { interaction } : {}),
     }),
   };
@@ -171,16 +231,41 @@ function sealCall(
 function validatedArguments(
   tool: BoundToolDefinition,
   candidate: CanonicalCall,
-): import("../types/shared.js").JsonValue | HarnessError {
-  const validation = tool.parameters.validate(candidate.args);
+):
+  | { readonly ok: true; readonly value: import("../types/shared.js").JsonValue }
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly details: ToolValidationFailureDetails;
+    } {
+  const validation = tool.inputSchema.validate(candidate.args);
   if (!validation.ok)
-    return new HarnessError("tool.invalid-arguments", validation.issues.join("; "));
+    return {
+      ok: false,
+      message: validation.issues.map(renderIssue).join("; "),
+      details: Object.freeze({ phase: "input", issues: validation.issues }),
+    };
   try {
     assertJson(validation.value, `arguments for '${candidate.name}'`);
-    return copyJson(validation.value);
+    return { ok: true, value: copyJson(validation.value) };
   } catch (error) {
-    return isHarnessError(error)
-      ? error
-      : new HarnessError("tool.invalid-arguments", String(error), { cause: error });
+    return {
+      ok: false,
+      message: isHarnessError(error) ? error.message : String(error),
+      details: Object.freeze({
+        phase: "input",
+        issues: Object.freeze([
+          Object.freeze({
+            path: Object.freeze([]),
+            code: "invalid_json",
+            message: isHarnessError(error) ? error.message : String(error),
+          }),
+        ]),
+      }),
+    };
   }
+}
+
+function renderIssue(issue: import("../types/tool.js").SchemaIssue): string {
+  return `${issue.path.join(".") || "(root)"}: ${issue.message}`;
 }

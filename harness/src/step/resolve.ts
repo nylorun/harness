@@ -7,6 +7,7 @@ export function resolveModelRequest(input: {
   context: StepContext;
   arrivals: readonly InputEvent[];
   toolResults: readonly ToolResult[];
+  output?: import("../session/output-contract.js").TurnOutputContract;
 }): ModelRequest {
   const ctx = input.context;
   return Object.freeze({
@@ -21,5 +22,6 @@ export function resolveModelRequest(input: {
     arrivals: Object.freeze([...input.arrivals]),
     toolResults: Object.freeze([...input.toolResults]),
     tools: Object.freeze([...ctx.offeredTools]),
+    ...(input.output === undefined ? {} : { outputSchema: input.output.schema.jsonSchema }),
   });
 }

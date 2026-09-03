@@ -100,7 +100,7 @@ export type CapabilityItems<Item> =
 /** A named capability that may supply static model surface and one typed middleware handler. */
 export interface CapabilityDeclaration<State = never> {
   readonly id: string;
-  readonly tools?: CapabilityItems<ToolDefinition<ToolDefinition["parameters"], State>>;
+  readonly tools?: CapabilityItems<ToolDefinition<ToolDefinition["inputSchema"], State>>;
   readonly instructions?: CapabilityItems<string>;
   readonly model?: ModelDirective;
   readonly state?: CapabilityState<State>;

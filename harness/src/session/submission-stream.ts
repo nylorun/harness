@@ -1,10 +1,11 @@
 import type { InputCompletion, InputHandle, SessionEvent } from "../types/session.js";
+import type { JsonValue } from "../types/shared.js";
 
-export class SubmissionStream implements InputHandle {
-  readonly completed: Promise<InputCompletion>;
-  private resolveCompletion!: (value: InputCompletion) => void;
+export class SubmissionStream implements InputHandle<JsonValue> {
+  readonly completed: Promise<InputCompletion<JsonValue>>;
+  private resolveCompletion!: (value: InputCompletion<JsonValue>) => void;
   private rejectCompletion!: (reason: unknown) => void;
-  private readonly events: SessionEvent[] = [];
+  private readonly events: SessionEvent<JsonValue>[] = [];
   private readonly cleanups: (() => void)[] = [];
   private done = false;
 
@@ -15,11 +16,11 @@ export class SubmissionStream implements InputHandle {
     });
   }
 
-  emit(event: SessionEvent): void {
+  emit(event: SessionEvent<JsonValue>): void {
     if (!this.done) this.events.push(event);
   }
 
-  finish(status: InputCompletion["status"]): void {
+  finish(status: InputCompletion<JsonValue>["status"]): void {
     if (this.done) return;
     this.done = true;
     while (this.cleanups.length) this.cleanups.pop()!();

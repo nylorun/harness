@@ -33,7 +33,7 @@ export function tool(
   name = "echo",
   execute: ToolDefinition["execute"] = async (args) => ({ kind: "completed", output: args }),
 ) {
-  return typedTool({ name, parameters: objectSchema, execute });
+  return typedTool({ name, inputSchema: objectSchema, execute });
 }
 
 export function offer(...tools: ReturnType<typeof tool>[]) {

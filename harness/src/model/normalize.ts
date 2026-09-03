@@ -9,8 +9,7 @@ import type {
   ModelUsage,
 } from "../types/model.js";
 import type { JsonObject } from "../types/shared.js";
-import { digest } from "../utils/digest.js";
-import { copyJsonObject } from "../utils/immutable.js";
+import { assertJson, copyJson, copyJsonObject } from "../utils/immutable.js";
 
 const FINISH_REASONS = new Set<ModelFinishReason>([
   "stop",
@@ -74,7 +73,26 @@ export function normalizeDirective(value: unknown): ModelDirective | HarnessErro
 }
 
 export function sameDirective(left: ModelDirective, right: ModelDirective): boolean {
-  return digest(left) === digest(right);
+  return sameJson(left, right);
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object")
+    return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    return left.every((item, index) => sameJson(item, right[index]));
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const keys = Object.keys(leftRecord);
+  if (keys.length !== Object.keys(rightRecord).length) return false;
+  return keys.every(
+    (key) =>
+      Object.prototype.hasOwnProperty.call(rightRecord, key) &&
+      sameJson(leftRecord[key], rightRecord[key]),
+  );
 }
 
 export function textFromOutput(output: readonly ModelOutputBlock[]): string {
@@ -149,6 +167,23 @@ function normalizeBlock(value: unknown, index: number): ModelOutputBlock {
         `output[${index}].text`,
       );
     return Object.freeze({ type: block.type, text });
+  }
+  if (block.type === "json") {
+    rejectUnknownKeys(value, ["type", "value"], `Model output[${index}]`);
+    try {
+      const raw = (value as { value?: unknown }).value;
+      assertJson(raw, `Model output[${index}].value`);
+      return Object.freeze({
+        type: "json" as const,
+        value: copyJson(raw),
+      });
+    } catch (error) {
+      throw invalidCandidate(
+        `Model output[${index}].value must be JSON-safe`,
+        `output[${index}].value`,
+        error,
+      );
+    }
   }
   if (block.type === "tool-call") {
     rejectUnknownKeys(value, ["type", "id", "name", "args", "raw"], `Model output[${index}]`);

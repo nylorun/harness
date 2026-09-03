@@ -28,7 +28,7 @@ export const tools = [
     name: "convert",
     description:
       "Convert a number between celsius, fahrenheit, kelvin, meter, kilometer, foot, and mile. Use after calculate when the result needs a different unit.",
-    parameters: z.object({
+    inputSchema: z.object({
       value: z.number(),
       from: z.enum(units),
       to: z.enum(units),

@@ -47,6 +47,7 @@ export async function runStep(input: {
     readonly context?: import("../types/shared.js").JsonObject;
   }>;
   states: CapabilityStateRegistry;
+  output?: import("../session/output-contract.js").TurnOutputContract;
   recordModelRequested(
     state: SessionSnapshot,
     active: ActiveModelExecutionRecord,
@@ -101,6 +102,7 @@ export async function runStep(input: {
         context,
         arrivals: input.arrivals,
         toolResults: input.toolResults,
+        output: input.output,
       });
       requestedModelId = request.model?.id;
       const call = projectModelCall(request);
@@ -125,10 +127,32 @@ export async function runStep(input: {
         }),
       }));
       try {
+        let prepared = false;
         const outcome = await input.agent.invoke(call, {
           request,
           invocationId,
           signal: input.signal,
+          reportPreparedCall(value) {
+            if (prepared)
+              throw new HarnessError(
+                "model.adapter-invalid-options",
+                "Model adapter may report only one prepared call per invocation",
+              );
+            if (typeof value.adapter !== "string" || value.adapter === "")
+              throw new HarnessError(
+                "model.adapter-invalid-options",
+                "Prepared model call adapter must be a non-empty string",
+              );
+            prepared = true;
+            const reported = Object.freeze({ adapter: value.adapter, call: copyJson(value.call) });
+            input.observe(() => ({
+              type: "model.prepared",
+              turnId: input.turnId,
+              stepId: input.stepId,
+              ...(request.model?.id === undefined ? {} : { requestedModelId: request.model.id }),
+              attributes: reported,
+            }));
+          },
         });
         if (input.signal.aborted) throw input.signal.reason;
         if (isDeferred(outcome))
@@ -153,7 +177,7 @@ export async function runStep(input: {
     },
     input.observe,
   );
-  const output = sealStep(context);
+  const output = sealStep(context, input.output);
   const candidate = output.kind === "tools" ? output.plan.candidate : context.currentCandidate;
   return Object.freeze({
     stepId: input.stepId,
@@ -197,7 +221,6 @@ function snapshotConfiguration(
     tools: snapshotTools(configuration.tools),
     toolContracts: copyJson(configuration.toolContracts),
     contributors: copyJson(configuration.contributors),
-    digests: copyJson(configuration.digests),
   });
 }
 
@@ -208,7 +231,12 @@ function snapshotTools(tools: readonly BoundToolDefinition[]): readonly ObserveT
         name: tool.name,
         ...(tool.description === undefined ? {} : { description: tool.description }),
         owner: tool.owner,
-        parameters: Object.freeze({ jsonSchema: copyJson(tool.parameters.jsonSchema) }),
+        inputSchema: Object.freeze({ jsonSchema: copyJson(tool.inputSchema.jsonSchema) }),
+        ...(tool.outputSchema === undefined
+          ? {}
+          : {
+              outputSchema: Object.freeze({ jsonSchema: copyJson(tool.outputSchema.jsonSchema) }),
+            }),
       }),
     ),
   );

@@ -13,6 +13,7 @@ describe("public API", () => {
         "AgentLifecycleError",
         "BuiltAgent",
         "tool",
+        "defineSchema",
         "model",
         "middleware",
       ]),
@@ -21,6 +22,6 @@ describe("public API", () => {
     expect(manifest.exports).toHaveProperty(".");
     expect(manifest.exports).toHaveProperty("./model/adapters");
     expect(Object.keys(manifest.exports)).toEqual([".", "./model/adapters"]);
-    expect(manifest.dependencies).toEqual({ "@noble/hashes": "^2.3.0" });
+    expect(manifest.dependencies).toBeUndefined();
   });
 });

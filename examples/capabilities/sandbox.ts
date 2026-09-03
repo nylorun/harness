@@ -20,7 +20,7 @@ export function sandboxTools(workspaces: Map<string, DockerWorkspace>) {
       tool({
         name: "list_files",
         description: "List files in the isolated Docker workspace.",
-        parameters: z.object({}),
+        inputSchema: z.object({}),
         async execute(_, context) {
           try {
             return {
@@ -35,7 +35,7 @@ export function sandboxTools(workspaces: Map<string, DockerWorkspace>) {
       tool({
         name: "read_file",
         description: "Read a UTF-8 file from the isolated workspace.",
-        parameters: z.object({ path: z.string().min(1).max(200) }),
+        inputSchema: z.object({ path: z.string().min(1).max(200) }),
         async execute({ path }, context) {
           try {
             return {
@@ -50,7 +50,7 @@ export function sandboxTools(workspaces: Map<string, DockerWorkspace>) {
       tool({
         name: "write_file",
         description: "Write a UTF-8 file to the isolated workspace after approval.",
-        parameters: z.object({ path: z.string().min(1).max(200), content: z.string().max(20_000) }),
+        inputSchema: z.object({ path: z.string().min(1).max(200), content: z.string().max(20_000) }),
         async execute({ path, content }, context) {
           if (context.resume?.approved === false) {
             return { kind: "denied" as const, reason: "The user declined the workspace write." };
@@ -69,7 +69,7 @@ export function sandboxTools(workspaces: Map<string, DockerWorkspace>) {
       tool({
         name: "run_shell",
         description: "Run a shell script inside the isolated Docker workspace.",
-        parameters: z.object({ script: z.string().min(1).max(4_000) }),
+        inputSchema: z.object({ script: z.string().min(1).max(4_000) }),
         async execute({ script }, context) {
           try {
             return {

@@ -10,6 +10,9 @@ export { HarnessError, isHarnessError } from "./errors.js";
 export type { HarnessErrorCode, HarnessErrorDetails, HarnessErrorOptions } from "./errors.js";
 export { BuiltAgent } from "./build/agent.js";
 export { middleware, model, tool } from "./build/helpers.js";
+export { defineSchema } from "./build/schema.js";
+export { preparedModel } from "./model/prepared.js";
+export type { PreparedModelOptions } from "./model/prepared.js";
 
 export type { AgentManifest, MiddlewareManifest } from "./types/manifest.js";
 export type {
@@ -31,6 +34,7 @@ export type {
   ModelFinishReason,
   ModelAdapter,
   ModelAdapterContext,
+  ModelPreparedCall,
   ContextContributor,
   ContextMutationOptions,
   ContextSnapshot,
@@ -74,6 +78,7 @@ export type {
   InputEvent,
   InputHandle,
   InputOptions,
+  OutputInputOptions,
   MessageInput,
   Session,
   SessionInput,
@@ -87,6 +92,7 @@ export type {
   SeededSessionOptions,
   SessionSnapshot,
   TranscriptEntry,
+  UserContentPart,
 } from "./types/session.js";
 export type {
   BoundToolSchema,
@@ -98,8 +104,17 @@ export type {
   ToolDefinition,
   ToolExecutionContext,
   ToolExecutionResume,
-  ToolObjectSchema,
+  ToolInputSchema,
+  ToolOutputSchema,
+  ToolSchema,
+  ToolSchemaSource,
+  StandardToolSchema,
+  StandardSchemaIssue,
+  SchemaIssue,
+  SchemaValidation,
+  SchemaOutput,
   ToolOwner,
   ToolOutcome,
   ToolResult,
+  ToolValidationFailureDetails,
 } from "./types/tool.js";

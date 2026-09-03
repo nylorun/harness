@@ -47,7 +47,7 @@ describe("capability declarations", () => {
     const toolOwners: unknown[] = [];
     const increment = tool<typeof schema, { readonly id: string; count: number }>({
       name: "increment",
-      parameters: schema,
+      inputSchema: schema,
       async execute(_args, context) {
         const state = await context.state;
         state.count += 1;
