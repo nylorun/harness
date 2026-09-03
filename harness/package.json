@@ -1,7 +1,7 @@
 {
   "name": "@nylorun/harness",
   "version": "0.10.0-beta.1",
-  "description": "A provider-neutral, in-memory agent loop for TypeScript.",
+  "description": "Nylorun's TypeScript agent runtime. See github.com/nylorun/harness.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -9,7 +9,7 @@
     "url": "git+https://github.com/nylorun/harness.git",
     "directory": "harness"
   },
-  "homepage": "https://github.com/nylorun/harness/tree/main/harness#readme",
+  "homepage": "https://github.com/nylorun/harness",
   "bugs": "https://github.com/nylorun/harness/issues",
   "author": "Nylo",
   "keywords": [

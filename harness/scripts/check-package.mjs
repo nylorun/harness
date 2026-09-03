@@ -7,13 +7,13 @@ import ts from "typescript";
 const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 const canonicalLicense = readFileSync("../LICENSE", "utf8");
 const forbidden = ["@nylorun/runtime", "@nylorun/agent"];
-if (manifest.description !== "A provider-neutral, in-memory agent loop for TypeScript.")
-  throw new Error("Harness package description must describe the current provider-neutral loop.");
+if (manifest.description !== "Nylorun's TypeScript agent runtime. See github.com/nylorun/harness.")
+  throw new Error("Harness package description must direct users to the canonical repository.");
 if (!Array.isArray(manifest.keywords) || manifest.keywords.length === 0)
   throw new Error("Harness package must declare npm keywords.");
 if (manifest.author !== "Nylo") throw new Error("Harness package must identify its author.");
-if (manifest.homepage !== "https://github.com/nylorun/harness/tree/main/harness#readme")
-  throw new Error("Harness package homepage must point to its canonical README.");
+if (manifest.homepage !== "https://github.com/nylorun/harness")
+  throw new Error("Harness package homepage must point to its canonical repository.");
 if (manifest.bugs !== "https://github.com/nylorun/harness/issues")
   throw new Error("Harness package bugs field must point to the canonical issue tracker.");
 if (

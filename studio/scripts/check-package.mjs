@@ -6,6 +6,7 @@ const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 if (manifest.license !== "Apache-2.0") throw new Error("Studio must publish under Apache-2.0.");
 if (manifest.repository?.url !== "git+https://github.com/nylorun/harness.git" || manifest.repository?.directory !== "studio") throw new Error("Studio must reference its public source directory.");
 if (manifest.bugs !== "https://github.com/nylorun/harness/issues") throw new Error("Studio must reference the public issue tracker.");
+if (manifest.homepage !== "https://docs.nylorun.com") throw new Error("Studio homepage must point to Nylorun documentation.");
 if (manifest.dependencies?.["@nylorun/create-agent"] !== undefined) throw new Error("Studio must not depend on Create Agent.");
 const cache = mkdtempSync(join(tmpdir(), "nylo-studio-pack-"));
 const output = execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["pack", "--json", "--dry-run", "--ignore-scripts"], { encoding: "utf8", env: { ...process.env, npm_config_cache: cache } });
