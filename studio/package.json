@@ -1,7 +1,7 @@
 {
   "name": "@nylorun/studio",
-  "version": "0.2.0-rc.3",
-  "description": "Developer-only local Studio for Nylo agents.",
+  "version": "0.2.0-rc.4",
+  "description": "Local developer Studio for Nylorun agents. Docs: docs.nylorun.com.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -9,7 +9,7 @@
     "url": "git+https://github.com/nylorun/harness.git",
     "directory": "studio"
   },
-  "homepage": "https://github.com/nylorun/harness/tree/main/studio#readme",
+  "homepage": "https://docs.nylorun.com",
   "bugs": "https://github.com/nylorun/harness/issues",
   "keywords": [
     "agent",
