@@ -97,5 +97,5 @@ export const commitFinal = (
   state: SessionSnapshot,
   turnId: string,
   stepId: string,
-  output: string,
+  output: import("../types/shared.js").JsonValue,
 ): SessionSnapshot => append(state, { kind: "final", turnId, stepId, output });

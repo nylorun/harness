@@ -1,4 +1,5 @@
 import type { InputEvent, InputOptions } from "../types/session.js";
+import type { TurnOutputContract } from "./output-contract.js";
 import { copyJson, copyJsonObject } from "../utils/immutable.js";
 import { SubmissionStream } from "./submission-stream.js";
 
@@ -6,13 +7,13 @@ export type WorkEvent = InputEvent | { readonly kind: "continue" };
 
 export interface QueuedInput {
   readonly event: WorkEvent;
-  readonly options?: InputOptions;
+  readonly options?: InputOptions & { readonly output?: TurnOutputContract };
   readonly stream: SubmissionStream;
   cancelled: boolean;
 }
 
 export type QueuedInterrupt = Omit<QueuedInput, "event"> & {
-  readonly event: Extract<InputEvent, { kind: "interrupt" }>;
+  readonly event: InputEvent & { readonly kind: "interrupt" };
 };
 
 export interface QueueAbortHandlers {
@@ -31,6 +32,22 @@ export function snapshotInput(event: InputEvent): InputEvent {
   switch (event.kind) {
     case "user-message":
     case "interrupt":
+      if ("content" in event)
+        return Object.freeze({
+          kind: event.kind,
+          content: Object.freeze(
+            event.content.map((part) =>
+              part.type === "text"
+                ? Object.freeze({ type: "text" as const, text: part.text })
+                : Object.freeze({
+                    type: "media" as const,
+                    mediaType: part.mediaType,
+                    reference: copyJson(part.reference),
+                  }),
+            ),
+          ),
+          ...(event.metadata ? { metadata: copyJsonObject(event.metadata, "input metadata") } : {}),
+        });
       return Object.freeze({
         kind: event.kind,
         text: event.text,

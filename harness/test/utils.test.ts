@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { digest } from "../src/utils/digest.js";
 import { createId } from "../src/utils/ids.js";
 import { createObserverRegistry } from "../src/utils/observe.js";
 
@@ -7,12 +6,6 @@ describe("portable utility primitives", () => {
   it("creates prefixed UUID v4 identifiers with Web Crypto", () => {
     expect(createId("session")).toMatch(
       /^session_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
-  });
-
-  it("preserves the synchronous lowercase SHA-256 digest format", () => {
-    expect(digest({ b: 2, a: 1 })).toBe(
-      "43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777",
     );
   });
 });

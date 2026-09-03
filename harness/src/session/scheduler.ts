@@ -245,7 +245,10 @@ export class SessionScheduler {
     return stream;
   }
 
-  private publish(stream: SubmissionStream, event: SessionEvent): void {
+  private publish(
+    stream: SubmissionStream,
+    event: SessionEvent<import("../types/shared.js").JsonValue>,
+  ): void {
     stream.emit(event);
     this.events.emit(event);
   }
@@ -307,7 +310,8 @@ export class SessionScheduler {
               this.emitObserve({ type: "session.continued", inputId: submission.stream.inputId });
             return committed;
           }),
-        onConversation: (event: SessionEvent) => this.publish(submission.stream, event),
+        onConversation: (event: SessionEvent<import("../types/shared.js").JsonValue>) =>
+          this.publish(submission.stream, event),
         claimInterrupts: (state: SessionSnapshot, turnId: string) =>
           this.claimInterrupts(state, turnId),
       };
@@ -315,7 +319,12 @@ export class SessionScheduler {
         ? await this.resumeTurn(submission, context)
         : submission.event.kind === "continue"
           ? await this.turns.continue(this.snapshotValue, context)
-          : await this.turns.start(this.snapshotValue, submission.event, context);
+          : await this.turns.start(
+              this.snapshotValue,
+              submission.event,
+              context,
+              submission.options?.output,
+            );
       this.applyTurnOutcome(submission.stream, outcome);
     } catch (error) {
       if (this.inFlightPlan && !this.recordFailure) {

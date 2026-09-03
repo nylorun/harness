@@ -20,7 +20,7 @@ export function codexTools(workspaces: Map<string, CodexWorkspace>) {
       tool({
         name: "codex_exec",
         description: "Run a coding task with the host-installed Codex CLI after approval.",
-        parameters: z.object({ task: z.string().min(1).max(4_000) }),
+        inputSchema: z.object({ task: z.string().min(1).max(4_000) }),
         async execute({ task }, context) {
           if (context.resume?.approved === false) {
             return { kind: "denied" as const, reason: "The user declined the Codex run." };

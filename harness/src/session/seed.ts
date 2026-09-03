@@ -5,6 +5,7 @@ import type {
   SessionSeed,
   TranscriptEntry,
   TranscriptToolsEntry,
+  UserContentPart,
 } from "../types/session.js";
 import type { ToolResult } from "../types/tool.js";
 import { assertJson, copyJson, copyJsonObject } from "../utils/immutable.js";
@@ -97,13 +98,12 @@ function entryAt(value: unknown, index: number): TranscriptEntry {
     case "final":
       exactKeys(entry, ["kind", "turnId", "stepId", "output"], `Transcript entry ${index}`);
       requiredString(entry.stepId, `Transcript entry ${index} stepId`);
-      if (typeof entry.output !== "string")
-        fail(`Transcript entry ${index} output must be a string`);
+      assertJson(entry.output, `Transcript entry ${index} output`);
       return Object.freeze({
         kind: "final",
         turnId: entry.turnId as string,
         stepId: entry.stepId as string,
-        output: entry.output,
+        output: copyJson(entry.output),
       });
     default:
       fail(`Transcript entry ${index} has unknown kind '${String(entry.kind)}'`);
@@ -116,6 +116,18 @@ function inputEvent(value: unknown, index: number): InputEvent {
   switch (event.kind) {
     case "user-message":
     case "interrupt":
+      if ("content" in event) {
+        exactKeys(event, ["kind", "content", "metadata"], `Transcript input ${index}`);
+        if (!Array.isArray(event.content))
+          fail(`Transcript input ${index} content must be an array`);
+        return Object.freeze({
+          kind: event.kind,
+          content: contentParts(event.content, index),
+          ...(event.metadata === undefined
+            ? {}
+            : { metadata: copyJsonObject(event.metadata, `transcript input ${index} metadata`) }),
+        });
+      }
       exactKeys(event, ["kind", "text", "metadata"], `Transcript input ${index}`);
       if (typeof event.text !== "string") fail(`Transcript input ${index} text must be a string`);
       return Object.freeze({
@@ -149,6 +161,42 @@ function inputEvent(value: unknown, index: number): InputEvent {
   }
 }
 
+function contentParts(value: readonly unknown[], inputIndex: number): readonly UserContentPart[] {
+  return Object.freeze(
+    value.map((value, partIndex) => {
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        fail(`Transcript input ${inputIndex} content part ${partIndex} must be an object`);
+      const part = value as Record<string, unknown>;
+      if (part.type === "text") {
+        exactKeys(
+          part,
+          ["type", "text"],
+          `Transcript input ${inputIndex} content part ${partIndex}`,
+        );
+        if (typeof part.text !== "string")
+          fail(`Transcript input ${inputIndex} text part ${partIndex} must contain text`);
+        return Object.freeze({ type: "text" as const, text: part.text });
+      }
+      if (part.type === "media") {
+        exactKeys(
+          part,
+          ["type", "mediaType", "reference"],
+          `Transcript input ${inputIndex} content part ${partIndex}`,
+        );
+        if (typeof part.mediaType !== "string" || part.mediaType === "")
+          fail(`Transcript input ${inputIndex} media part ${partIndex} must contain mediaType`);
+        assertJson(part.reference, `transcript input ${inputIndex} media reference ${partIndex}`);
+        return Object.freeze({
+          type: "media" as const,
+          mediaType: part.mediaType,
+          reference: copyJson(part.reference),
+        });
+      }
+      fail(`Transcript input ${inputIndex} content part ${partIndex} has unknown type`);
+    }),
+  );
+}
+
 function toolResult(value: unknown, index: number): ToolResult {
   if (!value || typeof value !== "object") fail(`Tool result ${index} must be an object`);
   const result = value as Record<string, unknown>;
@@ -165,7 +213,11 @@ function toolResult(value: unknown, index: number): ToolResult {
       if (typeof result.reason !== "string") fail(`Tool result ${index} reason must be a string`);
       return Object.freeze({ ...base, kind: "denied", reason: result.reason });
     case "failed":
-      exactKeys(result, ["callId", "toolName", "kind", "code", "message"], `Tool result ${index}`);
+      exactKeys(
+        result,
+        ["callId", "toolName", "kind", "code", "message", "details"],
+        `Tool result ${index}`,
+      );
       if (typeof result.code !== "string" || typeof result.message !== "string")
         fail(`Tool result ${index} code and message must be strings`);
       return Object.freeze({
@@ -173,10 +225,54 @@ function toolResult(value: unknown, index: number): ToolResult {
         kind: "failed",
         code: result.code,
         message: result.message,
+        ...(result.details === undefined
+          ? {}
+          : { details: validationDetails(result.details, index) }),
       });
     default:
       fail(`Tool result ${index} has unknown kind '${String(result.kind)}'`);
   }
+}
+
+function validationDetails(
+  value: unknown,
+  index: number,
+): NonNullable<Extract<ToolResult, { kind: "failed" }>["details"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail(`Tool result ${index} details must be an object`);
+  const details = value as Record<string, unknown>;
+  exactKeys(details, ["phase", "issues"], `Tool result ${index} details`);
+  if (details.phase !== "input" && details.phase !== "output")
+    fail(`Tool result ${index} details phase must be input or output`);
+  if (!Array.isArray(details.issues)) fail(`Tool result ${index} details issues must be an array`);
+  return Object.freeze({
+    phase: details.phase,
+    issues: Object.freeze(
+      details.issues.map((issue, issueIndex) => {
+        if (!issue || typeof issue !== "object" || Array.isArray(issue))
+          fail(`Tool result ${index} details issue ${issueIndex} must be an object`);
+        const item = issue as Record<string, unknown>;
+        exactKeys(
+          item,
+          ["path", "code", "message"],
+          `Tool result ${index} details issue ${issueIndex}`,
+        );
+        if (!Array.isArray(item.path))
+          fail(`Tool result ${index} details issue ${issueIndex} path must be an array`);
+        if (item.path.some((part) => typeof part !== "string" && typeof part !== "number"))
+          fail(
+            `Tool result ${index} details issue ${issueIndex} path must contain strings or numbers`,
+          );
+        if (typeof item.code !== "string" || typeof item.message !== "string")
+          fail(`Tool result ${index} details issue ${issueIndex} code and message must be strings`);
+        return Object.freeze({
+          path: Object.freeze([...item.path] as (string | number)[]),
+          code: item.code,
+          message: item.message,
+        });
+      }),
+    ),
+  });
 }
 
 function validateSeedCandidate(value: unknown, index: number): void {
@@ -198,6 +294,11 @@ function validateSeedCandidate(value: unknown, index: number): void {
       exactKeys(block, ["type", "text"], `Candidate output ${blockIndex}`);
       if (typeof block.text !== "string")
         fail(`Candidate output ${blockIndex} text must be a string`);
+      return;
+    }
+    if (block.type === "json") {
+      exactKeys(block, ["type", "value"], `Candidate output ${blockIndex}`);
+      assertJson(block.value, `Candidate output ${blockIndex} value`);
       return;
     }
     if (block.type === "tool-call") {

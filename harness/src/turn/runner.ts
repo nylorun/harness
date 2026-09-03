@@ -5,7 +5,7 @@ import type {
   SessionRecord,
   SessionSnapshot,
 } from "../types/session.js";
-import type { JsonObject, Tripwire } from "../types/shared.js";
+import type { JsonObject, JsonValue, Tripwire } from "../types/shared.js";
 import type { RequiredInteraction, ToolResult } from "../types/tool.js";
 import {
   beginTurn,
@@ -21,12 +21,14 @@ import { copyJson } from "../utils/immutable.js";
 import type { ObserveEmit } from "../utils/observe.js";
 import { ToolPlanRunner } from "./plan-runner.js";
 import type { CapabilityStateRegistry } from "../session/capability-state.js";
+import type { TurnOutputContract } from "../session/output-contract.js";
 
 export interface PendingTurn {
   readonly plan: ToolPlanRunner;
   readonly turnId: string;
   readonly stepId: string;
   readonly stepNumber: number;
+  readonly output?: TurnOutputContract;
 }
 
 export type TurnProgress =
@@ -35,7 +37,7 @@ export type TurnProgress =
       readonly state: SessionSnapshot;
       readonly turnId: string;
       readonly stepId: string;
-      readonly output: string;
+      readonly output: JsonValue;
     }
   | {
       readonly kind: "interaction-required";
@@ -69,7 +71,7 @@ export interface TurnRunContext {
     transition: SessionRecord["transition"],
     active?: ActiveExecutionRecord,
   ) => Promise<SessionSnapshot>;
-  readonly onConversation: (event: SessionEvent) => void;
+  readonly onConversation: (event: SessionEvent<JsonValue>) => void;
   readonly claimInterrupts: (
     state: SessionSnapshot,
     turnId: string,
@@ -88,11 +90,12 @@ export class TurnRunner {
     state: SessionSnapshot,
     event: InputEvent,
     context: TurnRunContext,
+    output?: TurnOutputContract,
   ): Promise<TurnProgress> {
     const turnId = createId("turn");
     state = await context.commit(beginTurn(state, turnId, event), "input");
     context.onConversation({ type: "input", event, turnId });
-    return this.advance(state, turnId, 1, [event], [], context);
+    return this.advance(state, turnId, 1, [event], [], context, output);
   }
 
   async continue(state: SessionSnapshot, context: TurnRunContext): Promise<TurnProgress> {
@@ -133,6 +136,7 @@ export class TurnRunner {
       claimed.arrivals,
       progress.results,
       context,
+      pending.output,
     );
   }
 
@@ -143,6 +147,7 @@ export class TurnRunner {
     arrivals: readonly InputEvent[],
     initialResults: readonly ToolResult[],
     context: TurnRunContext,
+    output?: TurnOutputContract,
   ): Promise<TurnProgress> {
     let state = initialState;
     let stepArrivals = arrivals;
@@ -163,6 +168,7 @@ export class TurnRunner {
         signal: context.signal,
         session: this.session,
         states: context.states,
+        output,
         recordModelRequested: (next, active) => context.commit(next, "model-requested", active),
       });
       context.assertCurrent();
@@ -175,6 +181,7 @@ export class TurnRunner {
               turnId,
               stepId,
               stepNumber,
+              ...(output === undefined ? {} : { output }),
             }
           : undefined;
 

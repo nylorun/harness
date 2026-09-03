@@ -10,17 +10,23 @@ import type {
   PromptContentPart,
   PromptItem,
 } from "../types/model.js";
-import type { JsonObject } from "../types/shared.js";
+import type { JsonObject, JsonValue } from "../types/shared.js";
 import { copyJsonObject } from "../utils/immutable.js";
+import { preparedModel } from "./prepared.js";
 
 export type ChatCompletionsMessage =
-  | { readonly role: "system" | "user"; readonly content: string }
+  | { readonly role: "system"; readonly content: string }
+  | { readonly role: "user"; readonly content: string | readonly ChatCompletionsContentPart[] }
   | {
       readonly role: "assistant";
       readonly content: string | null;
       readonly tool_calls?: readonly ChatCompletionsToolCall[];
     }
   | { readonly role: "tool"; readonly tool_call_id: string; readonly content: string };
+
+export type ChatCompletionsContentPart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image_url"; readonly image_url: Readonly<{ url: string }> };
 
 export interface ChatCompletionsToolCall {
   readonly id: string;
@@ -36,6 +42,10 @@ export interface ChatCompletionsRequest {
   }>[];
   readonly temperature?: number;
   readonly max_completion_tokens?: number;
+  readonly response_format?: Readonly<{
+    type: "json_schema";
+    json_schema: Readonly<{ name: string; schema: JsonObject }>;
+  }>;
 }
 
 export interface ResponsesRequest {
@@ -49,10 +59,17 @@ export interface ResponsesRequest {
   }>[];
   readonly temperature?: number;
   readonly max_output_tokens?: number;
+  readonly text?: Readonly<{
+    format: Readonly<{ type: "json_schema"; name: string; schema: JsonObject }>;
+  }>;
 }
 
 export type ResponsesInputItem =
-  | { readonly type: "message"; readonly role: "user" | "assistant"; readonly content: string }
+  | {
+      readonly type: "message";
+      readonly role: "user" | "assistant";
+      readonly content: string | readonly ResponsesContentPart[];
+    }
   | {
       readonly type: "function_call";
       readonly call_id: string;
@@ -60,6 +77,10 @@ export type ResponsesInputItem =
       readonly arguments: string;
     }
   | { readonly type: "function_call_output"; readonly call_id: string; readonly output: string };
+
+export type ResponsesContentPart =
+  | { readonly type: "input_text"; readonly text: string }
+  | { readonly type: "input_image"; readonly image_url: string };
 
 export interface MessagesRequest {
   readonly system?: string;
@@ -74,7 +95,10 @@ export interface MessagesRequest {
 }
 
 export type MessagesMessage =
-  | { readonly role: "user"; readonly content: string | readonly MessagesToolResult[] }
+  | {
+      readonly role: "user";
+      readonly content: string | readonly (MessagesToolResult | MessagesUserContentPart)[];
+    }
   | { readonly role: "assistant"; readonly content: readonly MessagesAssistantPart[] };
 
 export type MessagesAssistantPart =
@@ -92,6 +116,10 @@ export interface MessagesToolResult {
   readonly content: string;
   readonly is_error?: boolean;
 }
+
+export type MessagesUserContentPart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image"; readonly source: Readonly<{ type: "url"; url: string }> };
 
 export type AdapterSend<Request> = (
   request: Request,
@@ -123,7 +151,7 @@ export function toChatCompletions(call: ModelCall): ChatCompletionsRequest {
         ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }),
       };
     }
-    return { role: "user", content: textOf(item) };
+    return { role: "user", content: chatContent(item.content) };
   });
   return {
     messages,
@@ -140,11 +168,22 @@ export function toChatCompletions(call: ModelCall): ChatCompletionsRequest {
           })),
         }),
     ...chatControls(call),
+    ...(call.outputSchema === undefined
+      ? {}
+      : {
+          response_format: {
+            type: "json_schema" as const,
+            json_schema: { name: "harness_output", schema: call.outputSchema },
+          },
+        }),
   };
 }
 
 /** Translate a Chat Completions response into a Harness candidate. */
-export function fromChatCompletions(value: unknown): ModelCandidate {
+export function fromChatCompletions(
+  value: unknown,
+  call?: Pick<ModelCall, "outputSchema">,
+): ModelCandidate {
   const response = record(value, "response");
   const choices = array(response.choices, "response.choices");
   if (choices.length === 0)
@@ -153,7 +192,7 @@ export function fromChatCompletions(value: unknown): ModelCandidate {
   const message = record(choice.message, "response.choices[0].message");
   const output: ModelOutputBlock[] = [];
   if (typeof message.content === "string" && message.content !== "")
-    output.push({ type: "text", text: message.content });
+    output.push(outputText(message.content, call?.outputSchema !== undefined));
   if (typeof message.reasoning_content === "string" && message.reasoning_content !== "")
     output.push({ type: "reasoning", text: message.reasoning_content });
   for (const [index, raw] of optionalArray(
@@ -182,8 +221,15 @@ export function fromChatCompletions(value: unknown): ModelCandidate {
 
 /** Return a Harness adapter backed by an application-owned Chat Completions send function. */
 export function chatCompletionsAdapter(send: AdapterSend<ChatCompletionsRequest>): ModelAdapter {
-  return async (call, context) =>
-    fromChatCompletions(await send(toChatCompletions(call), call, context));
+  return preparedModel({
+    adapter: "openai.chat-completions",
+    async prepare(call) {
+      const request = toChatCompletions(call);
+      return { request, observed: request as unknown as JsonValue };
+    },
+    send,
+    decode: fromChatCompletions,
+  });
 }
 
 /** Translate a Harness call to the OpenAI Responses request shape. */
@@ -207,7 +253,7 @@ export function toResponses(call: ModelCall): ResponsesRequest {
         })),
       ];
     }
-    return [{ type: "message", role: "user", content: textOf(item) }];
+    return [{ type: "message", role: "user", content: responsesContent(item.content) }];
   });
   return {
     ...(instructions.length === 0 ? {} : { instructions: instructions.join("\n\n") }),
@@ -223,11 +269,25 @@ export function toResponses(call: ModelCall): ResponsesRequest {
           })),
         }),
     ...responsesControls(call),
+    ...(call.outputSchema === undefined
+      ? {}
+      : {
+          text: {
+            format: {
+              type: "json_schema" as const,
+              name: "harness_output",
+              schema: call.outputSchema,
+            },
+          },
+        }),
   };
 }
 
 /** Translate an OpenAI Responses response into a Harness candidate. */
-export function fromResponses(value: unknown): ModelCandidate {
+export function fromResponses(
+  value: unknown,
+  call?: Pick<ModelCall, "outputSchema">,
+): ModelCandidate {
   const response = record(value, "response");
   if (response.error !== undefined && response.error !== null)
     throw invalidResponse("response.error is present", "response.error");
@@ -250,7 +310,7 @@ export function fromResponses(value: unknown): ModelCandidate {
       ).entries()) {
         const part = record(rawPart, `response.output[${index}].content[${partIndex}]`);
         if (part.type === "output_text" && typeof part.text === "string")
-          output.push({ type: "text", text: part.text });
+          output.push(outputText(part.text, call?.outputSchema !== undefined));
       }
       continue;
     }
@@ -275,12 +335,25 @@ export function fromResponses(value: unknown): ModelCandidate {
 
 /** Return a Harness adapter backed by an application-owned Responses send function. */
 export function responsesAdapter(send: AdapterSend<ResponsesRequest>): ModelAdapter {
-  return async (call, context) => fromResponses(await send(toResponses(call), call, context));
+  return preparedModel({
+    adapter: "openai.responses",
+    async prepare(call) {
+      const request = toResponses(call);
+      return { request, observed: request as unknown as JsonValue };
+    },
+    send,
+    decode: fromResponses,
+  });
 }
 
 /** Translate a Harness call to the Anthropic Messages request shape. */
 export function toMessages(call: ModelCall, defaultMaxOutputTokens: number): MessagesRequest {
   checkedMaxOutputTokens(defaultMaxOutputTokens);
+  if (call.outputSchema !== undefined)
+    throw new HarnessError(
+      "model.unsupported-output-schema",
+      "Anthropic Messages output schemas require a custom prepared adapter",
+    );
   const instructions = call.prompt.filter((item) => item.kind === "instructions").map(textOf);
   const messages = call.prompt.flatMap((item): MessagesMessage[] => {
     if (item.kind === "instructions") return [];
@@ -302,14 +375,15 @@ export function toMessages(call: ModelCall, defaultMaxOutputTokens: number): Mes
       return [
         {
           role: "assistant",
-          content: item.content.map((part): MessagesAssistantPart =>
-            part.type === "text"
-              ? { type: "text", text: part.text }
-              : { type: "tool_use", id: part.id, name: part.name, input: part.args },
-          ),
+          content: item.content.map((part): MessagesAssistantPart => {
+            if (part.type === "text") return { type: "text", text: part.text };
+            if (part.type === "tool-call")
+              return { type: "tool_use", id: part.id, name: part.name, input: part.args };
+            throw unsupportedContent(part);
+          }),
         },
       ];
-    return [{ role: "user", content: textOf(item) }];
+    return [{ role: "user", content: messagesContent(item.content) }];
   });
   return {
     ...(instructions.length === 0 ? {} : { system: instructions.join("\n\n") }),
@@ -328,6 +402,15 @@ export function toMessages(call: ModelCall, defaultMaxOutputTokens: number): Mes
       : { temperature: call.model.controls.temperature }),
     max_tokens: call.model?.controls?.maxOutputTokens ?? defaultMaxOutputTokens,
   };
+}
+
+function outputText(text: string, structured: boolean): ModelOutputBlock {
+  if (!structured) return { type: "text", text };
+  try {
+    return { type: "json", value: JSON.parse(text) as JsonValue };
+  } catch {
+    return { type: "text", text };
+  }
 }
 
 /** Translate an Anthropic Messages response into a Harness candidate. */
@@ -364,14 +447,77 @@ export function fromMessages(value: unknown): ModelCandidate {
 /** Return a Harness adapter backed by an application-owned Anthropic Messages send function. */
 export function anthropicAdapter(options: AnthropicAdapterOptions): ModelAdapter {
   checkedMaxOutputTokens(options.defaultMaxOutputTokens);
-  return async (call, context) =>
-    fromMessages(
-      await options.send(toMessages(call, options.defaultMaxOutputTokens), call, context),
-    );
+  return preparedModel({
+    adapter: "anthropic.messages",
+    async prepare(call) {
+      const request = toMessages(call, options.defaultMaxOutputTokens);
+      return { request, observed: request as unknown as JsonValue };
+    },
+    send: options.send,
+    decode: fromMessages,
+  });
+}
+
+function chatContent(
+  parts: readonly PromptContentPart[],
+): string | readonly ChatCompletionsContentPart[] {
+  if (!parts.some((part) => part.type === "media")) return textOfParts(parts);
+  return parts.map((part): ChatCompletionsContentPart => {
+    if (part.type === "text") return { type: "text", text: part.text };
+    if (part.type === "media") return { type: "image_url", image_url: { url: imageUrl(part) } };
+    throw unsupportedContent(part);
+  });
+}
+
+function responsesContent(
+  parts: readonly PromptContentPart[],
+): string | readonly ResponsesContentPart[] {
+  if (!parts.some((part) => part.type === "media")) return textOfParts(parts);
+  return parts.map((part): ResponsesContentPart => {
+    if (part.type === "text") return { type: "input_text", text: part.text };
+    if (part.type === "media") return { type: "input_image", image_url: imageUrl(part) };
+    throw unsupportedContent(part);
+  });
+}
+
+function messagesContent(
+  parts: readonly PromptContentPart[],
+): string | readonly MessagesUserContentPart[] {
+  if (!parts.some((part) => part.type === "media")) return textOfParts(parts);
+  return parts.map((part): MessagesUserContentPart => {
+    if (part.type === "text") return { type: "text", text: part.text };
+    if (part.type === "media")
+      return { type: "image", source: { type: "url", url: imageUrl(part) } };
+    throw unsupportedContent(part);
+  });
+}
+
+function imageUrl(part: Extract<PromptContentPart, { type: "media" }>): string {
+  if (!part.mediaType.startsWith("image/")) throw unsupportedContent(part);
+  const reference = part.reference;
+  if (!reference || typeof reference !== "object" || Array.isArray(reference))
+    throw unsupportedContent(part);
+  const url = (reference as { readonly url?: unknown }).url;
+  if (typeof url !== "string" || url === "") throw unsupportedContent(part);
+  return url;
+}
+
+function unsupportedContent(part: PromptContentPart): HarnessError {
+  const label = part.type === "media" ? part.mediaType : part.type;
+  return new HarnessError(
+    "model.unsupported-content",
+    `Adapter does not support ${label} content without a custom prepared adapter`,
+  );
 }
 
 function textOf(item: PromptItem): string {
-  return item.content
+  const unsupported = item.content.find((part) => part.type === "media");
+  if (unsupported) throw unsupportedContent(unsupported);
+  return textOfParts(item.content);
+}
+
+function textOfParts(parts: readonly PromptContentPart[]): string {
+  return parts
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("");

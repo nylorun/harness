@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/harness",
-  "version": "0.9.0-beta.1",
+  "version": "0.10.0-beta.1",
   "description": "A provider-neutral, in-memory agent loop for TypeScript.",
   "type": "module",
   "license": "Apache-2.0",
@@ -66,8 +66,5 @@
   },
   "peerDependencies": {
     "zod": "^4.1.12"
-  },
-  "dependencies": {
-    "@noble/hashes": "^2.3.0"
   }
 }

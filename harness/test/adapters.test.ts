@@ -53,6 +53,7 @@ const context = {
   request: {} as ModelRequest,
   invocationId: "invocation-1",
   signal: new AbortController().signal,
+  reportPreparedCall: () => undefined,
 } satisfies ModelAdapterContext;
 
 describe("model adapter translators", () => {
@@ -88,6 +89,38 @@ describe("model adapter translators", () => {
       temperature: 0.2,
       max_completion_tokens: 256,
     });
+  });
+
+  it("maps portable output schemas without selecting provider strictness", () => {
+    const structured = {
+      ...call,
+      outputSchema: { type: "object", properties: { ok: { type: "boolean" } } },
+    };
+    expect(toChatCompletions(structured).response_format).toEqual({
+      type: "json_schema",
+      json_schema: { name: "harness_output", schema: structured.outputSchema },
+    });
+    expect(toResponses(structured).text).toEqual({
+      format: { type: "json_schema", name: "harness_output", schema: structured.outputSchema },
+    });
+    expect(
+      fromChatCompletions(
+        { choices: [{ finish_reason: "stop", message: { content: '{"ok":true}' } }] },
+        structured,
+      ).output,
+    ).toEqual([{ type: "json", value: { ok: true } }]);
+    expect(
+      fromResponses(
+        {
+          status: "completed",
+          output: [{ type: "message", content: [{ type: "output_text", text: "nope" }] }],
+        },
+        structured,
+      ).output,
+    ).toEqual([{ type: "text", text: "nope" }]);
+    expect(() => toMessages(structured, 1024)).toThrowError(
+      expect.objectContaining({ code: "model.unsupported-output-schema" }),
+    );
   });
 
   it("translates a projected call to Responses", () => {

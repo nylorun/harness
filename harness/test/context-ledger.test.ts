@@ -53,9 +53,9 @@ describe("runtime context", () => {
     ]);
   });
 
-  it("keeps configuration digests independent from current-step context", async () => {
-    const configurationDigests: string[] = [];
-    const contextDigests: string[] = [];
+  it("keeps configuration independent from current-step context", async () => {
+    const configurations: string[][] = [];
+    const contexts: string[][] = [];
     let calls = 0;
     const agent = testAgent()
       .use("assembly", async (request, next) => {
@@ -66,16 +66,16 @@ describe("runtime context", () => {
       })
       .with(
         model(async (_call, { request }) => {
-          configurationDigests.push(request.configuration.digests.request);
-          contextDigests.push(request.context.digest);
+          configurations.push(request.configuration.instructions.map((item) => item.text));
+          contexts.push(request.context.items.map((item) => String(item.value)));
           return ++calls === 1 ? toolCalls({ id: "call", name: "echo", args: {} }) : "done";
         }),
       )
       .build();
 
     await turn(agent).handle.completed;
-    expect(configurationDigests[0]).toBe(configurationDigests[1]);
-    expect(contextDigests[0]).not.toBe(contextDigests[1]);
+    expect(configurations[0]).toEqual(configurations[1]);
+    expect(contexts[0]).not.toEqual(contexts[1]);
   });
 
   it("tripwires an illegal context item type before the model runs", async () => {

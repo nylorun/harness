@@ -40,7 +40,7 @@ export const publish = {
     tool({
       name: "publish",
       description: "Publish a short public notice after policy review.",
-      parameters: z.object({ text: z.string().min(1).max(500) }),
+      inputSchema: z.object({ text: z.string().min(1).max(500) }),
       async execute({ text }) {
         return { kind: "completed" as const, output: { published: text } };
       },
@@ -56,7 +56,7 @@ export const lookup = {
     tool({
       name: "lookup",
       description: "Look up a named record. status is public. vault may contain secrets.",
-      parameters: z.object({ record: z.enum(["status", "vault"]) }),
+      inputSchema: z.object({ record: z.enum(["status", "vault"]) }),
       async execute({ record }) {
         return {
           kind: "completed" as const,

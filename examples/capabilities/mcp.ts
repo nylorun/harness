@@ -10,7 +10,7 @@ export function mcpTools(mcp: LocalMcp) {
       tool({
         name: "mcp_add",
         description: "Add integers through the local MCP demonstration server.",
-        parameters: z.object({ left: z.number().int(), right: z.number().int() }),
+        inputSchema: z.object({ left: z.number().int(), right: z.number().int() }),
         async execute({ left, right }) {
           try {
             return { kind: "completed" as const, output: (await mcp.add(left, right)) as never };

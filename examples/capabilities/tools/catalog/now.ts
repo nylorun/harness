@@ -5,7 +5,7 @@ export const tools = [
   tool({
     name: "now",
     description: "Return the current UTC time. Use when the user asks what time it is.",
-    parameters: z.object({}),
+    inputSchema: z.object({}),
     async execute() {
       const instant = new Date();
       return {

@@ -1,12 +1,13 @@
 import type { SessionEvent } from "../types/session.js";
+import type { JsonValue } from "../types/shared.js";
 
 /** Session-lifetime conversation log. Each stream() call replays from the start. */
-export class SessionEventLog implements AsyncIterable<SessionEvent> {
-  private readonly events: SessionEvent[] = [];
+export class SessionEventLog implements AsyncIterable<SessionEvent<JsonValue>> {
+  private readonly events: SessionEvent<JsonValue>[] = [];
   private readonly subscribers: (() => void)[][] = [];
   private done = false;
 
-  emit(event: SessionEvent): void {
+  emit(event: SessionEvent<JsonValue>): void {
     if (this.done) return;
     this.events.push(event);
     this.wake();
@@ -19,7 +20,7 @@ export class SessionEventLog implements AsyncIterable<SessionEvent> {
     this.subscribers.length = 0;
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<SessionEvent> {
+  [Symbol.asyncIterator](): AsyncIterator<SessionEvent<JsonValue>> {
     let index = 0;
     let closed = false;
     const waiting: (() => void)[] = [];
@@ -28,12 +29,12 @@ export class SessionEventLog implements AsyncIterable<SessionEvent> {
       const position = this.subscribers.indexOf(waiting);
       if (position !== -1) this.subscribers.splice(position, 1);
     };
-    const complete = (): IteratorResult<SessionEvent> => {
+    const complete = (): IteratorResult<SessionEvent<JsonValue>> => {
       closed = true;
       detach();
       return { done: true, value: undefined };
     };
-    const pull = (): Promise<IteratorResult<SessionEvent>> => {
+    const pull = (): Promise<IteratorResult<SessionEvent<JsonValue>>> => {
       if (closed) return Promise.resolve({ done: true, value: undefined });
       if (index < this.events.length)
         return Promise.resolve({ done: false, value: this.events[index++]! });

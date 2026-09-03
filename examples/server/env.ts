@@ -1,4 +1,8 @@
 import { config } from "dotenv";
+import {
+  createOpenAIImageEditor,
+  type ImageEditor,
+} from "../services/openai-image.js";
 
 config();
 
@@ -27,6 +31,15 @@ export function providerConfig(): Readonly<{
       ? {}
       : { headers: headers(process.env.NYLO_HEADERS_JSON) }),
   };
+}
+
+export function imageEditorConfig(): ImageEditor | undefined {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) return undefined;
+  return createOpenAIImageEditor({
+    apiKey,
+    model: process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-2",
+  });
 }
 
 function headers(value: string): Readonly<Record<string, string>> {

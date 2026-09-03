@@ -5,7 +5,6 @@ import type {
 } from "../types/model.js";
 import type { ContextItem, JsonObject, JsonValue } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
-import { digest } from "../utils/digest.js";
 import { copyJson } from "../utils/immutable.js";
 import { SlotDraft, type SlotOwner } from "./slot-assembly.js";
 
@@ -51,7 +50,7 @@ export class ContextDraft {
       ...(this.hostContext === undefined ? [] : [hostContributor()]),
       ...slots.map((slot) => contributor(slot.owner, slot.reason)),
     ]);
-    return Object.freeze({ items, contributors, digest: digest(items.map(itemDigest)) });
+    return Object.freeze({ items, contributors });
   }
 }
 
@@ -74,7 +73,6 @@ function hostContributor(): ContextContributor {
     middlewareId: "host",
     slot: "session",
     order: 0,
-    digest: digest({ middlewareId: "host", slot: "session", order: 0 }),
   });
 }
 
@@ -83,11 +81,6 @@ function contributor(owner: SlotOwner, reason?: string): ContextContributor {
     middlewareId: owner.middlewareId,
     slot: owner.slot,
     order: owner.order,
-    digest: digest({ middlewareId: owner.middlewareId, slot: owner.slot, order: owner.order }),
     ...(reason === undefined ? {} : { reason }),
   });
-}
-
-function itemDigest(item: ContextItem): object {
-  return item.type === undefined ? { value: item.value } : { type: item.type, value: item.value };
 }

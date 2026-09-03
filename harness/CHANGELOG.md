@@ -4,6 +4,44 @@ All notable changes to `@nylorun/harness` are documented in this file.
 
 The project follows [Semantic Versioning](https://semver.org/). Before 1.0, the public API is experimental: breaking changes may occur in minor releases, while patch releases are reserved for compatible fixes.
 
+## Unreleased
+
+## [0.10.0-beta.1] - 2026-09-03
+
+### Added
+
+- Portable ordered media input parts with opaque JSON references preserved through sessions,
+  transcripts, middleware, model calls, and observations.
+- `preparedModel()` for adapters that need to materialize a provider request while exposing the
+  JSON-safe derived call through the new `model.prepared` observation.
+- Direct `inputSchema` and optional `outputSchema` tool contracts. Harness accepts Zod v4,
+  synchronous Standard Schema values with JSON Schema conversion, and explicit validator-backed
+  `defineSchema()` contracts.
+- Structured input and output validation diagnostics on failed tool results.
+- Per-turn `session.input({ ... }, { outputSchema })` contracts for locally validated terminal JSON
+  results, including canonical model-call projection, JSON candidates, immutable final persistence,
+  and `output.invalid` tripwires.
+
+### Changed
+
+- Bundled provider translators map direct URL image references and fail unsupported media with the
+  stable `model.unsupported-content` error rather than dropping or stringifying it.
+- Chat Completions and Responses translators project terminal output schemas without choosing
+  provider strictness; Anthropic Messages reports `model.unsupported-output-schema` until an
+  application supplies a custom prepared adapter.
+- Tool definitions use `inputSchema` instead of `parameters`. Completed output is validated when an
+  `outputSchema` is supplied; the resulting JSON is the same value recorded, observed, and sent to
+  the model. Model configuration and `model.requested` observations expose optional output schemas.
+
+### Breaking changes
+
+- Replace every tool `parameters` field with `inputSchema`. `outputSchema` is now an optional tool
+  contract and completed tool output may be any JSON value, not only a string.
+- Terminal results, final events, and stream projections may now be JSON values. Consumers that
+  assumed string output must render or serialize `JsonValue` safely.
+- Custom model adapters receive the `reportPreparedCall` context method. Adapters that materialize
+  provider requests should use it (or `preparedModel()`) to emit one JSON-safe derived request.
+
 ## [0.9.0-beta.1] - 2026-09-02
 
 ### Added

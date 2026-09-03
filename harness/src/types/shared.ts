@@ -40,7 +40,8 @@ export interface ObserveToolSnapshot {
   readonly name: string;
   readonly description?: string;
   readonly owner: { readonly middlewareId: string; readonly slot: string };
-  readonly parameters: { readonly jsonSchema: JsonObject };
+  readonly inputSchema: { readonly jsonSchema: JsonObject };
+  readonly outputSchema?: { readonly jsonSchema: JsonObject };
 }
 
 /** JSON-only model-configuration view suitable for an observation stream. */
@@ -63,7 +64,7 @@ export interface ObserveSealedCall {
 export interface ObserveModelRequested {
   /** The exact immutable logical input supplied to the ModelAdapter. */
   readonly call: ModelCall;
-  /** Canonical configuration facts and attribution; hashes have no policy semantics. */
+  /** Canonical configuration facts and attribution. */
   readonly configuration: ObserveModelConfigurationSnapshot;
   /** Current-step runtime context and attribution. */
   readonly context: ContextSnapshot;
@@ -98,6 +99,14 @@ export type ObserveEvent =
       readonly inputId?: string;
       readonly requestedModelId?: string;
       readonly attributes: ObserveModelRequested;
+    }
+  | {
+      readonly type: "model.prepared";
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly inputId?: string;
+      readonly requestedModelId?: string;
+      readonly attributes: { readonly adapter: string; readonly call: JsonValue };
     }
   | {
       readonly type: "model.completed";
@@ -200,7 +209,7 @@ export type ObserveEvent =
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;
-      readonly attributes: { readonly output: string };
+      readonly attributes: { readonly output: JsonValue };
     }
   | {
       readonly type: "interaction.required";

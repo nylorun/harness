@@ -1,14 +1,31 @@
 import type { ModelCall, ModelCandidate } from "./model.js";
 import type { JsonObject, JsonValue, Observer, Tripwire } from "./shared.js";
-import type { RequiredInteraction, ToolExecutionResume, ToolOwner, ToolResult } from "./tool.js";
+import type {
+  RequiredInteraction,
+  SchemaOutput,
+  ToolExecutionResume,
+  ToolOwner,
+  ToolResult,
+  ToolSchemaSource,
+} from "./tool.js";
 
 export type InputEvent =
-  | { readonly kind: "user-message"; readonly text: string; readonly metadata?: JsonObject }
-  | { readonly kind: "interrupt"; readonly text: string; readonly metadata?: JsonObject }
+  | {
+      readonly kind: "user-message" | "interrupt";
+      readonly text: string;
+      readonly metadata?: JsonObject;
+    }
+  | {
+      readonly kind: "user-message" | "interrupt";
+      readonly content: readonly UserContentPart[];
+      /** Undefined for content-bearing events; retained for text-event narrowing compatibility. */
+      readonly text?: undefined;
+      readonly metadata?: JsonObject;
+    }
   | { readonly kind: "approve"; readonly interactionId: string; readonly approved: boolean }
   | { readonly kind: "respond"; readonly interactionId: string; readonly value: JsonValue };
 
-export type SessionEvent =
+export type SessionEvent<Output = string> =
   | { readonly type: "input"; readonly event: InputEvent; readonly turnId: string }
   | {
       readonly type: "candidate";
@@ -16,7 +33,7 @@ export type SessionEvent =
       readonly stepId: string;
       readonly candidate: ModelCandidate;
     }
-  | { readonly type: "final"; readonly output: string; readonly turnId: string }
+  | { readonly type: "final"; readonly output: Output; readonly turnId: string }
   | {
       readonly type: "interaction.required";
       readonly interaction: RequiredInteraction;
@@ -33,15 +50,15 @@ export type SessionEvent =
   | { readonly type: "input.cancelled"; readonly inputId: string; readonly reason: string }
   | { readonly type: "session.stopped"; readonly sessionId: string };
 
-export interface InputCompletion {
+export interface InputCompletion<Output = string> {
   readonly inputId: string;
   readonly status: "completed" | "waiting" | "rejected" | "cancelled" | "stopped";
-  readonly events: readonly SessionEvent[];
+  readonly events: readonly SessionEvent<Output>[];
 }
 
-export interface InputHandle {
+export interface InputHandle<Output = string> {
   readonly inputId: string;
-  readonly completed: Promise<InputCompletion>;
+  readonly completed: Promise<InputCompletion<Output>>;
 }
 
 export interface SessionOptions {
@@ -73,7 +90,22 @@ export interface InputOptions {
   readonly signal?: AbortSignal;
 }
 
-export type MessageInput = string | { readonly text: string; readonly metadata?: JsonObject };
+/** Per-turn, locally-enforced terminal JSON contract. */
+export interface OutputInputOptions<
+  Schema extends ToolSchemaSource = ToolSchemaSource,
+> extends InputOptions {
+  readonly outputSchema?: Schema;
+}
+
+/** Ordered, model-visible user content. Media references stay host-owned JSON values. */
+export type UserContentPart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "media"; readonly mediaType: string; readonly reference: JsonValue };
+
+export type MessageInput =
+  | string
+  | { readonly text: string; readonly metadata?: JsonObject }
+  | { readonly content: readonly UserContentPart[]; readonly metadata?: JsonObject };
 export type InteractionReply = Extract<InputEvent, { kind: "approve" | "respond" }>;
 /** Ordinary user text or an interaction reply. Use `Session.interrupt()` for barge-in text. */
 export type SessionInput = MessageInput | InteractionReply;
@@ -99,7 +131,7 @@ export interface TranscriptFinalEntry {
   readonly kind: "final";
   readonly turnId: string;
   readonly stepId: string;
-  readonly output: string;
+  readonly output: JsonValue;
 }
 export type TranscriptEntry =
   TranscriptInputEntry | TranscriptCandidateEntry | TranscriptToolsEntry | TranscriptFinalEntry;
@@ -188,10 +220,14 @@ export interface SessionRecorder {
 export interface Session {
   readonly id: string;
   readonly state: SessionSnapshot;
-  input(event: SessionInput, options?: InputOptions): InputHandle;
+  input<Schema extends ToolSchemaSource>(
+    event: MessageInput,
+    options: OutputInputOptions<Schema> & { readonly outputSchema: Schema },
+  ): InputHandle<SchemaOutput<Schema>>;
+  input(event: SessionInput, options?: InputOptions): InputHandle<string>;
   interrupt(event: MessageInput, options?: InputOptions): InputHandle;
   continue(options?: InputOptions): InputHandle;
-  stream(): AsyncIterable<SessionEvent>;
+  stream(): AsyncIterable<SessionEvent<JsonValue>>;
   observe(listener: Observer): () => void;
   stop(reason?: string): Promise<void>;
 }

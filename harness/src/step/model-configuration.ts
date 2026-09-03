@@ -10,7 +10,6 @@ import type { BoundToolDefinition, ToolDefinition } from "../types/tool.js";
 import { bindTool } from "../build/bind-tool.js";
 import { HarnessError, isHarnessError } from "../errors.js";
 import { normalizeDirective, sameDirective } from "../model/normalize.js";
-import { digest } from "../utils/digest.js";
 import { copyJson } from "../utils/immutable.js";
 import { checkedReason, slotOwner, SlotDraft, type SlotOwner } from "./slot-assembly.js";
 
@@ -144,7 +143,6 @@ export class ModelConfigurationDraft {
       slot.value.map((text) =>
         Object.freeze({
           text,
-          digest: digest(text),
           contributor: contributor(slot.owner, slot.reason),
         }),
       ),
@@ -169,15 +167,6 @@ export class ModelConfigurationDraft {
       toolContract(tool, source),
     );
     const model = this.#model?.directive;
-    const logical = digest({
-      instructions: instructions.map((item) => item.text),
-      tools: toolContracts.map(({ name, description, inputSchema }) => ({
-        name,
-        ...(description === undefined ? {} : { description }),
-        inputSchema,
-      })),
-    });
-    const modelDigest = digest(model ?? null);
     return Object.freeze({
       version: 1,
       ...(model === undefined ? {} : { model }),
@@ -189,11 +178,6 @@ export class ModelConfigurationDraft {
         ...toolSlots.map((slot) => contributor(slot.owner, slot.reason)),
         ...(this.#model?.owner ? [contributor(this.#model.owner, this.#model.reason)] : []),
       ]),
-      digests: Object.freeze({
-        logical,
-        model: modelDigest,
-        request: digest({ logical, model: modelDigest }),
-      }),
     });
   }
 }
@@ -209,7 +193,6 @@ function contributor(owner: SlotOwner, reason?: string): ModelConfigurationContr
     middlewareId: owner.middlewareId,
     slot: owner.slot,
     order: owner.order,
-    digest: digest({ middlewareId: owner.middlewareId, slot: owner.slot, order: owner.order }),
     ...(reason === undefined ? {} : { reason }),
   });
 }
@@ -218,7 +201,10 @@ function providerTool(tool: BoundToolDefinition): object {
   return {
     name: tool.name,
     ...(tool.description === undefined ? {} : { description: tool.description }),
-    inputSchema: copyJson(tool.parameters.jsonSchema),
+    inputSchema: copyJson(tool.inputSchema.jsonSchema),
+    ...(tool.outputSchema === undefined
+      ? {}
+      : { outputSchema: copyJson(tool.outputSchema.jsonSchema) }),
   };
 }
 
@@ -230,6 +216,7 @@ function toolContract(
     name: string;
     description?: string;
     inputSchema: import("../types/shared.js").JsonObject;
+    outputSchema?: import("../types/shared.js").JsonObject;
   };
-  return Object.freeze({ ...value, digest: digest(value), contributor: source });
+  return Object.freeze({ ...value, contributor: source });
 }

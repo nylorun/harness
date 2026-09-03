@@ -8,13 +8,15 @@ import type {
 import type {
   Interaction,
   RequiredInteraction,
+  SchemaIssue,
   ToolExecutionResume,
   ToolOutcome,
   ToolResult,
+  ToolValidationFailureDetails,
 } from "../types/tool.js";
 import type { JsonValue, ObserveEvent } from "../types/shared.js";
 import { createId } from "../utils/ids.js";
-import { copyJson, copyJsonObject } from "../utils/immutable.js";
+import { assertJson, copyJson, copyJsonObject } from "../utils/immutable.js";
 import type { CapabilityStateRegistry } from "../session/capability-state.js";
 import type { ExecutablePlanEntry, InternalToolPlan } from "../step/seal.js";
 
@@ -411,8 +413,18 @@ function resultFrom(
 ): ToolResult {
   const base = { callId: entry.call.callId, toolName: entry.call.toolName };
   switch (outcome.kind) {
-    case "completed":
-      return Object.freeze({ ...base, kind: "completed", output: copyJson(outcome.output) });
+    case "completed": {
+      const output = validatedOutput(entry, outcome.output);
+      if (!output.ok)
+        return Object.freeze({
+          ...base,
+          kind: "failed",
+          code: "tool.invalid-output",
+          message: output.message,
+          details: output.details,
+        });
+      return Object.freeze({ ...base, kind: "completed", output: output.value });
+    }
     case "denied":
       if (typeof outcome.reason !== "string")
         throw new HarnessError("tool.invalid-tool-result", "Tool denial reason must be a string");
@@ -430,6 +442,47 @@ function resultFrom(
         message: outcome.message,
       });
   }
+}
+
+function validatedOutput(
+  entry: ExecutablePlanEntry,
+  value: unknown,
+):
+  | { readonly ok: true; readonly value: import("../types/shared.js").JsonValue }
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly details: ToolValidationFailureDetails;
+    } {
+  const validation = entry.outputSchema?.validate(value) ?? { ok: true as const, value };
+  if (!validation.ok) return validationFailure("output", validation.issues);
+  try {
+    assertJson(validation.value, `output for '${entry.call.toolName}'`);
+    return { ok: true, value: copyJson(validation.value) };
+  } catch (error) {
+    return validationFailure("output", [
+      Object.freeze({
+        path: Object.freeze([]),
+        code: "invalid_json",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    ]);
+  }
+}
+
+function validationFailure(
+  phase: "input" | "output",
+  issues: readonly SchemaIssue[],
+): {
+  readonly ok: false;
+  readonly message: string;
+  readonly details: ToolValidationFailureDetails;
+} {
+  return {
+    ok: false,
+    message: issues.map((item) => `${item.path.join(".") || "(root)"}: ${item.message}`).join("; "),
+    details: Object.freeze({ phase, issues: Object.freeze([...issues]) }),
+  };
 }
 
 function completedEvent(

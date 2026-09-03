@@ -9,12 +9,16 @@ import type {
   SessionRunOptions,
   SessionSnapshot,
   SessionInput,
+  UserContentPart,
 } from "../types/session.js";
-import type { Observer } from "../types/shared.js";
+import type { ToolSchemaSource } from "../types/tool.js";
+import type { JsonValue, Observer } from "../types/shared.js";
+import { HarnessError } from "../errors.js";
 import { SessionScheduler } from "./scheduler.js";
 import type { LoopAgent } from "../build/agent.js";
-import { copyJsonObject } from "../utils/immutable.js";
+import { copyJson, copyJsonObject } from "../utils/immutable.js";
 import { normalizeSessionSeed } from "./seed.js";
+import { bindOutputContract } from "./output-contract.js";
 
 export class LiveSession implements Session {
   private readonly scheduler: SessionScheduler;
@@ -42,16 +46,29 @@ export class LiveSession implements Session {
   get state(): SessionSnapshot {
     return this.scheduler.snapshot;
   }
-  input(event: SessionInput, options?: InputOptions): InputHandle {
-    return this.scheduler.submit(normalizeInput(event), options);
+  input(
+    event: SessionInput,
+    options?: InputOptions & { readonly outputSchema?: ToolSchemaSource },
+  ): InputHandle<any> {
+    const output =
+      options?.outputSchema === undefined ? undefined : bindOutputContract(options.outputSchema);
+    if (output && isInteractionReply(event))
+      throw new HarnessError(
+        "output.invalid-schema",
+        "Interaction replies cannot define a turn outputSchema",
+      );
+    return this.scheduler.submit(normalizeInput(event), {
+      ...(options?.signal === undefined ? {} : { signal: options.signal }),
+      ...(output === undefined ? {} : { output }),
+    });
   }
-  interrupt(event: MessageInput, options?: InputOptions): InputHandle {
+  interrupt(event: MessageInput, options?: InputOptions): InputHandle<any> {
     return this.scheduler.submit(normalizeMessage("interrupt", event), options);
   }
-  continue(options?: InputOptions): InputHandle {
+  continue(options?: InputOptions): InputHandle<any> {
     return this.scheduler.continue(options);
   }
-  stream(): AsyncIterable<SessionEvent> {
+  stream(): AsyncIterable<SessionEvent<JsonValue>> {
     return this.scheduler.events;
   }
   observe(listener: Observer): () => void {
@@ -72,6 +89,14 @@ function isInteractionReply(value: SessionInput): value is InteractionReply {
 
 function normalizeMessage(kind: "user-message" | "interrupt", value: MessageInput): InputEvent {
   if (typeof value === "string") return { kind, text: value };
+  if ("content" in value)
+    return {
+      kind,
+      content: snapshotContent(value.content),
+      ...(value.metadata === undefined
+        ? {}
+        : { metadata: copyJsonObject(value.metadata, "input metadata") }),
+    };
   return {
     kind,
     text: value.text,
@@ -85,4 +110,36 @@ function normalizeInput(input: SessionInput): InputEvent {
   if (typeof input === "string") return { kind: "user-message", text: input };
   if (isInteractionReply(input)) return input;
   return normalizeMessage("user-message", input);
+}
+
+function snapshotContent(value: readonly UserContentPart[]) {
+  if (!Array.isArray(value))
+    throw new HarnessError("input.invalid-content", "Input content must be an array");
+  return Object.freeze(
+    value.map((part, index) => {
+      if (!part || typeof part !== "object")
+        throw new HarnessError(
+          "input.invalid-content",
+          `Input content part ${index} must be an object`,
+        );
+      if (part.type === "text") {
+        if (typeof part.text !== "string")
+          throw new HarnessError(
+            "input.invalid-content",
+            `Input text part ${index} must contain text`,
+          );
+        return Object.freeze({ type: "text" as const, text: part.text });
+      }
+      if (part.type !== "media" || typeof part.mediaType !== "string" || part.mediaType === "")
+        throw new HarnessError(
+          "input.invalid-content",
+          `Input media part ${index} must contain a non-empty mediaType`,
+        );
+      return Object.freeze({
+        type: "media" as const,
+        mediaType: part.mediaType,
+        reference: copyJson(part.reference),
+      });
+    }),
+  );
 }
