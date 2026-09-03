@@ -1,41 +1,33 @@
-name: Publish npm package
+name: Publish package release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
-      package:
-        description: Package to publish
+      scope:
+        description: Packages to publish from main
         required: true
+        default: harness
         type: choice
-        options: [harness, studio]
-      version:
-        description: Exact package version to publish
-        required: true
-        type: string
-      dist_tag:
-        description: npm dist-tag
-        required: true
-        default: beta
-        type: choice
-        options: [beta, latest]
+        options: [harness, studio, both]
       confirm:
-        description: Publication has explicit maintainer approval
+        description: I confirm the selected release PR has merged into main and should be published
         required: true
         type: boolean
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
   publish:
-    if: github.event_name == 'push' || inputs.confirm
+    if: ${{ inputs.confirm && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     environment: npm
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: 24.x
@@ -43,28 +35,40 @@ jobs:
           package-manager-cache: false
       - run: npm install --global npm@^11.15.0
       - run: npm ci
-      - name: Resolve and verify release
+      - name: Test release versioning
+        run: npm run test:release
+      - name: Resolve and verify release packages
         id: release
-        shell: bash
+        env:
+          RELEASE_SCOPE: ${{ inputs.scope }}
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            package=harness
-            expected="${GITHUB_REF_NAME#v}"
-          else
-            package="${{ inputs.package }}"
-            expected="${{ inputs.version }}"
-          fi
-          actual="$(node -p "require('./' + process.argv[1] + '/package.json').version" "$package")"
-          test "$actual" = "$expected"
-          if [[ "$actual" == *-* ]]; then
-            dist_tag=beta
-          else
-            dist_tag=latest
-          fi
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            test "$dist_tag" = "${{ inputs.dist_tag }}"
-          fi
-          echo "package=$package" >> "$GITHUB_OUTPUT"
-          echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
-      - run: npm run check --workspace "@nylorun/${{ steps.release.outputs.package }}"
-      - run: npm publish --workspace "@nylorun/${{ steps.release.outputs.package }}" --access public --tag "${{ steps.release.outputs.dist_tag }}"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          node .github/scripts/release-version.mjs --scope "$RELEASE_SCOPE" --publish --tsv > "$RUNNER_TEMP/release.tsv"
+          cat "$RUNNER_TEMP/release.tsv"
+      - name: Verify packages before publishing
+        run: |
+          while IFS=$'\t' read -r _ package version _ tag _; do
+            npm run check --workspace "$package"
+            if npm view "$package@$version" version --json > npm-view.out 2> npm-view.err; then
+              echo "$package@$version is already published."
+              exit 1
+            fi
+            if ! grep -Eq 'E404|404 Not Found' npm-view.err; then
+              cat npm-view.err
+              exit 1
+            fi
+            if GH_TOKEN="${{ github.token }}" gh release view "$tag" > /dev/null 2>&1; then
+              echo "GitHub Release $tag already exists."
+              exit 1
+            fi
+          done < "$RUNNER_TEMP/release.tsv"
+      - name: Publish packages and create GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          while IFS=$'\t' read -r _ package version dist_tag tag prerelease; do
+            npm publish --workspace "$package" --access public --tag "$dist_tag" --provenance
+            args=(release create "$tag" --target "$GITHUB_SHA" --title "$package $version" --generate-notes)
+            if [[ "$prerelease" == true ]]; then args+=(--prerelease); fi
+            gh "${args[@]}"
+          done < "$RUNNER_TEMP/release.tsv"
