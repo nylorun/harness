@@ -98,7 +98,7 @@ jobs:
         run: git diff --exit-code
       - name: Create release pull request
         if: ${{ !inputs.dry_run }}
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: codex/release/${{ steps.release.outputs.branch }}
           delete-branch: true
