@@ -42,3 +42,11 @@ The creator runs `nylorun configure` after installation and before development u
 Discovery and manifest documents use protocol version 2. The agent's manifest is under `manifest`; no engine-branded envelope is required. Existing agent-scoped HTTP endpoint paths remain unchanged. Studio also understands legacy version-1 `harness.manifest` documents.
 
 Repository development: [contributing](../CONTRIBUTING.md). Package publication: [releasing](../RELEASING.md).
+
+Provider continuation state (for example Gemini thought signatures) travels as
+opaque JSON `providerMetadata` on assistant text, reasoning, and tool-call
+blocks. Engines integrating `piModel()` must preserve it on the corresponding
+assistant prompt parts, including empty signed blocks and their order. Runtime
+only reuses signatures with the originating provider and model. Middleware that
+rewrites a signed block must remove its metadata; signatures describe the
+original provider output. Unsigned reasoning remains diagnostic output.

@@ -88,7 +88,11 @@ function projectEntry(entry: TranscriptEntry): readonly PromptItem[] {
   }
   if (entry.kind === "candidate") {
     const content = entry.candidate.output.flatMap((block): PromptContentPart[] => {
-      if (block.type === "text") return [textPart(block.text)];
+      if (
+        block.type === "text" ||
+        (block.type === "reasoning" && block.providerMetadata !== undefined)
+      )
+        return [Object.freeze({ ...block })];
       if (block.type === "json") return [textPart(JSON.stringify(block.value))];
       if (block.type === "tool-call")
         return [
@@ -97,6 +101,9 @@ function projectEntry(entry: TranscriptEntry): readonly PromptItem[] {
             id: block.id,
             name: block.name,
             args: copyJson(block.args),
+            ...(block.providerMetadata === undefined
+              ? {}
+              : { providerMetadata: copyJson(block.providerMetadata) }),
           }),
         ];
       return [];

@@ -9,11 +9,12 @@ export interface ModelToolCall {
 }
 
 export type ModelOutputBlock =
-  | { readonly type: "text"; readonly text: string }
-  | { readonly type: "reasoning"; readonly text: string }
+  | { readonly type: "text"; readonly text: string; readonly providerMetadata?: JsonObject }
+  | { readonly type: "reasoning"; readonly text: string; readonly providerMetadata?: JsonObject }
   | { readonly type: "json"; readonly value: JsonValue }
   | {
       readonly type: "tool-call";
+      readonly providerMetadata?: JsonObject;
       readonly id: string;
       readonly name: string;
       readonly args: JsonObject;
@@ -130,10 +131,12 @@ export interface ModelRequest {
 }
 
 export type PromptContentPart =
-  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "reasoning"; readonly text: string; readonly providerMetadata?: JsonObject }
+  | { readonly type: "text"; readonly text: string; readonly providerMetadata?: JsonObject }
   | { readonly type: "media"; readonly mediaType: string; readonly reference: JsonValue }
   | {
       readonly type: "tool-call";
+      readonly providerMetadata?: JsonObject;
       readonly id: string;
       readonly name: string;
       readonly args: JsonObject;

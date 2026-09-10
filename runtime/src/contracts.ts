@@ -70,9 +70,15 @@ export interface RuntimeAgent {
   close?(): Promise<void>;
 }
 export type PromptContentPart =
-  | UserContentPart
+  | Exclude<UserContentPart, { readonly type: "text" }>
+  | {
+      readonly type: "text" | "reasoning";
+      readonly text: string;
+      readonly providerMetadata?: JsonObject;
+    }
   | {
       readonly type: "tool-call";
+      readonly providerMetadata?: JsonObject;
       readonly id: string;
       readonly name: string;
       readonly args: JsonObject;
@@ -120,10 +126,15 @@ export interface RuntimeModelCall {
 }
 export interface RuntimeModelCandidate {
   readonly output: readonly (
-    | { readonly type: "text" | "reasoning"; readonly text: string }
+    | {
+        readonly type: "text" | "reasoning";
+        readonly text: string;
+        readonly providerMetadata?: JsonObject;
+      }
     | { readonly type: "json"; readonly value: JsonValue }
     | {
         readonly type: "tool-call";
+        readonly providerMetadata?: JsonObject;
         readonly id: string;
         readonly name: string;
         readonly args: JsonObject;
