@@ -1,3 +1,31 @@
 # Changelog
 
+## 0.2.0-beta
+
+### Minor Changes
+
+- 54ab304: Configure the provider and model after project installation and before development
+  starts. Add --skip-config for deferred setup and require it for noninteractive
+  creation. Retain the project with recovery instructions when setup fails or is
+  cancelled, and cancel pending prompts, authentication, and child processes on
+  shutdown.
+
+### Patch Changes
+
+- 54ab304: Group generated npm scripts by workflow and remove the redundant `dev:host` alias.
+  Use `npm run dev -- --no-studio` for headless development.
+- 54ab304: Support portable Runtime protocol version 2 while retaining legacy Studio
+  manifest support. Move the Studio CLI into Runtime: use `nylorun studio
+--agent-url <url>` instead of `nylo studio`. Applications should install Runtime
+  directly and keep Studio as a development dependency.
+
+  Retain session lists and media across development reloads, and recognize agent
+  file changes on Windows. Validate noninteractive creator startup during release
+  verification with deferred provider configuration.
+
+  Include Harness in this release so the creator does not rely on an unpublished
+  compatibility pin. Ship and verify all four packages together.
+
+- Update the tested Harness, Runtime, and Studio compatibility combination.
+
 Release notes are maintained with Changesets.
