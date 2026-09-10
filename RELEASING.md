@@ -93,6 +93,7 @@ model calls. Tags use `@nylorun/<package>@<version>`.
 | Validation failed | Fix in a reviewed PR and prepare the corrected release |
 | Missing npm trust/access | Correct the external setting, then rerun the same workflow |
 | Partial publication/network failure | Rerun for the same release commit; matching artifact integrity allows completed packages to be skipped |
+| npm accepted publication but is still processing it | Wait for the version and tag to appear in ordinary npm reads before retrying; preparation/publication must not assign a new artifact to that version |
 | Published integrity differs | Stop; investigate the existing release and prepare a new version |
 | Missing/older dist-tag after publication | An npm administrator must verify/correct it, then retry; trusted publishing does not authenticate standalone tag edits |
 | A newer dist-tag exists | Do not move it backward; prepare a newer release |
@@ -101,3 +102,7 @@ model calls. Tags use `@nylorun/<package>@<version>`.
 Publication cannot be treated as an atomic transaction. Do not delete/reuse a
 published version to recover. Record the affected versions and ship a corrective
 release. Keep credentials and access tokens out of release notes and logs.
+
+After npm accepts a publication, the workflow polls visibility every five seconds
+for up to ten minutes. A registry timeout does not mean the publication failed:
+confirm the version's integrity before retrying the same reviewed release.
