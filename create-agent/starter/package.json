@@ -1,0 +1,27 @@
+{
+  "name": "my-nylorun-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "configure": "nylorun configure",
+    "dev": "nylorun dev",
+    "inspect": "nylorun inspect",
+    "build": "nylorun build",
+    "start": "nylorun start",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nylorun/harness": "{{HARNESS_VERSION}}",
+    "@nylorun/runtime": "{{RUNTIME_VERSION}}",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@nylorun/studio": "{{STUDIO_VERSION}}",
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -7,9 +7,9 @@ import type {
   ModelCall,
   ModelRequest,
 } from "@nylorun/harness";
-import { createOpenAICompatibleAdapter } from "../services/openai-compatible.js";
-import { createOpenAIImageEditor } from "../services/openai-image.js";
-import { MediaStore } from "../services/media.js";
+import { piModel } from "@nylorun/runtime";
+import { createOpenAIImageEditor } from "../agent/interior-design/image-editor.js";
+import { MediaStore } from "@nylorun/runtime";
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const encodedPng = Buffer.from(png).toString("base64");
@@ -47,6 +47,7 @@ describe("OpenAI image integrations", () => {
       expect(body?.has("input_fidelity")).toBe(false);
     } finally {
       vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
     }
   });
 
@@ -73,6 +74,7 @@ describe("OpenAI image integrations", () => {
       ).rejects.toThrow("canonical base64");
     } finally {
       vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
     }
   });
 
@@ -92,9 +94,8 @@ describe("OpenAI image integrations", () => {
       vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
         requestBody = String(init?.body);
         return new Response(
-          JSON.stringify({
-            choices: [{ finish_reason: "stop", message: { content: "Done." } }],
-          }),
+          'data: {"id":"test","choices":[{"index":0,"delta":{"role":"assistant","content":"Done."},"finish_reason":null}]}\n\ndata: {"id":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+          { headers: { "content-type": "text/event-stream" } },
         );
       }),
     );
@@ -125,22 +126,25 @@ describe("OpenAI image integrations", () => {
       tools: [],
     };
     try {
-      const adapter = createOpenAICompatibleAdapter({
-        baseUrl: "https://provider.example/v1",
-        apiKey: "test-key",
-        model: "vision-test",
+      vi.stubEnv("NYLO_CUSTOM_API_KEY", "test-provider-key");
+      const adapter = piModel({
+        root,
         media,
+        selection: {
+          provider: "custom",
+          model: "vision-test",
+          custom: { baseUrl: "https://provider.example/v1" },
+        },
       });
       await expect(adapter(call, context)).resolves.toMatchObject({
         output: [{ type: "text" }],
       });
       expect(requestBody).toContain(`data:image/png;base64,${encodedPng}`);
-      expect(JSON.stringify(prepared)).toContain(
-        `asset://interior-design/${asset.id}`,
-      );
+      expect(JSON.stringify(prepared)).toContain(asset.id);
       expect(JSON.stringify(prepared)).not.toContain(encodedPng);
     } finally {
       vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
       await rm(root, { recursive: true, force: true });
     }
   });

@@ -6,15 +6,40 @@
   "license": "Apache-2.0",
   "workspaces": [
     "harness",
-    "studio"
+    "runtime",
+    "studio",
+    "create-agent"
   ],
   "engines": {
-    "node": "^22.14.0 || ^24.0.0 || >=26.0.0"
+    "node": "^24.0.0",
+    "npm": "^11.0.0"
   },
   "scripts": {
-    "build": "npm run build --workspace @nylorun/harness && npm run build --workspace @nylorun/studio",
-    "test": "npm run test --workspaces --if-present",
-    "check": "npm run check --workspace @nylorun/harness",
-    "test:release": "node --test .github/scripts/release-version.test.mjs"
+    "setup": "node scripts/setup.mjs",
+    "configure": "npm run configure --prefix examples",
+    "dev": "node scripts/dev.mjs",
+    "dev:starter": "node scripts/starter.mjs",
+    "build": "node scripts/validate.mjs build",
+    "check": "node scripts/validate.mjs check",
+    "check:stack": "node scripts/validate.mjs stack",
+    "test": "node scripts/validate.mjs test",
+    "test:tooling": "node --test scripts/test/*.test.mjs",
+    "test:dev": "node scripts/smoke-development.mjs",
+    "test:setup": "node scripts/smoke-setup.mjs",
+    "examples:sync": "npm run examples:sync --workspace @nylorun/create-agent",
+    "examples:check": "npm run examples:check --workspace @nylorun/create-agent",
+    "changeset": "changeset",
+    "release:prepare": "node scripts/release/prepare.mjs",
+    "release:check": "node scripts/release/check.mjs"
+  },
+  "packageManager": "npm@11.15.0",
+  "devDependencies": {
+    "@changesets/apply-release-plan": "^7.1.1",
+    "@changesets/cli": "^2.29.8",
+    "@changesets/config": "^3.1.4",
+    "@changesets/read": "^0.6.7",
+    "@manypkg/get-packages": "^1.1.3",
+    "chokidar": "^4.0.3",
+    "semver": "^7.7.4"
   }
 }

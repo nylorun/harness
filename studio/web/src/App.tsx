@@ -1,3 +1,4 @@
+import { isStudioDiscovery, manifestMiddleware } from "../../src/protocol.js";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   BrowserRouter,
@@ -58,10 +59,11 @@ export type MiddlewareManifest = Readonly<{
   }>;
 }>;
 export type AgentManifest = Readonly<{
-  protocolVersion: number;
+  protocolVersion: 1 | 2;
   id: string;
   name: string;
-  harness: {
+  manifest?: { id: string; name: string; middleware?: readonly MiddlewareManifest[] };
+  harness?: {
     manifest: {
       id: string;
       name: string;
@@ -74,6 +76,12 @@ export type AgentManifest = Readonly<{
 type Discovery = Readonly<{
   protocolVersion: number;
   agents: readonly { id: string; manifestUrl: string }[];
+  setup?: Readonly<{
+    state: "required";
+    title: string;
+    detail: string;
+    command: string;
+  }>;
 }>;
 export type SessionSummary = Readonly<{
   session: string;
@@ -99,6 +107,7 @@ type ChatMessage = Readonly<{
 export type Connection = Readonly<{
   status: "Connecting" | "Running" | "Offline";
   url?: string;
+  setup?: Discovery["setup"];
   agents: readonly AgentManifest[];
   sessionsByAgent: Readonly<Record<string, readonly SessionSummary[]>>;
 }>;
@@ -194,7 +203,7 @@ function useConnection(): Connection {
         if (!response.ok)
           throw new Error("Agent Server returned " + response.status + ".");
         const discovery = (await response.json()) as Discovery;
-        if (discovery.protocolVersion !== 1 || !Array.isArray(discovery.agents))
+        if (!isStudioDiscovery(discovery))
           throw new Error("Unsupported Studio discovery document.");
         const agents = await Promise.all(
           discovery.agents.map(async (entry) => {
@@ -227,6 +236,7 @@ function useConnection(): Connection {
           setConnection((previous) => ({
             status: "Running",
             url: config.agentServerUrl,
+            setup: discovery.setup?.state === "required" ? discovery.setup : undefined,
             agents,
             sessionsByAgent: previous.sessionsByAgent,
           }));
@@ -669,7 +679,7 @@ function Chat({
 }
 
 function Manifest({ agent }: Readonly<{ agent: AgentManifest }>) {
-  const declared = agent.harness.manifest.middleware ?? [];
+  const declared = manifestMiddleware(agent);
   const instructions = constructorInstructions(declared);
   const middleware = declared.filter((entry) => entry.id !== "agent");
   return (
@@ -1051,6 +1061,13 @@ function SessionWorkspace({
 function StudioWorkspace({ connection }: Readonly<{ connection: Connection }>) {
   const { agentId = "", sessionId } = useParams();
   const navigate = useNavigate();
+  if (connection.setup !== undefined)
+    return (
+      <Empty
+        title={connection.setup.title}
+        detail={`${connection.setup.detail} Run \`${connection.setup.command}\` in another terminal; Studio will become ready automatically.`}
+      />
+    );
   const agent = connection.agents.find((entry) => entry.id === agentId);
   if (agentId === "")
     return (

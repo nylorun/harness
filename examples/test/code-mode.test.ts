@@ -1,13 +1,18 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Agent, model, type CapabilityItems, type ToolDefinition } from "@nylorun/harness";
+import {
+  Agent,
+  model,
+  type CapabilityItems,
+  type ToolDefinition,
+} from "@nylorun/harness";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CODE_MODE_RULE,
   CODE_MODE_USAGE,
   codeMode,
-} from "../capabilities/code-mode.js";
+} from "../agent/code-mode/capability.js";
 
 const adapter = model(async () => ({
   output: [{ type: "text" as const, text: "ok" }],
@@ -17,7 +22,9 @@ const adapter = model(async () => ({
 const temps: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temps.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    temps.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
 });
 
 function items<T>(value: CapabilityItems<T> | undefined): readonly T[] {
@@ -36,7 +43,10 @@ function context() {
   };
 }
 
-function catalogTool(name: string, declaration: Awaited<ReturnType<typeof codeMode>>): ToolDefinition {
+function catalogTool(
+  name: string,
+  declaration: Awaited<ReturnType<typeof codeMode>>,
+): ToolDefinition {
   const found = items(declaration.tools).find((tool) => tool.name === name);
   if (!found) throw new Error(`Missing tool ${name}`);
   return found;
@@ -45,7 +55,9 @@ function catalogTool(name: string, declaration: Awaited<ReturnType<typeof codeMo
 describe("codeMode()", () => {
   it("offers only run_code and a generated SDK for the tools catalog", async () => {
     const declaration = await codeMode();
-    expect(items(declaration.tools).map((tool) => tool.name)).toEqual(["run_code"]);
+    expect(items(declaration.tools).map((tool) => tool.name)).toEqual([
+      "run_code",
+    ]);
     expect(items(declaration.instructions)).toEqual([
       CODE_MODE_RULE,
       CODE_MODE_USAGE,
@@ -86,7 +98,12 @@ describe("codeMode()", () => {
           {
             name: "convert",
             args: { value: 25, from: "celsius", to: "fahrenheit" },
-            output: { value: 25, from: "celsius", to: "fahrenheit", result: 77 },
+            output: {
+              value: 25,
+              from: "celsius",
+              to: "fahrenheit",
+              result: 77,
+            },
           },
         ],
       },
@@ -154,7 +171,9 @@ describe("codeMode()", () => {
   it("omits the transport when the directory has no catalog modules", async () => {
     const root = await mkdtemp(join(tmpdir(), "code-mode-test-"));
     temps.push(root);
-    await expect(codeMode({ directory: root })).resolves.toEqual({ id: "code-mode" });
+    await expect(codeMode({ directory: root })).resolves.toEqual({
+      id: "code-mode",
+    });
   });
 
   it("builds the code-mode agent with only run_code on the model surface", async () => {
@@ -166,8 +185,13 @@ describe("codeMode()", () => {
       .use(await codeMode())
       .with(adapter)
       .build();
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual(["agent", "code-mode"]);
-    const offered = agent.manifest.middleware.find((item) => item.id === "code-mode");
+    expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
+      "agent",
+      "code-mode",
+    ]);
+    const offered = agent.manifest.middleware.find(
+      (item) => item.id === "code-mode",
+    );
     expect(offered?.tools?.map((tool) => tool.name)).toEqual(["run_code"]);
     expect(offered?.tools?.map((tool) => tool.name)).not.toEqual(
       expect.arrayContaining(["calculate", "convert", "now"]),

@@ -1,74 +1,71 @@
-name: Publish package release
-
+name: Publish reviewed release
 on:
   workflow_dispatch:
     inputs:
-      scope:
-        description: Packages to publish from main
+      commit:
+        description: Full SHA of the merged release commit on main
         required: true
-        default: harness
-        type: choice
-        options: [harness, studio, both]
-      confirm:
-        description: I confirm the selected release PR has merged into main and should be published
-        required: true
-        type: boolean
-
+        type: string
 permissions:
-  contents: write
-  id-token: write
-
+  contents: read
+concurrency:
+  group: npm-publication
+  cancel-in-progress: false
 jobs:
-  publish:
-    if: ${{ inputs.confirm && github.ref == 'refs/heads/main' }}
+  validate:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: npm
+    env:
+      RELEASE_SHA: ${{ inputs.commit }}
     steps:
+      - name: Validate commit input
+        shell: bash
+        run: '[[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]'
       - uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ inputs.commit }}
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
-          node-version: 24.x
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm run setup
+      - run: npm run check -- --built
+      - run: npm run release:check -- --built
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: .tmp/release-artifacts/
+          include-hidden-files: true
+          if-no-files-found: error
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ inputs.commit }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - run: npm install --global npm@^11.15.0
-      - run: npm ci
-      - name: Test release versioning
-        run: npm run test:release
-      - name: Resolve and verify release packages
-        id: release
-        env:
-          RELEASE_SCOPE: ${{ inputs.scope }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-          node .github/scripts/release-version.mjs --scope "$RELEASE_SCOPE" --publish --tsv > "$RUNNER_TEMP/release.tsv"
-          cat "$RUNNER_TEMP/release.tsv"
-      - name: Verify packages before publishing
-        run: |
-          while IFS=$'\t' read -r _ package version _ tag _; do
-            npm run check --workspace "$package"
-            if npm view "$package@$version" version --json > npm-view.out 2> npm-view.err; then
-              echo "$package@$version is already published."
-              exit 1
-            fi
-            if ! grep -Eq 'E404|404 Not Found' npm-view.err; then
-              cat npm-view.err
-              exit 1
-            fi
-            if GH_TOKEN="${{ github.token }}" gh release view "$tag" > /dev/null 2>&1; then
-              echo "GitHub Release $tag already exists."
-              exit 1
-            fi
-          done < "$RUNNER_TEMP/release.tsv"
-      - name: Publish packages and create GitHub Releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          while IFS=$'\t' read -r _ package version dist_tag tag prerelease; do
-            npm publish --workspace "$package" --access public --tag "$dist_tag" --provenance
-            args=(release create "$tag" --target "$GITHUB_SHA" --title "$package $version" --generate-notes)
-            if [[ "$prerelease" == true ]]; then args+=(--prerelease); fi
-            gh "${args[@]}"
-          done < "$RUNNER_TEMP/release.tsv"
+      - run: npm install --global npm@11.15.0
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: .tmp/release-artifacts/
+      - run: node scripts/release/publish.mjs
