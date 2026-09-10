@@ -1,11 +1,5 @@
 # Changelog
 
-## 0.2.1-beta
-
-### Patch Changes
-
-- Update the tested Harness, Runtime, and Studio compatibility combination.
-
 ## 0.2.0-beta
 
 ### Minor Changes
