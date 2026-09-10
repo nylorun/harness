@@ -291,7 +291,7 @@ function validateSeedCandidate(value: unknown, index: number): void {
       fail(`Candidate output ${blockIndex} at transcript ${index} must be an object`);
     const block = value as Record<string, unknown>;
     if (block.type === "text" || block.type === "reasoning") {
-      exactKeys(block, ["type", "text"], `Candidate output ${blockIndex}`);
+      exactKeys(block, ["type", "text", "providerMetadata"], `Candidate output ${blockIndex}`);
       if (typeof block.text !== "string")
         fail(`Candidate output ${blockIndex} text must be a string`);
       return;
@@ -302,7 +302,11 @@ function validateSeedCandidate(value: unknown, index: number): void {
       return;
     }
     if (block.type === "tool-call") {
-      exactKeys(block, ["type", "id", "name", "args", "raw"], `Candidate output ${blockIndex}`);
+      exactKeys(
+        block,
+        ["type", "id", "name", "args", "raw", "providerMetadata"],
+        `Candidate output ${blockIndex}`,
+      );
       requiredString(block.id, `Candidate output ${blockIndex} id`);
       requiredString(block.name, `Candidate output ${blockIndex} name`);
       if (block.raw !== undefined && typeof block.raw !== "string")

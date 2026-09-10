@@ -48,6 +48,15 @@ it("preserves opaque block metadata through normalization, canonicalization and 
       await other.stop();
     }
     expect(JSON.stringify(calls[3]?.prompt)).not.toContain("signature");
+    const restored = agent.run({
+      seed: { transcript: JSON.parse(JSON.stringify(session.state.transcript)) },
+    });
+    try {
+      await restored.input("Restored conversation").completed;
+    } finally {
+      await restored.stop();
+    }
+    expect(calls[4]?.prompt).toContainEqual(projected);
   } finally {
     await session.stop();
   }
