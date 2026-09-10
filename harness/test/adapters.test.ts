@@ -340,3 +340,42 @@ describe("model adapter translators", () => {
     });
   });
 });
+
+it("omits foreign signed reasoning in standard adapters while retaining assistant text and tools", () => {
+  const metadata = {
+    pi: { provider: "google", model: "gemini-flash-latest", signature: "opaque" },
+  };
+  const signed: ModelCall = {
+    ...call,
+    prompt: [
+      {
+        kind: "message",
+        role: "assistant",
+        content: [{ type: "reasoning", text: "private summary", providerMetadata: metadata }],
+      },
+      {
+        kind: "message",
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "private summary", providerMetadata: metadata },
+          { type: "text", text: "Checking", providerMetadata: metadata },
+          {
+            type: "tool-call",
+            id: "call",
+            name: "weather",
+            args: { city: "Delhi" },
+            providerMetadata: metadata,
+          },
+        ],
+      },
+    ],
+  };
+  for (const request of [toMessages(signed, 256), toChatCompletions(signed), toResponses(signed)]) {
+    expect(JSON.stringify(request)).not.toContain("private summary");
+    expect(JSON.stringify(request)).not.toContain("opaque");
+    expect(JSON.stringify(request)).toContain("Checking");
+    expect(JSON.stringify(request)).toContain("weather");
+  }
+  expect(toMessages(signed, 256).messages).toHaveLength(1);
+  expect(toChatCompletions(signed).messages).toHaveLength(1);
+});

@@ -134,7 +134,7 @@ export interface AnthropicAdapterOptions {
 
 /** Translate a Harness call to the OpenAI Chat Completions request shape. */
 export function toChatCompletions(call: ModelCall): ChatCompletionsRequest {
-  const messages = call.prompt.map((item): ChatCompletionsMessage => {
+  const messages = withoutProviderReasoning(call.prompt).map((item): ChatCompletionsMessage => {
     if (item.kind === "instructions") return { role: "system", content: textOf(item) };
     if (item.kind === "tool-result")
       return { role: "tool", tool_call_id: item.toolCallId, content: textOf(item) };
@@ -235,7 +235,7 @@ export function chatCompletionsAdapter(send: AdapterSend<ChatCompletionsRequest>
 /** Translate a Harness call to the OpenAI Responses request shape. */
 export function toResponses(call: ModelCall): ResponsesRequest {
   const instructions = call.prompt.filter((item) => item.kind === "instructions").map(textOf);
-  const input = call.prompt.flatMap((item): ResponsesInputItem[] => {
+  const input = withoutProviderReasoning(call.prompt).flatMap((item): ResponsesInputItem[] => {
     if (item.kind === "instructions") return [];
     if (item.kind === "tool-result")
       return [{ type: "function_call_output", call_id: item.toolCallId, output: textOf(item) }];
@@ -355,7 +355,7 @@ export function toMessages(call: ModelCall, defaultMaxOutputTokens: number): Mes
       "Anthropic Messages output schemas require a custom prepared adapter",
     );
   const instructions = call.prompt.filter((item) => item.kind === "instructions").map(textOf);
-  const messages = call.prompt.flatMap((item): MessagesMessage[] => {
+  const messages = withoutProviderReasoning(call.prompt).flatMap((item): MessagesMessage[] => {
     if (item.kind === "instructions") return [];
     if (item.kind === "tool-result")
       return [
@@ -748,5 +748,19 @@ function invalidResponse(message: string, path: string, cause?: unknown): Harnes
   return new HarnessError("model.adapter-invalid-response", message, {
     ...(cause === undefined ? {} : { cause }),
     details: { path },
+  });
+}
+
+// These portable translators do not interpret another adapter's signed reasoning.
+function withoutProviderReasoning(prompt: readonly PromptItem[]): readonly PromptItem[] {
+  return prompt.flatMap((item): PromptItem[] => {
+    if (
+      item.kind !== "message" ||
+      item.role !== "assistant" ||
+      !item.content.some((part) => part.type === "reasoning")
+    )
+      return [item];
+    const content = item.content.filter((part) => part.type !== "reasoning");
+    return content.length === 0 ? [] : [{ ...item, content }];
   });
 }

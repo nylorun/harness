@@ -159,14 +159,14 @@ function normalizeBlock(value: unknown, index: number): ModelOutputBlock {
     throw invalidCandidate(`Model output[${index}] must be an object`, `output[${index}]`);
   const block = value as { type?: unknown };
   if (block.type === "text" || block.type === "reasoning") {
-    rejectUnknownKeys(value, ["type", "text"], `Model output[${index}]`);
+    rejectUnknownKeys(value, ["type", "text", "providerMetadata"], `Model output[${index}]`);
     const text = (value as { text?: unknown }).text;
     if (typeof text !== "string")
       throw invalidCandidate(
         `Model output[${index}].text must be a string`,
         `output[${index}].text`,
       );
-    return Object.freeze({ type: block.type, text });
+    return Object.freeze({ type: block.type, text, ...providerMetadata(value, index) });
   }
   if (block.type === "json") {
     rejectUnknownKeys(value, ["type", "value"], `Model output[${index}]`);
@@ -186,7 +186,11 @@ function normalizeBlock(value: unknown, index: number): ModelOutputBlock {
     }
   }
   if (block.type === "tool-call") {
-    rejectUnknownKeys(value, ["type", "id", "name", "args", "raw"], `Model output[${index}]`);
+    rejectUnknownKeys(
+      value,
+      ["type", "id", "name", "args", "raw", "providerMetadata"],
+      `Model output[${index}]`,
+    );
     const raw = value as { id?: unknown; name?: unknown; args?: unknown; raw?: unknown };
     if (raw.id !== undefined && typeof raw.id !== "string")
       throw invalidCandidate(`Model output[${index}].id must be a string`, `output[${index}].id`);
@@ -211,6 +215,7 @@ function normalizeBlock(value: unknown, index: number): ModelOutputBlock {
       throw invalidCandidate(`Model output[${index}].raw must be a string`, `output[${index}].raw`);
     return Object.freeze({
       type: "tool-call",
+      ...providerMetadata(value, index),
       id: typeof raw.id === "string" ? raw.id : "",
       name: typeof raw.name === "string" ? raw.name : "",
       args,
@@ -326,4 +331,21 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function providerMetadata(
+  value: object,
+  index: number,
+): { readonly providerMetadata?: JsonObject } {
+  const metadata = (value as { providerMetadata?: unknown }).providerMetadata;
+  if (metadata === undefined) return {};
+  try {
+    return { providerMetadata: copyJsonObject(metadata, "providerMetadata") };
+  } catch (error) {
+    throw invalidCandidate(
+      `Model output[${index}].providerMetadata must be a JSON object`,
+      `output[${index}].providerMetadata`,
+      error,
+    );
+  }
 }

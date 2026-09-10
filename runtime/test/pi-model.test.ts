@@ -32,7 +32,13 @@ afterEach(async () => {
 });
 function response(delta: unknown, finishReason = "stop") {
   return new Response(
-    `data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta: {}, finish_reason: finishReason }] })}\n\ndata: [DONE]\n\n`,
+    `data: ${JSON.stringify({
+      id: "test",
+      choices: [{ index: 0, delta, finish_reason: null }],
+    })}\n\ndata: ${JSON.stringify({
+      id: "test",
+      choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
+    })}\n\ndata: [DONE]\n\n`,
     { headers: { "content-type": "text/event-stream" } },
   );
 }
@@ -193,3 +199,97 @@ it("keeps usage counters while redacting credential fields and inline images", (
     preview: "[inline image data redacted]",
   });
 });
+it.each(["tool", "text", "reasoning"])(
+  "replays Gemini %s signatures on the tool-result request",
+  async (signatureBlock) => {
+    vi.stubEnv("GEMINI_API_KEY", "test-google-secret");
+    const requests: { contents: { role: string; parts: unknown[] }[] }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, options) => {
+        const body =
+          options?.body ??
+          (url instanceof Request ? await url.text() : undefined);
+        requests.push(JSON.parse(String(body)));
+        const parts =
+          requests.length === 1
+            ? [
+                ...(signatureBlock === "text"
+                  ? [{ text: "", thoughtSignature: "dGV4dA==" }]
+                  : []),
+                ...(signatureBlock === "reasoning"
+                  ? [
+                      {
+                        text: "",
+                        thought: true,
+                        thoughtSignature: "dGhpbmtpbmc=",
+                      },
+                    ]
+                  : []),
+                {
+                  functionCall: { name: "add_numbers", args: { a: 19, b: 7 } },
+                  thoughtSignature: "c2lnbmF0dXJl",
+                },
+              ]
+            : [{ text: "26" }];
+        return new Response(
+          `data: ${JSON.stringify({
+            candidates: [
+              { content: { role: "model", parts }, finishReason: "STOP" },
+            ],
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const adapter = piModel({
+      selection: { provider: "google", model: "gemini-flash-latest" },
+    });
+    const first = await adapter(call, { signal: signal() });
+    const toolCall = first.output.find((part) => part.type === "tool-call");
+    if (!toolCall || toolCall.type !== "tool-call")
+      throw new Error("Missing function call");
+    const nextCall: RuntimeModelCall = {
+      ...call,
+      prompt: [
+        ...call.prompt,
+        {
+          kind: "message",
+          role: "assistant",
+          content: first.output.filter((part) => part.type !== "json"),
+        },
+        {
+          kind: "tool-result",
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          status: "completed",
+          content: [{ type: "text", text: '{"sum":26}' }],
+        },
+      ],
+    };
+    // A fresh adapter and JSON round trip rule out hidden per-instance state.
+    await piModel({
+      selection: { provider: "google", model: "gemini-flash-latest" },
+    })(JSON.parse(JSON.stringify(nextCall)), { signal: signal() });
+    expect(
+      requests[1]?.contents.find((message) => message.role === "model")?.parts,
+    ).toContainEqual({
+      functionCall: { name: "add_numbers", args: { a: 19, b: 7 } },
+      thoughtSignature: "c2lnbmF0dXJl",
+    });
+    if (signatureBlock === "text")
+      expect(
+        requests[1]?.contents.find((message) => message.role === "model")
+          ?.parts[0],
+      ).toEqual({ text: "", thoughtSignature: "dGV4dA==" });
+    if (signatureBlock === "reasoning")
+      expect(
+        requests[1]?.contents.find((message) => message.role === "model")
+          ?.parts[0],
+      ).toEqual({ text: "", thought: true, thoughtSignature: "dGhpbmtpbmc=" });
+    await piModel({
+      selection: { provider: "google", model: "gemini-2.5-flash" },
+    })(nextCall, { signal: signal() });
+    expect(JSON.stringify(requests[2])).not.toContain("thoughtSignature");
+  },
+);

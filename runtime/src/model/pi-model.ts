@@ -10,6 +10,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import type {
   JsonValue,
+  JsonObject,
   PromptContentPart,
   RuntimeModelAdapter,
   RuntimeModelCandidate,
@@ -46,6 +47,38 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
     );
     const selected = registry.getModel(selection.provider, selection.model);
     if (!selected) throw new Error("Unknown model. Run nylorun configure.");
+    const signatureFor = (part: PromptContentPart): string | undefined => {
+      const metadata =
+        "providerMetadata" in part ? part.providerMetadata?.pi : undefined;
+      if (!metadata || typeof metadata !== "object" || Array.isArray(metadata))
+        return;
+      if (
+        !("provider" in metadata) ||
+        metadata.provider !== selected.provider ||
+        !("model" in metadata) ||
+        metadata.model !== selected.id ||
+        !("signature" in metadata) ||
+        typeof metadata.signature !== "string"
+      )
+        return;
+      return metadata.signature;
+    };
+    const metadataFor = (
+      signature: string | undefined,
+      redacted?: boolean,
+    ): { providerMetadata?: JsonObject } =>
+      signature === undefined
+        ? {}
+        : {
+            providerMetadata: {
+              pi: {
+                provider: selected.provider,
+                model: selected.id,
+                signature,
+                ...(redacted ? { redacted: true } : {}),
+              },
+            },
+          };
     const messages: Message[] = [];
     const instructions: string[] = [];
     const content = async (
@@ -123,11 +156,37 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
                       id: part.id,
                       name: part.name,
                       arguments: { ...part.args },
+                      ...(signatureFor(part) === undefined
+                        ? {}
+                        : { thoughtSignature: signatureFor(part) }),
                     },
                   ]
                 : part.type === "text"
-                  ? [{ type: "text" as const, text: part.text }]
-                  : [],
+                  ? [
+                      {
+                        type: "text" as const,
+                        text: part.text,
+                        ...(signatureFor(part) === undefined
+                          ? {}
+                          : { textSignature: signatureFor(part) }),
+                      },
+                    ]
+                  : part.type === "reasoning" &&
+                      signatureFor(part) !== undefined
+                    ? [
+                        {
+                          type: "thinking" as const,
+                          thinking: part.text,
+                          thinkingSignature: signatureFor(part),
+                          ...(typeof part.providerMetadata?.pi === "object" &&
+                          part.providerMetadata.pi !== null &&
+                          "redacted" in part.providerMetadata.pi &&
+                          part.providerMetadata.pi.redacted === true
+                            ? { redacted: true }
+                            : {}),
+                        },
+                      ]
+                    : [],
           ),
         });
       } else
@@ -174,15 +233,24 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
       const output: RuntimeModelCandidate["output"][number][] = [];
       for (const part of response.content) {
         if (part.type === "text")
-          output.push({ type: "text", text: part.text });
+          output.push({
+            type: "text",
+            text: part.text,
+            ...metadataFor(part.textSignature),
+          });
         else if (part.type === "thinking")
-          output.push({ type: "reasoning", text: part.thinking });
+          output.push({
+            type: "reasoning",
+            text: part.thinking,
+            ...metadataFor(part.thinkingSignature, part.redacted),
+          });
         else if (part.type === "toolCall")
           output.push({
             type: "tool-call",
             id: part.id,
             name: part.name,
             args: part.arguments,
+            ...metadataFor(part.thoughtSignature),
           });
       }
       return {

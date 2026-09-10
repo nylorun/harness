@@ -64,6 +64,9 @@ export function canonicalizeOutput(output: readonly ModelOutputBlock[]): {
           id: call.id,
           name: call.name,
           args: call.args,
+          ...(block.providerMetadata === undefined
+            ? {}
+            : { providerMetadata: block.providerMetadata }),
           ...(block.raw === undefined ? {} : { raw: block.raw }),
         });
       }),
