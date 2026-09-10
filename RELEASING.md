@@ -20,6 +20,15 @@ If npm requires an initial authenticated publication before trust can be set up,
 an administrator must bootstrap that package using the verified candidate
 artifact, then configure trust. Never substitute an untested local build.
 
+For that first publication, an administrator can temporarily set
+`NPM_BOOTSTRAP_TOKEN` in the protected GitHub `npm` environment. Use a short-lived
+token with only the package/scope permissions needed for this release and direct
+publication enabled. The workflow exposes it only to the publishing step; npm
+prefers configured OIDC trust and falls back to the token when needed. This keeps
+bootstrap publication on the GitHub runner, with provenance and the exact
+validated tarballs. Remove/revoke the token after bootstrap and configure trusted
+publishing for the newly created packages before future releases.
+
 ## Prepare a release PR
 
 Start from updated `main`, with the intended changesets already committed:

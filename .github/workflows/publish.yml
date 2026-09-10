@@ -69,3 +69,6 @@ jobs:
           name: release-packages
           path: .tmp/release-artifacts/
       - run: node scripts/release/publish.mjs
+        env:
+          # Optional first-publication fallback; npm prefers configured OIDC trust.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
