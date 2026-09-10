@@ -40,11 +40,12 @@ export const registry = {
       "--ignore-scripts",
     ]);
   },
-  async waitFor(name, version) {
-    for (let attempt = 0; attempt < 10; attempt++) {
+  async waitFor(name, version, { sleep = delay } = {}) {
+    // npm can accept a publish before several minutes of registry processing.
+    for (let attempt = 0; attempt < 120; attempt++) {
       const value = await this.lookup(name, version);
       if (value) return value;
-      await delay(2000);
+      await sleep(5000);
     }
     throw new Error(
       `Registry has not exposed ${name}@${version}; retry this release later.`,
