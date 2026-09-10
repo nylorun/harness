@@ -45,7 +45,7 @@
     "vite": "^8.2.2"
   },
   "devDependencies": {
-    "@types/node": "^22.18.0",
+    "@types/node": "^26.4.1",
     "@typescript/native": "npm:typescript@^7.0.2",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "^4.1.11"
