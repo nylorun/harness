@@ -17,11 +17,12 @@ export const CODE_MODE_USAGE = [
   "## Writing code for run_code",
   "",
   "`run_code` takes two required arguments: `code` — the body of an async JavaScript function (no `enum`, namespaces, or type annotations; the SDK types are for reference) — and `description`, a short summary of what the program does. Inside the program:",
+  "Write top-level await and return statements. Do not wrap the body in a function declaration or an async arrow function: an uninvoked function does no work. Combine a related calculation/conversion/time request into one run_code call.",
   "",
   '- Call tools as `await tools.name(args)` — quoted access for exotic names: `tools["my-tool"](args)`. Every call resolves to the tool\'s canonical JSON value. Tool arguments must be lossless JSON.',
   "- A FAILED tool call rejects with `ToolCallError`, whose `toolName` identifies the failed tool and whose `message` is human-readable — `try/catch` it to handle and continue.",
   "- Independent read-only calls MAY overlap under `Promise.all`. Sequence dependent work with `await`.",
-  "- Emit results with `return` and/or `console.log(...)`. ONLY what you print or return comes back to you — intermediate tool results never enter the conversation, so extract just what you need.",
+  "- Emit results with `return` and/or `console.log(...)`. Read each tool's described result fields; an object containing a number is not itself a number. ONLY what you print or return comes back to you — intermediate tool results never enter the conversation, so extract just what you need.",
   "",
   "The available tools:",
 ].join("\n");

@@ -15,13 +15,22 @@ export function codexTools(workspaces: Map<string, CodexWorkspace>) {
     id: "codex",
     instructions: [
       "codex_exec runs the host Codex CLI in an isolated temporary workspace. Ask for approval before launching it.",
+      "Each new workspace already contains hello.js with an exported hello(name = 'world') function. Preserve it when adding another function. The task argument is a plain-language instruction for Codex, not JavaScript or a shell script.",
     ],
     tools: [
       tool({
         name: "codex_exec",
         description:
-          "Run a coding task with the host-installed Codex CLI after approval.",
-        inputSchema: z.object({ task: z.string().min(1).max(4_000) }),
+          "Give plain-language editing instructions to the host-installed Codex CLI after approval. Its temporary workspace is already seeded with hello.js.",
+        inputSchema: z.object({
+          task: z
+            .string()
+            .min(1)
+            .max(4_000)
+            .describe(
+              "Plain-language instructions describing the requested edit and verification in the temporary workspace.",
+            ),
+        }),
         async execute({ task }, context) {
           if (context.resume?.approved === false) {
             return {

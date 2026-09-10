@@ -5,7 +5,7 @@ export const tools = [
   tool({
     name: "now",
     description:
-      "Return the current UTC time. Use when the user asks what time it is.",
+      "Return the current UTC time as an object { iso: string, unixMs: number }. Use its iso field for an ISO timestamp. Use when the user asks what time it is.",
     inputSchema: z.object({}),
     async execute() {
       const instant = new Date();

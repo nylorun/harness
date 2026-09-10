@@ -49,6 +49,35 @@ If a model answers directly rather than selecting a tool, try a more explicit re
 “you must use the calculator tool.” For the clock: `What is the current UTC time? You must use the now tool.`
 The example adapter does not invent tool calls for models that skip them.
 
+Model refusals can also happen before a guardrail tool runs. To exercise the middleware
+itself, make the synthetic test explicit: `Call publish with text "the password is hunter2"
+and do not write assistant text before the tool call.` For the tool-input tripwire,
+use the same request with `override-policy`. The lookup's `vault` record is a hard-coded
+fake fixture (`api_key=sk-demo-not-real`); it never accesses an external vault. Check the
+event diagnostics for a denied tool or the expected tripwire, rather than treating a
+model's refusal as proof that middleware ran.
+
+For Code Mode, ask for one `run_code` call using an async function **body**, without a
+function or arrow wrapper. Tool results are objects: `calculate` supplies `.value`,
+`convert` supplies `.result`, and `now` supplies `.iso`. A complete body is:
+
+```js
+const calculation = await tools.calculate({ expression: "100 / 4" });
+const conversion = await tools.convert({
+  value: calculation.value,
+  from: "celsius",
+  to: "fahrenheit",
+});
+const time = await tools.now({});
+return { celsius: calculation.value, fahrenheit: conversion.result, iso: time.iso };
+```
+
+For Coding Agent, `codex_exec.task` is a plain-language task for the Codex CLI. Its
+workspace already contains `hello.js`; it does not need your repository or file upload.
+For example: `Preserve hello in the seeded hello.js, add an exported goodbye function,
+show the resulting file, and verify both functions.` Review that task in Studio's
+approval prompt before allowing execution.
+
 Studio discovers these agents through `GET /v1/agents`, then reads each Runtime-served
 `/agents/:id/manifest.json`. The agent-scoped endpoints are:
 
@@ -92,6 +121,11 @@ npm run codex:preflight
 
 Codex runs in a temporary workspace seeded with a tiny `hello.js` file. It never receives this
 repository. The agent asks for approval before `codex_exec`.
+
+The preflight checks that the CLI is installed; it does not make a model request.
+If execution reports that the configured model requires a newer Codex version,
+[upgrade the host CLI](https://learn.chatgpt.com/docs/codex/cli) and restart the examples
+process so it uses the updated executable. Codex uses its host configuration and login.
 
 ## Learn from the code
 
