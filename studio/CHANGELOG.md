@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1-beta
+
+### Patch Changes
+
+- d27242c: Show stopped guardrail and failed model requests as errors in Studio. Runtime now emits a terminal AG-UI error instead of marking failed requests successful, and Studio displays the reported message. The guardrails example also checks text content parts sent by Studio, including mixed media input, before invoking the model.
+
 ## 0.4.0-beta
 
 ### Minor Changes

@@ -5,7 +5,7 @@ export const tools = [
   tool({
     name: "calculate",
     description:
-      "Evaluate basic arithmetic using numbers, parentheses, and + - * /.",
+      "Evaluate basic arithmetic using numbers, parentheses, and + - * /. Returns an object { expression: string, value: number }; use its value field for further calculations.",
     inputSchema: z.object({ expression: z.string().min(1).max(100) }),
     async execute({ expression }) {
       if (!/^[0-9+\-*/().\s]+$/u.test(expression)) {
