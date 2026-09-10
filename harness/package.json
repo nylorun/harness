@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/harness",
-  "version": "0.10.0-beta.1",
+  "version": "0.11.0-beta",
   "description": "Nylorun's TypeScript agent runtime. See github.com/nylorun/harness.",
   "type": "module",
   "license": "Apache-2.0",
