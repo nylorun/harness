@@ -58,14 +58,24 @@ export function agUiEvents(
         { type: "TEXT_MESSAGE_CONTENT", messageId, delta: text },
         { type: "TEXT_MESSAGE_END", messageId },
       );
-    } else if (event.type === "error") {
+    } else if (event.type === "error" || event.type === "tripwire") {
+      const tripwire = event.payload.tripwire;
+      const payload =
+        tripwire && typeof tripwire === "object"
+          ? { ...event.payload, ...tripwire }
+          : event.payload;
+      const attributes = payload.attributes;
+      const message =
+        payload.message ??
+        (attributes && typeof attributes === "object" && "message" in attributes
+          ? attributes.message
+          : undefined);
       output.push({
         type: "RUN_ERROR",
-        message:
-          typeof event.payload.message === "string"
-            ? event.payload.message
-            : "Agent run failed.",
+        message: typeof message === "string" ? message : "Agent run failed.",
+        ...(typeof payload.code === "string" ? { code: payload.code } : {}),
       });
+      return Object.freeze(output);
     }
   }
   output.push({ type: "RUN_FINISHED", threadId, runId });

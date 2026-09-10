@@ -1,11 +1,5 @@
 # Changelog
 
-## 0.1.2-beta
-
-### Patch Changes
-
-- c0ce3b5: Preserve opaque provider continuation metadata through assistant conversation history. Gemini tool calls now retain thought signatures when sending tool results back to the model, including signed empty text and reasoning blocks. Only the originating provider and model receive their signatures.
-
 ## 0.1.1-beta
 
 ### Patch Changes

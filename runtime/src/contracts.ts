@@ -42,6 +42,7 @@ export interface RuntimeEvent {
   readonly event?: RuntimeInputEvent;
   readonly interaction?: unknown;
   readonly attributes?: unknown;
+  readonly tripwire?: { readonly code: string; readonly message?: string };
 }
 export interface RuntimeCompletion {
   readonly status:
