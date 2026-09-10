@@ -497,6 +497,9 @@ function Chat({
       await runner.runAgent(
         { runId: crypto.randomUUID() },
         {
+          onRunErrorEvent: ({ event }) => {
+            setError(event.message);
+          },
           onNewMessage: ({ message }) => {
             const value = message as unknown as {
               id?: string;

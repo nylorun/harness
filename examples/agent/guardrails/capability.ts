@@ -1,17 +1,18 @@
-import { middleware, tool } from "@nylorun/harness";
+import { middleware, tool, type InputEvent } from "@nylorun/harness";
 import { z } from "zod";
 
 const blocked = /secret|password|credential|api[_-]?key/iu;
-const jailbreak = /ignore (all )?guards|jailbreak/iu;
+const jailbreak = /ignore\s+(all\s+)?guards|jailbreak/iu;
 const override = /override-policy/iu;
 
-function arrivalText(event: {
-  readonly kind: string;
-  readonly text?: string;
-}): string {
-  return event.kind === "user-message" || event.kind === "interrupt"
+function arrivalText(event: InputEvent): string {
+  if (event.kind !== "user-message" && event.kind !== "interrupt") return "";
+  return "text" in event
     ? (event.text ?? "")
-    : "";
+    : event.content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
 }
 
 function publishText(args: unknown): string {

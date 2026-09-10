@@ -58,14 +58,21 @@ export function agUiEvents(
         { type: "TEXT_MESSAGE_CONTENT", messageId, delta: text },
         { type: "TEXT_MESSAGE_END", messageId },
       );
-    } else if (event.type === "error") {
+    } else if (event.type === "error" || event.type === "tripwire") {
+      const attributes = event.payload.attributes;
+      const message =
+        event.payload.message ??
+        (attributes && typeof attributes === "object" && "message" in attributes
+          ? attributes.message
+          : undefined);
       output.push({
         type: "RUN_ERROR",
-        message:
-          typeof event.payload.message === "string"
-            ? event.payload.message
-            : "Agent run failed.",
+        message: typeof message === "string" ? message : "Agent run failed.",
+        ...(typeof event.payload.code === "string"
+          ? { code: event.payload.code }
+          : {}),
       });
+      return Object.freeze(output);
     }
   }
   output.push({ type: "RUN_FINISHED", threadId, runId });
