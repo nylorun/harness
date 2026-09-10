@@ -1,5 +1,5 @@
 {
-  "harness": "0.11.0-beta",
+  "harness": "0.11.1-beta",
   "studio": "0.4.0-beta",
-  "runtime": "0.1.1-beta"
+  "runtime": "0.1.2-beta"
 }
