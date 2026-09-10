@@ -193,6 +193,11 @@ it("blocks Studio text content through Runtime before invoking the model", async
         "http://local/agents/guardrails/v1/sessions/studio-input/events",
       )
     ).json();
+    expect(
+      history.events.filter(
+        (event: { type: string }) => event.type === "tripwire",
+      ),
+    ).toHaveLength(1);
     expect(history.events).toContainEqual(
       expect.objectContaining({
         type: "tripwire",

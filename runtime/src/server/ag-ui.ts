@@ -59,18 +59,21 @@ export function agUiEvents(
         { type: "TEXT_MESSAGE_END", messageId },
       );
     } else if (event.type === "error" || event.type === "tripwire") {
-      const attributes = event.payload.attributes;
+      const tripwire = event.payload.tripwire;
+      const payload =
+        tripwire && typeof tripwire === "object"
+          ? { ...event.payload, ...tripwire }
+          : event.payload;
+      const attributes = payload.attributes;
       const message =
-        event.payload.message ??
+        payload.message ??
         (attributes && typeof attributes === "object" && "message" in attributes
           ? attributes.message
           : undefined);
       output.push({
         type: "RUN_ERROR",
         message: typeof message === "string" ? message : "Agent run failed.",
-        ...(typeof event.payload.code === "string"
-          ? { code: event.payload.code }
-          : {}),
+        ...(typeof payload.code === "string" ? { code: payload.code } : {}),
       });
       return Object.freeze(output);
     }

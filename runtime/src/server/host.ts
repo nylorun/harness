@@ -248,7 +248,9 @@ export async function createRuntime(options: RuntimeConfig) {
         : randomUUID();
     if (!isSessionId(threadId))
       return context.json(
-        { error: "threadId may only contain letters, digits, '.', '_' and '-'" },
+        {
+          error: "threadId may only contain letters, digits, '.', '_' and '-'",
+        },
         400,
       );
     const runId =
@@ -366,6 +368,7 @@ export async function createRuntime(options: RuntimeConfig) {
       ...("approved" in inputEvent ? { approved: inputEvent.approved } : {}),
       ...("value" in inputEvent ? { value: inputEvent.value } : {}),
     });
+    const start = entry.events.length;
     try {
       const result = await entry.session.input(input).completed;
       for (const event of result.events) {
@@ -380,12 +383,33 @@ export async function createRuntime(options: RuntimeConfig) {
           add(entry, agentId, event.type, { interaction: event.interaction });
         }
       }
-      entry.status =
-        result.status === "waiting"
+      const observedFailure = entry.events
+        .slice(start)
+        .some((event) => event.type === "error" || event.type === "tripwire");
+      const completionFailure = result.events.find(
+        (event) => event.type === "error" || event.type === "tripwire",
+      );
+      const failed =
+        observedFailure ||
+        completionFailure !== undefined ||
+        (result.status !== "completed" && result.status !== "waiting");
+      if (!observedFailure && completionFailure) {
+        add(
+          entry,
+          agentId,
+          completionFailure.type,
+          observedPayload(completionFailure),
+        );
+      } else if (!observedFailure && failed) {
+        add(entry, agentId, "error", {
+          message: `Agent run ${result.status}.`,
+        });
+      }
+      entry.status = failed
+        ? "failed"
+        : result.status === "waiting"
           ? "waiting"
-          : result.status === "completed"
-            ? "completed"
-            : "failed";
+          : "completed";
       await entry.writes;
     } catch (error) {
       entry.status = "failed";
