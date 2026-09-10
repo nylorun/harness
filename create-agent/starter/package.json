@@ -22,6 +22,6 @@
   "devDependencies": {
     "@nylorun/studio": "{{STUDIO_VERSION}}",
     "@types/node": "^22.18.0",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }

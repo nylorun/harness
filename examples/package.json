@@ -28,7 +28,7 @@
   "devDependencies": {
     "@nylorun/studio": "file:../studio",
     "@types/node": "^22.18.0",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   }
 }
