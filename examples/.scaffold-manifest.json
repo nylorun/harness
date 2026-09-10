@@ -6,13 +6,13 @@
     "studio": "0.4.1-beta",
     "runtime": "0.1.2-beta"
   },
-  "templateHash": "e857df05f42e3c8408c9d47a91c41468abccf151ac604e67e13715687ddc2db5",
+  "templateHash": "1f64b8adcd034444587acdfaf3c3cb11d144012678a31594c22e69cd52b943c3",
   "files": {
     ".env/.gitignore": "aae815b9313ef60fb99d51bec324f3de1cea5256d6bbf58a660578b3e2d5815c",
     ".env/README.md": "25c1570cc9febdcfaefb9be0eccf8edbe30dec3202fb2063f9e88fbab6a67889",
     ".gitignore": "4f847734ef0ea8461f2c30d0baaea4190b2db88830a3d02d5afcf3edf781a867",
     "nylorun.config.ts": "02b68fe9a2cf0f427ce732135fe4f1321bd8fab604aff06f6d451c76254973df",
-    "package.json": "cd8eb0dffce78bbb8e29262f3c2356821ae5d315d36179e516de01526df45d2e",
+    "package.json": "ee9a3d8a708fc6c9505cc8ef622a453efc9c33139e45b36b1e349cf647863ceb",
     "tsconfig.json": "878880e8ca66aa32247ae6ea58f988681c3b7453e93d9fc66bcbffe47ea361e9"
   }
 }
