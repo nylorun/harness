@@ -6,7 +6,12 @@ import ts from "typescript";
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 const canonicalLicense = readFileSync("../LICENSE", "utf8");
-const forbidden = ["@nylorun/runtime", "@nylorun/agent"];
+const forbidden = [
+  "@nylorun/runtime",
+  "@nylorun/agent",
+  "@nylorun/studio",
+  "@nylorun/create-harness",
+];
 if (manifest.description !== "Nylorun's TypeScript agent runtime. See github.com/nylorun/harness.")
   throw new Error("Harness package description must direct users to the canonical repository.");
 if (!Array.isArray(manifest.keywords) || manifest.keywords.length === 0)
@@ -119,3 +124,8 @@ try {
 } finally {
   rmSync(cache, { recursive: true, force: true });
 }
+
+const independentManifest = JSON.parse(readFileSync("package.json", "utf8"));
+for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"])
+  if (independentManifest[field]?.["@nylorun/runtime"])
+    throw new Error("Harness must not depend on Runtime.");

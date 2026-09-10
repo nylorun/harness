@@ -1,26 +1,78 @@
 name: CI
-
 on:
   pull_request:
   push:
     branches: [main]
-
 permissions:
   contents: read
-
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
-          node-version: 22.19.0
+          node-version-file: .node-version
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm run setup
+      - run: npm run check -- --built
+      - run: npm run check:stack -- --built
+      - run: npm run test:dev
+      - run: npm run test:setup
+      - name: Validate a proposed release
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        shell: bash
+        run: |
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            BASE_SHA=$(git rev-parse HEAD~1)
+          fi
+          git rev-parse --verify --quiet "$BASE_SHA^{commit}" > /dev/null
+          changed=$(git diff --name-only "$BASE_SHA" HEAD -- .release/plan.json)
+          if [[ -n "$changed" ]]; then
+            npm run release:check -- --built
+          fi
+  supervisor:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm install --global npm@11.15.0
+      - run: npm ci
+      - run: node --test scripts/test/processes.test.mjs scripts/test/development.test.mjs scripts/test/release.test.mjs scripts/test/version-policy.test.mjs
+  consumers:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22.14.0, 22.19.0, 26.x]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
       - run: npm ci
       - run: npm run check --workspace @nylorun/harness
-      - run: npm ci --prefix examples
-      - run: npm run check --prefix examples
-      - run: npm test --prefix examples
-      - run: npm run check --workspace @nylorun/studio
+      - if: matrix.node != '22.14.0'
+        run: npm run check --workspace @nylorun/runtime
+      - if: matrix.node != '22.14.0'
+        run: npm run check --workspace @nylorun/studio
+      - if: matrix.node != '22.14.0'
+        run: npm run check --workspace @nylorun/create-agent

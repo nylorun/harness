@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/studio",
-  "version": "0.2.0-rc.4",
+  "version": "0.3.0-beta.1",
   "description": "Local developer Studio for Nylorun agents. Docs: docs.nylorun.com.",
   "type": "module",
   "license": "Apache-2.0",
@@ -19,13 +19,18 @@
     "harness",
     "studio"
   ],
-  "bin": {
-    "nylo": "dist/cli.js"
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public",
@@ -35,13 +40,12 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
-    "typecheck": "node scripts/check-typescript-version.mjs && tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "build": "npm run clean && npm run typecheck && npm run build:server && npm run build:web",
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build",
-    "build": "npm run clean && npm run typecheck && npm run build:server && npm run build:web",
-    "dev": "vite",
     "check": "npm run build && node scripts/check-package.mjs",
+    "typecheck": "node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
     "prepack": "npm run build"
   },
   "dependencies": {

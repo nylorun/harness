@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { model } from "@nylorun/harness";
-import { createAgentServer } from "../server/server.js";
-import { exampleInstructions } from "../agents/types.js";
-import { MAX_IMAGE_BYTES } from "../services/media.js";
-import type { ImageEditor } from "../services/openai-image.js";
+import { createAgentServer } from "./support.js";
+import { exampleInstructions } from "../agent/shared/types.js";
+import { MAX_IMAGE_BYTES } from "@nylorun/runtime";
+import type { ImageEditor } from "../agent/interior-design/image-editor.js";
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const encodedPng = Buffer.from(png).toString("base64");
@@ -81,59 +81,57 @@ describe("multi-agent Hono host", () => {
       );
       const body = (await response.json()) as Record<string, unknown>;
       expect(body).toMatchObject({
-        protocolVersion: 1,
+        protocolVersion: 2,
         id: "interactions",
         name: "Interactions",
         mediaInput: {
           acceptedTypes: ["image/jpeg", "image/png", "image/webp"],
           maxBytes: MAX_IMAGE_BYTES,
         },
-        harness: {
-          manifest: {
-            id: "interactions",
-            name: "Interactions",
-            middleware: [
-              { id: "agent", instructions: [exampleInstructions] },
-              {
-                id: "model",
-                model: {
-                  id: "test/deterministic",
-                  controls: { temperature: 0.1 },
+        manifest: {
+          id: "interactions",
+          name: "Interactions",
+          middleware: [
+            { id: "agent", instructions: [exampleInstructions] },
+            {
+              id: "model",
+              model: {
+                id: "test/deterministic",
+                controls: { temperature: 0.1 },
+              },
+            },
+            {
+              id: "notes",
+              instructions: [
+                "Use write_note only when the user asks to save a note. A human approval is required before the write.",
+              ],
+              tools: [
+                {
+                  name: "read_notes",
+                  description: "Read the most recent locally stored notes.",
                 },
-              },
-              {
-                id: "notes",
-                instructions: [
-                  "Use write_note only when the user asks to save a note. A human approval is required before the write.",
-                ],
-                tools: [
-                  {
-                    name: "read_notes",
-                    description: "Read the most recent locally stored notes.",
-                  },
-                  {
-                    name: "write_note",
-                    description:
-                      "Write a local JSONL note after the user approves.",
-                  },
-                ],
-              },
-              {
-                id: "ask-user",
-                instructions: [
-                  "Use ask_user when you need a short fact from the human before continuing.",
-                ],
-                tools: [
-                  {
-                    name: "ask_user",
-                    description:
-                      "Ask the human a question and wait for their reply.",
-                  },
-                ],
-              },
-              { id: "review-writes" },
-            ],
-          },
+                {
+                  name: "write_note",
+                  description:
+                    "Write a local JSONL note after the user approves.",
+                },
+              ],
+            },
+            {
+              id: "ask-user",
+              instructions: [
+                "Use ask_user when you need a short fact from the human before continuing.",
+              ],
+              tools: [
+                {
+                  name: "ask_user",
+                  description:
+                    "Ask the human a question and wait for their reply.",
+                },
+              ],
+            },
+            { id: "review-writes" },
+          ],
         },
       });
       expect(body).not.toHaveProperty("description");
@@ -157,7 +155,7 @@ describe("multi-agent Hono host", () => {
     try {
       const discovery = await runtime.app.request("http://local/v1/agents");
       await expect(discovery.json()).resolves.toMatchObject({
-        protocolVersion: 1,
+        protocolVersion: 2,
         agents: expect.arrayContaining([
           expect.objectContaining({ id: "tool-use" }),
           expect.objectContaining({ id: "interactions" }),

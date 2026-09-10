@@ -1,9 +1,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Agent, model, type CapabilityItems, type ToolDefinition } from "@nylorun/harness";
+import {
+  Agent,
+  model,
+  type CapabilityItems,
+  type ToolDefinition,
+} from "@nylorun/harness";
 import { afterEach, describe, expect, it } from "vitest";
-import { tools } from "../capabilities/tools/index.js";
+import { tools } from "../agent/shared/tools/index.js";
 
 const adapter = model(async () => ({
   output: [{ type: "text" as const, text: "ok" }],
@@ -13,7 +18,9 @@ const adapter = model(async () => ({
 const temps: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temps.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    temps.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
 });
 
 function items<T>(value: CapabilityItems<T> | undefined): readonly T[] {
@@ -32,7 +39,10 @@ function context() {
   };
 }
 
-function catalogTool(name: string, declaration: Awaited<ReturnType<typeof tools>>): ToolDefinition {
+function catalogTool(
+  name: string,
+  declaration: Awaited<ReturnType<typeof tools>>,
+): ToolDefinition {
   const found = items(declaration.tools).find((tool) => tool.name === name);
   if (!found) throw new Error(`Missing tool ${name}`);
   return found;
@@ -42,7 +52,10 @@ describe("tools()", () => {
   it("loads calculate from the tools catalog", async () => {
     const declaration = await tools();
     await expect(
-      catalogTool("calculate", declaration).execute({ expression: "19 * 7" }, context()),
+      catalogTool("calculate", declaration).execute(
+        { expression: "19 * 7" },
+        context(),
+      ),
     ).resolves.toEqual({
       kind: "completed",
       output: { expression: "19 * 7", value: 133 },
@@ -53,7 +66,10 @@ describe("tools()", () => {
     const declaration = await tools();
     const convert = catalogTool("convert", declaration);
     await expect(
-      convert.execute({ value: 25, from: "celsius", to: "fahrenheit" }, context()),
+      convert.execute(
+        { value: 25, from: "celsius", to: "fahrenheit" },
+        context(),
+      ),
     ).resolves.toEqual({
       kind: "completed",
       output: { value: 25, from: "celsius", to: "fahrenheit", result: 77 },
@@ -72,7 +88,10 @@ describe("tools()", () => {
     const result = await catalogTool("now", declaration).execute({}, context());
     expect(result).toMatchObject({
       kind: "completed",
-      output: { iso: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/), unixMs: expect.any(Number) },
+      output: {
+        iso: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/),
+        unixMs: expect.any(Number),
+      },
     });
   });
 
@@ -91,8 +110,17 @@ describe("tools()", () => {
       .use(await tools())
       .with(adapter)
       .build();
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual(["agent", "tools"]);
-    const offered = agent.manifest.middleware.find((item) => item.id === "tools")?.tools ?? [];
-    expect(offered.map((tool) => tool.name).sort()).toEqual(["calculate", "convert", "now"]);
+    expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
+      "agent",
+      "tools",
+    ]);
+    const offered =
+      agent.manifest.middleware.find((item) => item.id === "tools")?.tools ??
+      [];
+    expect(offered.map((tool) => tool.name).sort()).toEqual([
+      "calculate",
+      "convert",
+      "now",
+    ]);
   });
 });

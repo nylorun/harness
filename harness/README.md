@@ -6,3 +6,5 @@ For installation, examples, API details, and release notes, see the
 [Nylorun Harness repository](https://github.com/nylorun/harness).
 
 > **Experimental beta.** Install with `npm install @nylorun/harness@beta`.
+
+Repository development: [contributing](../CONTRIBUTING.md). Package publication: [releasing](../RELEASING.md).

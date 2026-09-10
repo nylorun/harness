@@ -1,0 +1,125 @@
+import assert from "node:assert/strict";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { root, run, npm, readJson, verifyToolchain } from "./lib/repo.mjs";
+
+await verifyToolchain();
+const temporary = await mkdtemp(join(tmpdir(), "nylorun-setup-smoke-"));
+try {
+  const files = (
+    await run("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
+      capture: true,
+    })
+  )
+    .split("\0")
+    .filter(Boolean);
+  for (const file of new Set(files)) {
+    try {
+      await mkdir(dirname(join(temporary, file)), { recursive: true });
+      await cp(join(root, file), join(temporary, file));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  const sentinels = {
+    "examples/.env/auth.json": '{"fixture":"must-not-change"}',
+    "examples/config/model.json": '{"fixture":"must-not-change"}',
+    "examples/.data/sentinel.txt": "must-not-change",
+  };
+  for (const [file, content] of Object.entries(sentinels)) {
+    await mkdir(dirname(join(temporary, file)), { recursive: true });
+    await writeFile(join(temporary, file), content);
+  }
+  const protectedFiles = new Set([
+    ...files.filter(
+      (file) =>
+        file.startsWith("examples/agent/") || file.startsWith("examples/test/"),
+    ),
+    "examples/.scaffold-manifest.json",
+    "package-lock.json",
+    "examples/package-lock.json",
+    ...Object.keys(sentinels),
+  ]);
+  const before = new Map();
+  for (const file of protectedFiles)
+    before.set(file, await readFile(join(temporary, file)));
+  await npm(["run", "setup"], { cwd: temporary });
+  for (const [file, content] of before)
+    assert.deepEqual(
+      await readFile(join(temporary, file)),
+      content,
+      `Setup modified ${file}`,
+    );
+  console.log(
+    "Clean-checkout setup passed; authored agents, tests, shell provenance, lockfiles, and local state are unchanged.",
+  );
+  const compatibility = await readJson(
+    join(temporary, "create-agent/compatibility.json"),
+  );
+  // Exercise one release independently of pending intents in the source PR.
+  for (const file of await readdir(join(temporary, ".changeset"))) {
+    if (file.endsWith(".md")) await rm(join(temporary, ".changeset", file));
+  }
+  await writeFile(
+    join(temporary, ".changeset/runtime-fixture.md"),
+    '---\n"@nylorun/runtime": patch\n---\n\nExercise controlled release preparation.\n',
+  );
+  const git = (args) => run("git", args, { cwd: temporary, capture: true });
+  await git(["init", "-b", "main"]);
+  await git(["add", "."]);
+  await git([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-m",
+    "Release fixture",
+  ]);
+  await git(["switch", "-c", "codex/release-fixture"]);
+  await npm(["run", "release:prepare", "--", "--channel", "beta"], {
+    cwd: temporary,
+  });
+  const plan = await readJson(join(temporary, ".release/plan.json"));
+  assert.deepEqual(Object.keys(plan.packages).sort(), [
+    "create-agent",
+    "runtime",
+  ]);
+  assert.notEqual(plan.packages.runtime, compatibility.runtime);
+  assert.equal(plan.compatibility.harness, compatibility.harness);
+  assert.equal(plan.compatibility.studio, compatibility.studio);
+  const provenance = await readJson(
+    join(temporary, "examples/.scaffold-manifest.json"),
+  );
+  assert.equal(provenance.creatorVersion, plan.packages["create-agent"]);
+  assert.equal(provenance.compatibility.runtime, plan.packages.runtime);
+  for (const [file, content] of before) {
+    if (
+      file.endsWith("package-lock.json") ||
+      file.endsWith(".scaffold-manifest.json")
+    )
+      continue;
+    assert.deepEqual(
+      await readFile(join(temporary, file)),
+      content,
+      `Release preparation modified authored/local file ${file}`,
+    );
+  }
+  assert.equal(await git(["log", "-1", "--format=%s"]), "Release fixture");
+  console.log(
+    "Release preparation smoke passed: creator adoption, generated provenance, npm lockfile refresh, preserved authored/local files, and no automatic commit.",
+  );
+} finally {
+  await rm(temporary, { recursive: true, force: true });
+}

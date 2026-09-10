@@ -7,31 +7,28 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
-    "prestudio": "npm run build --prefix ../studio",
-    "studio": "node --env-file-if-exists=.env scripts/studio.mjs",
-    "build": "vite build --ssr server/main.ts --outDir dist",
-    "start": "node --env-file-if-exists=.env dist/main.js",
+    "configure": "nylorun configure",
+    "dev": "nylorun dev",
+    "inspect": "nylorun inspect",
+    "studio": "nylorun studio --agent-url http://127.0.0.1:4111",
+    "build": "nylorun build",
+    "start": "nylorun start",
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "docker:preflight": "node scripts/docker-preflight.mjs",
-    "codex:preflight": "node scripts/codex-preflight.mjs"
+    "codex:preflight": "node scripts/codex-preflight.mjs",
+    "docker:preflight": "node scripts/docker-preflight.mjs"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.10",
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "@nylorun/harness": "file:../harness",
-    "@nylorun/studio": "file:../studio",
-    "@noble/hashes": "^2.3.0",
-    "dotenv": "^17.4.2",
-    "hono": "^4.11.10",
+    "@nylorun/runtime": "file:../runtime",
     "zod": "^4.1.12",
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "zod-from-json-schema": "^0.5.6"
   },
   "devDependencies": {
+    "@nylorun/studio": "file:../studio",
     "@types/node": "^22.18.0",
     "typescript": "^5.9.3",
-    "vite": "^8.2.2",
     "vitest": "^4.1.11"
   }
 }

@@ -1,0 +1,53 @@
+{
+  "name": "@nylorun/runtime",
+  "version": "0.1.0-beta.1",
+  "description": "Portable agent hosting, model providers, and the Nylorun CLI.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nylorun/harness.git",
+    "directory": "runtime"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "nylorun": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json",
+    "check": "npm run build && npm test && node scripts/check-package.mjs",
+    "typecheck": "node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.84.4",
+    "@hono/node-server": "^1.19.10",
+    "hono": "^4.11.10",
+    "vite": "^8.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^4.1.11"
+  }
+}

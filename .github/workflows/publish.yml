@@ -1,70 +1,71 @@
-name: Publish npm package
-
+name: Publish reviewed release
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
-      package:
-        description: Package to publish
-        required: true
-        type: choice
-        options: [harness, studio]
-      version:
-        description: Exact package version to publish
+      commit:
+        description: Full SHA of the merged release commit on main
         required: true
         type: string
-      dist_tag:
-        description: npm dist-tag
-        required: true
-        default: beta
-        type: choice
-        options: [beta, latest]
-      confirm:
-        description: Publication has explicit maintainer approval
-        required: true
-        type: boolean
-
 permissions:
   contents: read
-  id-token: write
-
+concurrency:
+  group: npm-publication
+  cancel-in-progress: false
 jobs:
-  publish:
-    if: github.event_name == 'push' || inputs.confirm
+  validate:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: npm
+    env:
+      RELEASE_SHA: ${{ inputs.commit }}
     steps:
+      - name: Validate commit input
+        shell: bash
+        run: '[[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]'
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
-          node-version: 24.x
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm run setup
+      - run: npm run check -- --built
+      - run: npm run release:check -- --built
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: .tmp/release-artifacts/
+          include-hidden-files: true
+          if-no-files-found: error
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ inputs.commit }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - run: npm install --global npm@^11.15.0
-      - run: npm ci
-      - name: Resolve and verify release
-        id: release
-        shell: bash
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            package=harness
-            expected="${GITHUB_REF_NAME#v}"
-          else
-            package="${{ inputs.package }}"
-            expected="${{ inputs.version }}"
-          fi
-          actual="$(node -p "require('./' + process.argv[1] + '/package.json').version" "$package")"
-          test "$actual" = "$expected"
-          if [[ "$actual" == *-* ]]; then
-            dist_tag=beta
-          else
-            dist_tag=latest
-          fi
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            test "$dist_tag" = "${{ inputs.dist_tag }}"
-          fi
-          echo "package=$package" >> "$GITHUB_OUTPUT"
-          echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
-      - run: npm run check --workspace "@nylorun/${{ steps.release.outputs.package }}"
-      - run: npm publish --workspace "@nylorun/${{ steps.release.outputs.package }}" --access public --tag "${{ steps.release.outputs.dist_tag }}"
+      - run: npm install --global npm@11.15.0
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: .tmp/release-artifacts/
+      - run: node scripts/release/publish.mjs

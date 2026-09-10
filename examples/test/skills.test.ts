@@ -14,8 +14,8 @@ import {
   formatSkillCatalog,
   skills,
   SKILLS_USAGE,
-} from "../capabilities/skills/index.js";
-import { SkillRoster } from "../capabilities/skills/roster.js";
+} from "../agent/skills/capability.js";
+import { SkillRoster } from "../agent/skills/roster.js";
 
 const adapter = model(async () => ({
   output: [{ type: "text" as const, text: "ok" }],
@@ -25,7 +25,9 @@ const adapter = model(async () => ({
 const temps: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temps.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    temps.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
 });
 
 async function tempDir(): Promise<string> {
@@ -43,7 +45,10 @@ async function writeSkill(
 ): Promise<string> {
   const directory = join(root, directoryName);
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "SKILL.md"), `---\n${frontmatter}\n---\n\n${body}\n`);
+  await writeFile(
+    join(directory, "SKILL.md"),
+    `---\n${frontmatter}\n---\n\n${body}\n`,
+  );
   for (const [path, content] of Object.entries(extras)) {
     const full = join(directory, path);
     await mkdir(join(full, ".."), { recursive: true });
@@ -57,7 +62,10 @@ function items<T>(value: CapabilityItems<T> | undefined): readonly T[] {
   return "items" in value ? value.items : value;
 }
 
-function toolNamed(declaration: CapabilityDeclaration, name: string): ToolDefinition {
+function toolNamed(
+  declaration: CapabilityDeclaration,
+  name: string,
+): ToolDefinition {
   const found = items(declaration.tools).find((tool) => tool.name === name);
   if (!found) throw new Error(`Missing tool ${name}`);
   return found;
@@ -130,7 +138,8 @@ describe("SkillRoster", () => {
     expect(roster.diagnostics).toEqual([
       expect.objectContaining({
         kind: "warning",
-        message: "Skill name 'pdf-processing' does not match directory 'other-name'.",
+        message:
+          "Skill name 'pdf-processing' does not match directory 'other-name'.",
       }),
     ]);
   });
@@ -156,7 +165,8 @@ describe("skills()", () => {
       skills: [
         defineSkill({
           name: "structured-summary",
-          description: "Produce a fixed-heading summary. Use when asked to summarize.",
+          description:
+            "Produce a fixed-heading summary. Use when asked to summarize.",
           instructions: "## Claim",
         }),
       ],
@@ -166,16 +176,21 @@ describe("skills()", () => {
       formatSkillCatalog([
         {
           name: "structured-summary",
-          description: "Produce a fixed-heading summary. Use when asked to summarize.",
+          description:
+            "Produce a fixed-heading summary. Use when asked to summarize.",
           body: "## Claim",
           resources: [],
         },
       ]),
     ]);
-    expect(items(declaration.instructions)[1]).toContain("<name>structured-summary</name>");
+    expect(items(declaration.instructions)[1]).toContain(
+      "<name>structured-summary</name>",
+    );
     expect(items(declaration.instructions)[1]).not.toContain("## Claim");
     expect(formatSkillCatalog([])).toBe("");
-    expect(items(declaration.tools).map((tool) => tool.name)).toEqual(["load_skill"]);
+    expect(items(declaration.tools).map((tool) => tool.name)).toEqual([
+      "load_skill",
+    ]);
   });
 
   it("returns a wrapped body and resource list from load_skill", async () => {
@@ -198,7 +213,11 @@ describe("skills()", () => {
         content: expect.stringContaining("Read CHECKLIST.md, then review."),
       },
     });
-    if (result.kind !== "completed" || typeof result.output !== "object" || result.output === null) {
+    if (
+      result.kind !== "completed" ||
+      typeof result.output !== "object" ||
+      result.output === null
+    ) {
       throw new Error("expected a completed skill body");
     }
     const content = (result.output as { content: string }).content;
@@ -229,13 +248,19 @@ describe("skills()", () => {
       ),
     ).resolves.toEqual({
       kind: "completed",
-      output: { name: "code-review", path: "CHECKLIST.md", content: "- tests\n" },
+      output: {
+        name: "code-review",
+        path: "CHECKLIST.md",
+        content: "- tests\n",
+      },
     });
   });
 
   it("omits tools and catalog when no skills are discovered", async () => {
     const root = await tempDir();
-    await expect(skills({ directory: root })).resolves.toEqual({ id: "skills" });
+    await expect(skills({ directory: root })).resolves.toEqual({
+      id: "skills",
+    });
   });
 
   it("builds an agent with one skills middleware and no skill-use", async () => {
@@ -254,14 +279,24 @@ describe("skills()", () => {
       .use(await skills({ directory: root }))
       .with(adapter)
       .build();
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual(["agent", "skills"]);
-    expect(agent.manifest.middleware.find((item) => item.id === "skills")).toEqual({
+    expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
+      "agent",
+      "skills",
+    ]);
+    expect(
+      agent.manifest.middleware.find((item) => item.id === "skills"),
+    ).toEqual({
       id: "skills",
       instructions: [
         SKILLS_USAGE,
         expect.stringContaining("<name>structured-summary</name>"),
       ],
-      tools: [{ name: "load_skill", description: "Load the full instructions for a named skill." }],
+      tools: [
+        {
+          name: "load_skill",
+          description: "Load the full instructions for a named skill.",
+        },
+      ],
     });
   });
 });

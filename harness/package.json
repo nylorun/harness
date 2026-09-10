@@ -48,20 +48,22 @@
     "node": "^22.14.0 || ^24.0.0 || >=26.0.0"
   },
   "scripts": {
-    "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
-    "build": "npm run clean && tsc -p tsconfig.json",
+    "build": "npm run clean && node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json",
+    "check": "npm run format:check && npm run build && npm run test:types && npm test && node scripts/check-package.mjs",
+    "typecheck": "node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:types": "tsc -p test/types/tsconfig.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test:types": "tsc -p test/types/tsconfig.json",
-    "check": "npm run format:check && npm run build && npm run test:types && npm test && node scripts/check-package.mjs",
+    "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
     "prepack": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "prettier": "^3.9.6",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^4.1.11",
     "zod": "^4.1.12"
   },
   "peerDependencies": {
