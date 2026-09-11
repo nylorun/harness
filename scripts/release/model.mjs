@@ -8,10 +8,22 @@ import { getPackages } from "@manypkg/get-packages";
 import { root, packages, readJson, writeJson, run } from "../lib/repo.mjs";
 import { planVersions } from "./version-policy.mjs";
 
+/** Adapt manypkg v3 graphs for @changesets/apply-release-plan@7 (expects root + tool string). */
+function packagesForApplyReleasePlan(workspace) {
+  return {
+    tool:
+      typeof workspace.tool === "string"
+        ? workspace.tool
+        : (workspace.tool?.type ?? "root"),
+    packages: workspace.packages,
+    root: workspace.rootPackage ?? workspace.root,
+  };
+}
+
 export async function prepareVersions(repo, channel) {
   const workspace = await getPackages(repo);
-  // @changesets/config v4 expects manypkg v3 package graphs (rootDir). Let it
-  // load packages itself rather than passing the repo's manypkg v1 workspace.
+  // @changesets/config v4 discovers packages itself (manypkg v3 rootDir graphs).
+  // apply-release-plan@7 still wants the older Packages shape (root + tool string).
   const { config, errors } = await readConfig(repo);
   if (config == null) {
     throw new Error(
@@ -51,7 +63,7 @@ export async function prepareVersions(repo, channel) {
       releases: calculated.releases,
       preState: undefined,
     },
-    workspace,
+    packagesForApplyReleasePlan(workspace),
     config,
     undefined,
     root
