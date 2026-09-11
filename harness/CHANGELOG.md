@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0-beta
+
+### Minor Changes
+
+- 4badb5b: Move model execution to session startup, provide Runtime as a mountable Hono router, and generate Hono-first projects with supervised application and Studio development. Studio now resolves root-relative Runtime endpoints correctly for custom mount paths.
+
 ## 0.11.1-beta
 
 ### Patch Changes

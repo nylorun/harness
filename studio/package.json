@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/studio",
-  "version": "0.4.1-beta",
+  "version": "0.4.2-beta",
   "description": "Local developer Studio for Nylorun agents. Docs: docs.nylorun.com.",
   "type": "module",
   "license": "Apache-2.0",
