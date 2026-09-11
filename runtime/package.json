@@ -39,13 +39,13 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.84.4"
+    "@earendil-works/pi-ai": "0.85.1"
   },
   "peerDependencies": {
     "hono": "^4.13.7"
   },
   "devDependencies": {
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.5.0",
     "@typescript/native": "npm:typescript@^7.0.2",
     "hono": "^4.13.7",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
