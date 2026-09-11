@@ -20,6 +20,10 @@ test(
     let app;
     try {
       await mkdir(join(repo, "examples"));
+      await writeJson(join(repo, "examples", "package.json"), {
+        type: "module",
+        scripts: { dev: "node ../runtime/src/main.js" },
+      });
       for (const name of ["harness", "runtime"]) {
         await mkdir(join(repo, name, "src"), { recursive: true });
         await writeJson(join(repo, name, "package.json"), {
@@ -31,7 +35,9 @@ test(
         });
         await writeFile(
           join(repo, name, "build.mjs"),
-          `import { mkdir, copyFile } from 'node:fs/promises'; await mkdir('dist', {recursive:true}); await copyFile('src/main.js', 'dist/${name === "runtime" ? "cli" : "main"}.js');`,
+          `import { mkdir, copyFile } from 'node:fs/promises'; await mkdir('dist', {recursive:true}); await copyFile('src/main.js', 'dist/${
+            name === "runtime" ? "cli" : "main"
+          }.js');`
         );
       }
       const source = join(repo, "harness/src/main.js");
@@ -41,11 +47,11 @@ test(
         `
       import { name } from '../../harness/dist/main.js';
       import { createServer } from 'node:http';
-      const port = Number(process.argv.at(-1));
+      const port = Number(process.env.PORT);
       const server = createServer((req, res) => res.end(name));
       server.listen(port, '127.0.0.1');
       process.on('SIGTERM', () => server.close());
-    `,
+    `
       );
       const port = await availablePort();
       const url = `http://127.0.0.1:${port}/v1/agents`;
@@ -55,7 +61,7 @@ test(
           repo,
           project: join(repo, "examples"),
           log: (line) => logs.push(line),
-        },
+        }
       );
       assert.equal(await (await fetch(url)).text(), "before");
       const until = async (check) => {
@@ -69,23 +75,22 @@ test(
       await until(async () => (await (await fetch(url)).text()) === "after");
       await writeFile(source, "export const name = ;");
       await until(async () =>
-        logs.some((line) => line.includes("running application was retained")),
+        logs.some((line) => line.includes("running application was retained"))
       );
       assert.equal(await (await fetch(url)).text(), "after");
       await writeFile(source, 'export const name = "recovered";');
       await until(
-        async () => (await (await fetch(url)).text()) === "recovered",
+        async () => (await (await fetch(url)).text()) === "recovered"
       );
       const runtimeSource = join(repo, "runtime/src/main.js");
       await writeFile(
         runtimeSource,
-        (await readFile(runtimeSource, "utf8")).replace(
-          "res.end(name)",
-          "res.end('runtime-updated')",
-        ),
+        (
+          await readFile(runtimeSource, "utf8")
+        ).replace("res.end(name)", "res.end('runtime-updated')")
       );
       await until(
-        async () => (await (await fetch(url)).text()) === "runtime-updated",
+        async () => (await (await fetch(url)).text()) === "runtime-updated"
       );
       await assert.rejects(availablePort(port), /unavailable/);
       await app.close();
@@ -101,30 +106,30 @@ test(
             log: (line) => {
               if (line.startsWith("[dev] Runtime http")) controller.abort();
             },
-          },
+          }
         ),
-        /Development stopped/,
+        /Development stopped/
       );
       await availablePort(port);
     } finally {
       await app?.close();
       await rm(repo, { recursive: true, force: true });
     }
-  },
+  }
 );
 
 test("headless and custom-port options reject ambiguous or invalid ports", () => {
   assert.deepEqual(
     developmentOptions(["--no-studio", "--no-open", "--port", "4200"]),
-    { studio: false, open: false, port: 4200, studioPort: 4161 },
+    { studio: false, open: false, port: 4200, studioPort: 4161 }
   );
   assert.throws(
     () => developmentOptions(["--port", "4161"]),
-    /different ports/,
+    /different ports/
   );
   assert.throws(() => developmentOptions(["--port", "0"]), /Invalid port/);
   assert.throws(
     () => developmentOptions(["--port", "--no-open"]),
-    /Invalid port/,
+    /Invalid port/
   );
 });

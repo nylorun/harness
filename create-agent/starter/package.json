@@ -8,20 +8,24 @@
   },
   "scripts": {
     "configure": "nylorun configure",
-    "dev": "nylorun dev",
-    "inspect": "nylorun inspect",
-    "build": "nylorun build",
-    "start": "nylorun start",
+    "dev": "node scripts/dev.mjs",
+    "dev:app": "tsx watch src/index.ts",
+    "studio": "nylorun studio --agent-url http://localhost:3000/agents",
+    "build": "node -e \"import('node:fs/promises').then(async ({rm,cp}) => { await rm('dist', { recursive: true, force: true }); await cp('agents', 'dist/agents', { recursive: true, filter: (source) => !source.endsWith('.ts') }); })\" && tsc -p tsconfig.build.json",
+    "start": "node dist/src/index.js",
     "check": "tsc --noEmit"
   },
   "dependencies": {
     "@nylorun/harness": "{{HARNESS_VERSION}}",
     "@nylorun/runtime": "{{RUNTIME_VERSION}}",
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.7",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@nylorun/studio": "{{STUDIO_VERSION}}",
     "@types/node": "^22.18.0",
+    "tsx": "^4.20.6",
     "typescript": "^7.0.2"
   }
 }

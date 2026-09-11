@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createId } from "../src/utils/ids.js";
-import { createObserverRegistry } from "../src/utils/observe.js";
+import { emitObserve } from "../src/utils/observe.js";
 
 describe("portable utility primitives", () => {
   it("creates prefixed UUID v4 identifiers with Web Crypto", () => {
@@ -10,39 +10,38 @@ describe("portable utility primitives", () => {
   });
 });
 
-describe("observer registry", () => {
-  it("does not invoke an emit factory when no listeners are registered", () => {
-    const registry = createObserverRegistry();
+describe("observer emission", () => {
+  it("does not invoke an emit factory when no observer is provided", () => {
     let calls = 0;
-    registry.emit(() => {
+    emitObserve(undefined, () => {
       calls += 1;
       return { type: "session.stopped", reason: "unused" };
     });
     expect(calls).toBe(0);
   });
 
-  it("invokes an emit factory once when a listener exists", () => {
-    const registry = createObserverRegistry();
+  it("invokes an emit factory once when an observer exists", () => {
     const types: string[] = [];
-    registry.observe((event) => types.push(event.type));
     let calls = 0;
-    registry.emit(() => {
-      calls += 1;
-      return { type: "session.stopped", reason: "done" };
-    });
+    emitObserve(
+      (event) => types.push(event.type),
+      () => {
+        calls += 1;
+        return { type: "session.stopped", reason: "done" };
+      },
+    );
     expect(calls).toBe(1);
     expect(types).toEqual(["session.stopped"]);
   });
 
-  it("skips the next factory after the last listener unsubscribes", () => {
-    const registry = createObserverRegistry();
-    const unsubscribe = registry.observe(() => undefined);
-    unsubscribe();
-    let calls = 0;
-    registry.emit(() => {
-      calls += 1;
-      return { type: "session.stopped", reason: "unused" };
-    });
-    expect(calls).toBe(0);
+  it("isolates observer failures from the session", () => {
+    expect(() =>
+      emitObserve(
+        () => {
+          throw new Error("observer failed");
+        },
+        { type: "session.stopped", sessionId: "session" },
+      ),
+    ).not.toThrow();
   });
 });

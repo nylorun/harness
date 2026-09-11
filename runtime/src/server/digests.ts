@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import type { RuntimeEvent } from "../contracts.js";
 
 /** Optional diagnostic enrichment; engines need not emit model diagnostics. */
-export function observedPayload(event: RuntimeEvent): Record<string, unknown> {
+export function observedPayload(
+  event: { readonly type: string; readonly attributes?: unknown },
+): Record<string, unknown> {
   const attributes = record(event.attributes);
   if (event.type !== "model.requested" || !record(attributes?.call))
     return { ...event };

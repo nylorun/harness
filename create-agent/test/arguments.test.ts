@@ -9,16 +9,18 @@ describe("creator arguments", () => {
       skipConfig: false,
     });
   });
-  it("combines explicit skipping with the existing startup options", () => {
-    expect(
-      parse(["demo", "--skip-config", "--no-studio", "--no-open"]),
-    ).toMatchObject({
+  it("combines explicit skipping with Studio selection", () => {
+    expect(parse(["demo", "--skip-config", "--no-studio"])).toMatchObject({
       skipConfig: true,
       studio: false,
-      open: false,
     });
+  });
+  it("opens Studio by default and supports suppressing the browser", () => {
+    expect(parse(["demo"])).toMatchObject({ studio: true, open: true });
+    expect(parse(["demo", "--no-open"])).toMatchObject({ open: false });
   });
   it("rejects unknown options", () => {
     expect(() => parse(["demo", "--skip-conf"])).toThrow("Usage:");
+    expect(() => parse(["demo", "--studio"])).toThrow("Usage:");
   });
 });

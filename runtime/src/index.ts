@@ -1,15 +1,19 @@
-export { defineRuntime } from "./config.js";
 export type { RuntimeConfig } from "./config.js";
 export type * from "./contracts.js";
-export { createRuntime } from "./server/host.js";
-export { piModel } from "./model/pi-model.js";
-export type { PiModelOptions } from "./model/pi-model.js";
+export {
+  Runtime,
+  serveAgents,
+  type AgentRouterOptions,
+  type RuntimeActor,
+  type ServeAgentsOptions,
+} from "./server/host.js";
 export { localJsonl, memoryHistory, JsonlJournal } from "./adapters/journal.js";
 export type {
-  RuntimePersistence,
+  RuntimeDurability,
   CanonicalEvent,
   SessionSummary,
 } from "./adapters/journal.js";
+export { jsonlObserver } from "./adapters/observe.js";
 export {
   localMedia,
   MediaStore,
@@ -23,4 +27,6 @@ export type {
   MediaAsset,
   MediaReference,
 } from "./adapters/media.js";
+export { piModel } from "./model/pi-model.js";
+export type { PiModelOptions } from "./model/pi-model.js";
 export { projectAsset } from "./assets.js";

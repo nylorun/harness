@@ -1,18 +1,29 @@
 import { describe, expect, it } from "vitest";
-import type { RuntimeAgent } from "../src/contracts.js";
-import { createRuntime } from "../src/server/host.js";
+import type { RuntimeAgent, RuntimeModelAdapter } from "../src/contracts.js";
+import { memoryHistory } from "../src/adapters/journal.js";
+import { Runtime, serveAgents } from "../src/server/host.js";
+
+function isolated(agent: RuntimeAgent, onModelCall?: RuntimeModelAdapter) {
+  const runtime = new Runtime({
+    observer: () => {},
+    durability: memoryHistory(),
+    ...(onModelCall === undefined ? {} : { onModelCall }),
+  });
+  return { runtime, app: serveAgents({ agents: [agent], runtime }) };
+}
 
 /** Both the independent fixture and an external engine run these same assertions. */
 export function agentContract(
   name: string,
   factory: (interaction?: "approval" | "response") => RuntimeAgent,
+  model?: (interaction?: "approval" | "response") => RuntimeModelAdapter,
 ) {
   describe(`${name}: portable hosting contract`, () => {
     it("discovers neutral identity, records ordered lifecycle events, and preserves conversation history", async () => {
-      const runtime = await createRuntime({ agents: [factory()] });
+      const { runtime, app } = isolated(factory(), model?.());
       try {
         const manifest = await (
-          await runtime.app.request("http://local/agents/echo/manifest.json")
+          await app.request("http://local/agents/echo/manifest.json")
         ).json();
         expect(manifest).toMatchObject({
           protocolVersion: 2,
@@ -21,14 +32,11 @@ export function agentContract(
         });
         expect(manifest).not.toHaveProperty("harness");
         for (const content of ["first", "second"]) {
-          const result = await runtime.app.request(
+          const result = await app.request(
             "http://local/agents/echo/v1/ag-ui",
             {
               method: "POST",
-              headers: {
-                "content-type": "application/json",
-                origin: "http://localhost:1234",
-              },
+              headers: { "content-type": "application/json" },
               body: JSON.stringify({
                 threadId: "conversation",
                 messages: [{ role: "user", content }],
@@ -36,13 +44,10 @@ export function agentContract(
             },
           );
           expect(result.status).toBe(200);
-          expect(result.headers.get("access-control-allow-origin")).toBe(
-            "http://localhost:1234",
-          );
           expect(await result.text()).toContain("RUN_FINISHED");
         }
         const events = await (
-          await runtime.app.request(
+          await app.request(
             "http://local/agents/echo/v1/sessions/conversation/events",
           )
         ).json();
@@ -53,15 +58,14 @@ export function agentContract(
           events.events.filter((e: { type: string }) => e.type === "final"),
         ).toHaveLength(2);
         const history = await (
-          await runtime.app.request(
+          await app.request(
             "http://local/agents/echo/v1/ag-ui/sessions/conversation",
           )
         ).json();
         expect(history.messages).toHaveLength(4);
-        expect(runtime.hasSession("echo", "conversation")).toBe(true);
         expect(
           (
-            await runtime.app.request(
+              await app.request(
               "http://local/agents/missing/manifest.json",
             )
           ).status,
@@ -73,9 +77,9 @@ export function agentContract(
     it.each(["approval", "response"] as const)(
       "resumes a %s interaction through the portable contract",
       async (kind) => {
-        const runtime = await createRuntime({ agents: [factory(kind)] });
+        const { runtime, app } = isolated(factory(kind), model?.(kind));
         try {
-          await runtime.app.request("http://local/agents/echo/v1/ag-ui", {
+          await app.request("http://local/agents/echo/v1/ag-ui", {
             method: "POST",
             body: JSON.stringify({
               threadId: "waiting",
@@ -83,7 +87,7 @@ export function agentContract(
             }),
           });
           const session = await (
-            await runtime.app.request(
+            await app.request(
               "http://local/agents/echo/v1/sessions/waiting",
             )
           ).json();
@@ -101,13 +105,13 @@ export function agentContract(
                   kind: "respond",
                   value: "answer",
                 };
-          const reply = await runtime.app.request(
+          const reply = await app.request(
             "http://local/agents/echo/v1/sessions/waiting",
             { method: "POST", body: JSON.stringify({ interaction }) },
           );
           expect(reply.status).toBe(202);
           expect(await reply.json()).toMatchObject({ state: "completed" });
-          const stale = await runtime.app.request(
+          const stale = await app.request(
             "http://local/agents/echo/v1/sessions/waiting",
             { method: "POST", body: JSON.stringify({ interaction }) },
           );

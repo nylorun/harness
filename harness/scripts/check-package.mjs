@@ -94,7 +94,6 @@ try {
   const adapters = await import(new URL("../dist/model/adapters.js", import.meta.url));
   for (const name of [
     "AgentBuilder",
-    "BoundAgentBuilder",
     "AgentBuildError",
     "AgentLifecycleError",
     "HarnessError",

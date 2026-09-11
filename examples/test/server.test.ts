@@ -2,20 +2,21 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { model } from "@nylorun/harness";
+import type { RuntimeModelAdapter } from "@nylorun/runtime";
 import { createAgentServer } from "./support.js";
-import { exampleInstructions } from "../agent/shared/types.js";
+import { exampleInstructions } from "../agents/shared/types.js";
 import { MAX_IMAGE_BYTES } from "@nylorun/runtime";
-import type { ImageEditor } from "../agent/interior-design/image-editor.js";
+import type { ImageEditor } from "../agents/interior-design/image-editor.js";
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const encodedPng = Buffer.from(png).toString("base64");
 
-const deterministic = model(async (call) => {
+const deterministic: RuntimeModelAdapter = async (call) => {
   const user = call.prompt.find(
-    (item) => item.kind === "message" && item.role === "user",
+    (item) => item.kind === "message" && item.role === "user"
   );
-  const text = user?.content.find((part) => part.type === "text")?.text ?? "";
+  const userText = user?.content.find((part) => part.type === "text");
+  const text = userText && "text" in userText ? userText.text : "";
   if (call.prompt.some((item) => item.kind === "tool-result"))
     return {
       output: [{ type: "text", text: "Done." }],
@@ -44,9 +45,9 @@ const deterministic = model(async (call) => {
     ],
     finishReason: "tool-calls" as const,
   };
-});
+};
 
-const interiorModel = model(async (call) => {
+const interiorModel: RuntimeModelAdapter = async (call) => {
   if (call.prompt.some((item) => item.kind === "tool-result"))
     return {
       output: [
@@ -64,7 +65,7 @@ const interiorModel = model(async (call) => {
     ],
     finishReason: "tool-calls" as const,
   };
-});
+};
 
 describe("multi-agent Hono host", () => {
   it("exposes harness identity and static middleware surface", async () => {
@@ -77,7 +78,7 @@ describe("multi-agent Hono host", () => {
     });
     try {
       const response = await runtime.app.request(
-        "http://local/agents/interactions/manifest.json",
+        "http://local/agents/interactions/manifest.json"
       );
       const body = (await response.json()) as Record<string, unknown>;
       expect(body).toMatchObject({
@@ -175,31 +176,30 @@ describe("multi-agent Hono host", () => {
             runId: "run",
             messages: [{ role: "user", content: "calculate two plus two" }],
           }),
-        },
-      );
-      expect(response.headers.get("access-control-allow-origin")).toBe(
-        "http://nylo.run.localhost:4161",
+        }
       );
       const body = await response.text();
       const projectedEvents = body
         .trim()
         .split("\n\n")
         .map(
-          (frame) =>
-            JSON.parse(frame.slice("data: ".length)) as Record<string, unknown>,
+          (frame: string) =>
+            JSON.parse(frame.slice("data: ".length)) as Record<string, unknown>
         );
       expect(body).toContain("TOOL_CALL_START");
       expect(body).toContain("TOOL_CALL_RESULT");
       expect(body).toContain("TEXT_MESSAGE_CONTENT");
       expect(body).toContain("Done.");
       expect(
-        projectedEvents.find((event) => event.type === "TOOL_CALL_RESULT"),
+        projectedEvents.find(
+          (event: Record<string, unknown>) => event.type === "TOOL_CALL_RESULT"
+        )
       ).toMatchObject({
         messageId: expect.any(String),
         toolCallId: "calc-1",
       });
       const listed = await runtime.app.request(
-        "http://local/agents/tool-use/v1/sessions",
+        "http://local/agents/tool-use/v1/sessions"
       );
       await expect(listed.json()).resolves.toMatchObject({
         sessions: expect.arrayContaining([
@@ -211,17 +211,17 @@ describe("multi-agent Hono host", () => {
         ]),
       });
       const eventsResponse = await runtime.app.request(
-        "http://local/agents/tool-use/v1/sessions/calculator/events",
+        "http://local/agents/tool-use/v1/sessions/calculator/events"
       );
       const events = (await eventsResponse.json()) as {
         events: Array<{ type: string; payload: Record<string, unknown> }>;
       };
       const requests = events.events.filter(
-        (event) => event.type === "model.requested",
+        (event) => event.type === "model.requested"
       );
       expect(requests).toHaveLength(2);
       const digests = requests.map(
-        (event) => event.payload.digests as Record<string, string>,
+        (event) => event.payload.digests as Record<string, string>
       );
       expect(digests).toEqual([
         {
@@ -269,14 +269,14 @@ describe("multi-agent Hono host", () => {
         }),
       });
       const waiting = await runtime.app.request(
-        "http://local/agents/interactions/v1/sessions/notes",
+        "http://local/agents/interactions/v1/sessions/notes"
       );
       const state = (await waiting.json()) as {
         pending_interaction?: { id: string };
       };
       expect(state.pending_interaction?.id).toBeTruthy();
       const listed = await runtime.app.request(
-        "http://local/agents/interactions/v1/sessions",
+        "http://local/agents/interactions/v1/sessions"
       );
       await expect(listed.json()).resolves.toMatchObject({
         sessions: expect.arrayContaining([
@@ -299,10 +299,10 @@ describe("multi-agent Hono host", () => {
               approved: true,
             },
           }),
-        },
+        }
       );
       await expect(
-        readFile(join(root, ".data", "interactions", "notes.jsonl"), "utf8"),
+        readFile(join(root, ".data", "interactions", "notes.jsonl"), "utf8")
       ).resolves.toContain("verified note");
     } finally {
       await runtime.close();
@@ -355,7 +355,7 @@ describe("multi-agent Hono host", () => {
               },
             ],
           }),
-        },
+        }
       );
       expect(response.status).toBe(200);
       expect(calls).toEqual([
@@ -365,13 +365,13 @@ describe("multi-agent Hono host", () => {
         }),
       ]);
       const eventsResponse = await runtime.app.request(
-        "http://local/agents/interior-design/v1/sessions/room/events",
+        "http://local/agents/interior-design/v1/sessions/room/events"
       );
       const events = (await eventsResponse.json()) as {
         events: Array<{ type: string; payload: Record<string, any> }>;
       };
       const requested = events.events.find(
-        (event) => event.type === "model.requested",
+        (event) => event.type === "model.requested"
       );
       const prompt = requested?.payload.attributes.call.prompt as Array<{
         kind: string;
@@ -387,7 +387,7 @@ describe("multi-agent Hono host", () => {
               assetId: expect.any(String),
             }),
           }),
-        ]),
+        ])
       );
       const journal = await readFile(
         join(
@@ -396,28 +396,28 @@ describe("multi-agent Hono host", () => {
           "sessions",
           "interior-design",
           "room",
-          "events.jsonl",
+          "events.jsonl"
         ),
-        "utf8",
+        "utf8"
       );
       expect(journal).not.toContain(encodedPng);
       expect(journal).not.toContain("data:image/");
       const completed = events.events.find(
         (event) =>
           event.type === "tool.completed" &&
-          event.payload.toolName === "reimagine_interior",
+          event.payload.toolName === "reimagine_interior"
       );
       const assetId = completed?.payload.attributes.output.image.id;
       const image = await runtime.app.request(
-        `http://local/agents/interior-design/v1/media/room/${assetId}`,
+        `http://local/agents/interior-design/v1/media/room/${assetId}`
       );
       expect(image.headers.get("content-type")).toBe("image/png");
       await expect(image.arrayBuffer()).resolves.toHaveProperty(
         "byteLength",
-        png.byteLength,
+        png.byteLength
       );
       const history = await runtime.app.request(
-        "http://local/agents/interior-design/v1/ag-ui/sessions/room",
+        "http://local/agents/interior-design/v1/ag-ui/sessions/room"
       );
       await expect(history.json()).resolves.toMatchObject({
         messages: expect.arrayContaining([
@@ -472,7 +472,7 @@ describe("multi-agent Hono host", () => {
               },
             ],
           }),
-        },
+        }
       );
       expect(unsupported.status).toBe(400);
       const oversized = await runtime.app.request(
@@ -490,7 +490,7 @@ describe("multi-agent Hono host", () => {
                     source: {
                       type: "data",
                       value: Buffer.alloc(MAX_IMAGE_BYTES + 1).toString(
-                        "base64",
+                        "base64"
                       ),
                       mimeType: "image/png",
                     },
@@ -499,7 +499,7 @@ describe("multi-agent Hono host", () => {
               },
             ],
           }),
-        },
+        }
       );
       expect(oversized.status).toBe(400);
     } finally {

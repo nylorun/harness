@@ -17,7 +17,7 @@ function templatePath(path: string): string {
 
 export async function starterFiles(
   compatibility: Compatibility,
-  studio: boolean,
+  studio: boolean
 ): Promise<Readonly<Record<string, string>>> {
   const root = fileURLToPath(new URL("./starter/", import.meta.url));
   const files: Record<string, string> = {};
@@ -42,8 +42,15 @@ export async function starterFiles(
   if (!studio) {
     const manifest = JSON.parse(files["package.json"]!);
     delete manifest.devDependencies["@nylorun/studio"];
-    manifest.scripts.dev = "nylorun dev --no-studio";
+    manifest.scripts.dev = manifest.scripts["dev:app"];
+    delete manifest.scripts["dev:app"];
+    delete manifest.scripts.studio;
+    delete files["scripts/dev.mjs"];
     files["package.json"] = JSON.stringify(manifest, null, 2) + "\n";
+    files["README.md"] = files["README.md"]!.replace(
+      "`npm run dev` starts your app on port 3000, waits until its agent endpoint is ready, then starts Studio and opens it in your browser. Use `npm run dev -- --no-open` to start Studio without opening a browser. Run `npm run studio` in another terminal to attach Studio separately.",
+      "`npm run dev` starts your app on port 3000."
+    );
   }
   return Object.freeze(files);
 }

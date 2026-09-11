@@ -16,30 +16,41 @@ describe("starter template", () => {
     expect(manifest.dependencies["@nylorun/harness"]).toBe("1.2.3");
     expect(manifest.dependencies["@nylorun/runtime"]).toBe("7.8.9");
     expect(manifest.devDependencies["@nylorun/studio"]).toBe("4.5.6");
+    expect(manifest.scripts.dev).toBe("node scripts/dev.mjs");
+    expect(manifest.scripts["dev:app"]).toBe("tsx watch src/index.ts");
+    expect(files["scripts/dev.mjs"]).toContain("waitForReady");
     expect(
       Object.keys(files)
         .filter((path) => path.endsWith(".ts"))
-        .sort(),
-    ).toEqual([
-      "agent/assistant/agent.ts",
-      "agent/registry.ts",
-      "nylorun.config.ts",
-    ]);
+        .sort()
+    ).toEqual(["agents/assistant/agent.ts", "agents/index.ts", "src/index.ts"]);
     expect(files[".env/auth.json"]).toBeUndefined();
-    expect(files["nylorun.config.ts"]).toContain("defineRuntime({ agents })");
+    expect(files["src/index.ts"]).toContain("serveAgents({ agents, runtime })");
+    expect(files["src/index.ts"]).toContain("new Runtime()");
+    expect(JSON.parse(files["package.json"]!).name).toBe("my-nylorun-agent");
+    expect(files["README.md"]).toMatch(/^# My agent\n/u);
   });
   it("creates a functional headless shell", async () => {
     const files = await starterFiles(compatibility, false);
     const manifest = JSON.parse(files["package.json"]!);
     expect(manifest.devDependencies["@nylorun/studio"]).toBeUndefined();
-    expect(manifest.scripts.dev).toBe("nylorun dev --no-studio");
-    expect(manifest.scripts.start).toBe("nylorun start");
+    expect(manifest.scripts.dev).toBe("tsx watch src/index.ts");
+    expect(manifest.scripts.studio).toBeUndefined();
+    expect(manifest.scripts["dev:app"]).toBeUndefined();
+    expect(files["scripts/dev.mjs"]).toBeUndefined();
+    expect(files["README.md"]).toContain(
+      "`npm run dev` starts your app on port 3000."
+    );
+    expect(files["README.md"]).not.toContain("starts Studio");
+    expect(manifest.scripts.start).toBe("node dist/src/index.js");
   });
   it("renders ignore files under their real names so npm cannot drop them", async () => {
     const files = await starterFiles(compatibility, true);
     expect(files[".gitignore"]).toContain("node_modules/");
     expect(files[".env/.gitignore"]).toContain("*");
-    expect(Object.keys(files).some((path) => path.includes("_gitignore"))).toBe(false);
+    expect(Object.keys(files).some((path) => path.includes("_gitignore"))).toBe(
+      false
+    );
   });
 });
 
@@ -60,8 +71,8 @@ describe("project creation", () => {
       createProject(
         { directory: "taken", studio: true, open: true, yes: true },
         compatibility,
-        dependencies,
-      ),
+        dependencies
+      )
     ).rejects.toThrow("already exists");
   });
 
@@ -81,13 +92,13 @@ describe("project creation", () => {
       createProject(
         { directory: "../outside", studio: true, open: true, yes: true },
         compatibility,
-        dependencies,
-      ),
+        dependencies
+      )
     ).rejects.toThrow("new child");
   });
 });
 
-it("renders a fresh project before installation and forwards headless/browser choices", async () => {
+it("renders a fresh project before installation and forwards browser choices", async () => {
   const files = new Map<string, string>();
   const commands: unknown[] = [];
   let renamed = false;
@@ -112,16 +123,30 @@ it("renders a fresh project before installation and forwards headless/browser ch
         commands.push([command, args, directory]);
         return { status: 0 };
       },
-    },
+    }
   );
-  expect(
-    [...files.keys()].some((path) => path.endsWith("/nylorun.config.ts")),
-  ).toBe(true);
+  expect([...files.keys()].some((path) => path.endsWith("/src/index.ts"))).toBe(
+    true
+  );
+  const packageJson = [...files.entries()].find(([path]) =>
+    path.endsWith("/package.json")
+  )![1];
+  const readme = [...files.entries()].find(
+    ([path]) => path.endsWith("/README.md") && !path.includes("/.env/")
+  )![1];
+  expect(JSON.parse(packageJson).name).toBe("demo");
+  expect(readme.startsWith("# demo\n")).toBe(true);
   expect(commands).toEqual([
     ["npm", ["install", "--yes"], "/workspace/demo"],
     ["npm", ["run", "configure"], "/workspace/demo"],
     ["npm", ["run", "dev", "--", "--no-open"], "/workspace/demo"],
   ]);
+});
+
+it("starts Studio with browser opening by default", async () => {
+  const deps = fixture();
+  await createProject({ ...options, yes: true }, compatibility, deps);
+  expect(deps.run.mock.calls.at(-1)?.[1]).toEqual(["run", "dev"]);
 });
 
 function fixture() {
@@ -143,11 +168,32 @@ it("rejects noninteractive creation before any writes or installation", async ()
   const deps = fixture();
   deps.isInteractive = () => false;
   await expect(createProject(options, compatibility, deps)).rejects.toThrow(
-    "--skip-config",
+    "--skip-config"
   );
   expect(deps.makeDirectory).not.toHaveBeenCalled();
   expect(deps.write).not.toHaveBeenCalled();
   expect(deps.run).not.toHaveBeenCalled();
+});
+
+it("stamps package name and README title from a sanitized directory", async () => {
+  const deps = fixture();
+  const files = new Map<string, string>();
+  deps.write = async (path, content) => {
+    files.set(path, content);
+  };
+  await createProject(
+    { ...options, yes: true, skipConfig: true },
+    compatibility,
+    deps
+  );
+  const packageJson = [...files.entries()].find(([path]) =>
+    path.endsWith("/package.json")
+  )![1];
+  const readme = [...files.entries()].find(
+    ([path]) => path.endsWith("/README.md") && !path.includes("/.env/")
+  )![1];
+  expect(JSON.parse(packageJson).name).toBe("my-agent");
+  expect(readme.startsWith("# my-agent\n")).toBe(true);
 });
 
 it("explicit skipping starts development without interactive configuration", async () => {
@@ -159,7 +205,7 @@ it("explicit skipping starts development without interactive configuration", asy
     ["run", "dev"],
   ]);
   expect(deps.log.mock.calls.flat().join("\n")).toContain(
-    "cd '/workspace/my agent'\nnpm run configure",
+    "cd '/workspace/my agent'\nnpm run configure"
   );
 });
 
@@ -175,13 +221,13 @@ it.each([
       status: index++ === failAt ? 1 : 0,
     }));
     await expect(createProject(options, compatibility, deps)).rejects.toThrow(
-      "cd '/workspace/my agent'\n",
+      "cd '/workspace/my agent'\n"
     );
     expect(deps.run.mock.calls.map((call) => call[1].join(" "))).toEqual(
-      commands,
+      commands
     );
     expect(deps.remove).not.toHaveBeenCalled();
-  },
+  }
 );
 
 it.each([
@@ -193,11 +239,11 @@ it.each([
     const deps = fixture();
     deps.run.mockResolvedValueOnce({ status: 0 }).mockResolvedValueOnce(result);
     await expect(
-      createProject(options, compatibility, deps),
+      createProject(options, compatibility, deps)
     ).rejects.toMatchObject({ exitCode });
     expect(deps.run).toHaveBeenCalledTimes(2);
     expect(deps.remove).not.toHaveBeenCalled();
-  },
+  }
 );
 
 it("shows recovery instructions when spawning configure fails", async () => {
@@ -206,7 +252,7 @@ it("shows recovery instructions when spawning configure fails", async () => {
     .mockResolvedValueOnce({ status: 0 })
     .mockRejectedValueOnce(new Error("spawn failed"));
   await expect(createProject(options, compatibility, deps)).rejects.toThrow(
-    "npm run configure\nnpm run dev",
+    "npm run configure\nnpm run dev"
   );
   expect(deps.run).toHaveBeenCalledTimes(2);
 });

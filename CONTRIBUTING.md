@@ -31,7 +31,7 @@ Setup installs both lockfiles and builds packages. All four packages compile wit
 regenerate examples, or change local credentials/data. Package consumer Node
 support remains separate from the pinned contributor toolchain.
 
-Studio opens at `http://127.0.0.1:4161`; Runtime listens on port 4111.
+Studio opens at `http://127.0.0.1:4161`; Runtime listens on port 3000.
 Opening Studio needs no credentials. Before your first conversation, run this
 in another terminal:
 

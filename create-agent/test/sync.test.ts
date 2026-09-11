@@ -20,13 +20,13 @@ async function root() {
 }
 afterEach(async () => {
   await Promise.all(
-    roots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+    roots.splice(0).map((path) => rm(path, { recursive: true, force: true }))
   );
 });
 it("updates, deletes and renames generated files without touching authored code or local state", async () => {
   const directory = await root();
   for (const path of [
-    "agent/demo/agent.ts",
+    "agents/demo/agent.ts",
     ".env/auth.json",
     "config/model.json",
     ".data/session.json",
@@ -38,25 +38,25 @@ it("updates, deletes and renames generated files without touching authored code 
     directory,
     { "nylorun.config.ts": "v1", "old.json": "old" },
     compatibility,
-    options,
+    options
   );
   const next = { "nylorun.config.ts": "v2", "new.json": "new" };
   expect(
     await synchronize(directory, next, compatibility, {
       ...options,
       check: true,
-    }),
+    })
   ).toContain("old.json");
   expect(await readFile(join(directory, "nylorun.config.ts"), "utf8")).toBe(
-    "v1",
+    "v1"
   );
   await synchronize(directory, next, compatibility, options);
   expect(await synchronize(directory, next, compatibility, options)).toEqual(
-    [],
+    []
   );
   await expect(readFile(join(directory, "old.json"))).rejects.toThrow();
   for (const path of [
-    "agent/demo/agent.ts",
+    "agents/demo/agent.ts",
     ".env/auth.json",
     "config/model.json",
     ".data/session.json",
@@ -69,7 +69,7 @@ it("preflights conflicts before making any edits", async () => {
     directory,
     { "first.json": "v1", "second.json": "v1" },
     compatibility,
-    options,
+    options
   );
   await writeFile(join(directory, "second.json"), "manual edit");
   await expect(
@@ -77,21 +77,22 @@ it("preflights conflicts before making any edits", async () => {
       directory,
       { "first.json": "v2", "second.json": "v2" },
       compatibility,
-      options,
-    ),
+      options
+    )
   ).rejects.toThrow("conflict");
   expect(await readFile(join(directory, "first.json"), "utf8")).toBe("v1");
 });
 it("rejects authored paths, traversal, and symlinks", async () => {
   const directory = await root();
   for (const path of [
-    "agent/a.ts",
+    "agents/a.ts",
     "config/model.json",
     ".env/auth.json",
+    "scripts/manual.mjs",
     "../escape.json",
   ])
     await expect(
-      synchronize(directory, { [path]: "overwrite" }, compatibility, options),
+      synchronize(directory, { [path]: "overwrite" }, compatibility, options)
     ).rejects.toThrow("unmanaged");
   const external = await root();
   await symlink(external, join(directory, "linked"));
@@ -100,20 +101,15 @@ it("rejects authored paths, traversal, and symlinks", async () => {
       directory,
       { "linked/config.json": "overwrite" },
       compatibility,
-      options,
-    ),
+      options
+    )
   ).rejects.toThrow("symlink");
 });
 it("preserves a legacy environment file and explains migration", async () => {
   const directory = await root();
   await writeFile(join(directory, ".env"), "secret");
   await expect(
-    synchronize(
-      directory,
-      { ".env/README.md": "docs" },
-      compatibility,
-      options,
-    ),
+    synchronize(directory, { ".env/README.md": "docs" }, compatibility, options)
   ).rejects.toThrow("relocate");
   expect(await readFile(join(directory, ".env"), "utf8")).toBe("secret");
 });

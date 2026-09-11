@@ -49,6 +49,6 @@ test("the publication smoke creates and starts a project without a terminal or p
   );
   assert.deepEqual(commands, [
     ["install", "--yes"],
-    ["run", "dev", "--", "--no-open"],
+    ["run", "dev"],
   ]);
 });

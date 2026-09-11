@@ -11,10 +11,9 @@
     "vitest": "^4.1.11"
   },
   "scripts": {
-    "studio": "nylorun studio --agent-url http://127.0.0.1:4111",
     "test": "vitest run",
     "codex:preflight": "node scripts/codex-preflight.mjs",
     "docker:preflight": "node scripts/docker-preflight.mjs"
   },
-  "configuration": "import { defineRuntime, localJsonl } from \"@nylorun/runtime\";\nimport { agents, media } from \"./agent/registry.js\";\n\nexport default defineRuntime({ agents, persistence: localJsonl(), media });\n"
+  "index": "import { serve } from \"@hono/node-server\";\nimport { Hono } from \"hono\";\nimport { Runtime, serveAgents } from \"@nylorun/runtime\";\nimport { agents, media } from \"../agents/index.js\";\n\nconst runtime = new Runtime({ media });\nconst app = new Hono();\n\napp.get(\"/\", (c) =>\n  c.json({\n    agents: agents.map((agent) => ({\n      id: agent.id,\n      name: agent.name,\n      manifest: agent.manifest,\n    })),\n  }),\n);\napp.route(\"/agents\", serveAgents({ agents, runtime }));\n\nserve(\n  {\n    fetch: app.fetch,\n    port: Number(process.env.PORT ?? \"3000\"),\n  },\n  (info) => {\n    console.log(`Server is running on http://localhost:${info.port}`);\n  },\n);\n"
 }

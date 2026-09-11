@@ -13,34 +13,26 @@ export interface LoopAgent {
 
 let createBoundAgent: (
   middleware: readonly BoundMiddleware[],
-  invoke: ModelAdapter,
   manifest: AgentManifest,
 ) => BuiltAgent;
 
 export class BuiltAgent {
   readonly id: string;
   readonly name: string;
-  readonly #loopAgent: LoopAgent;
 
   private constructor(
     readonly middleware: readonly BoundMiddleware[],
-    invoke: ModelAdapter,
     readonly manifest: AgentManifest,
   ) {
     this.id = manifest.id;
     this.name = manifest.name;
-    this.#loopAgent = Object.freeze({
-      middleware,
-      invoke,
-    });
   }
 
   static {
-    createBoundAgent = (middleware, invoke, manifest) =>
-      new BuiltAgent(middleware, invoke, manifest);
+    createBoundAgent = (middleware, manifest) => new BuiltAgent(middleware, manifest);
   }
 
-  run(options: SessionRunOptions = {}): Session {
+  run(options: SessionRunOptions): Session {
     const seeded = "seed" in options && options.seed !== undefined;
     if (
       seeded &&
@@ -54,14 +46,17 @@ export class BuiltAgent {
       );
     const id =
       (seeded ? options.seed.id : "id" in options ? options.id : undefined) ?? createId("session");
-    return new LiveSession(id, this.#loopAgent, options);
+    return new LiveSession(
+      id,
+      Object.freeze({ middleware: this.middleware, invoke: options.onModelCall }),
+      options,
+    );
   }
 }
 
 export function bindAgent(
   middleware: readonly BoundMiddleware[],
-  invoke: ModelAdapter,
   manifest: AgentManifest,
 ): BuiltAgent {
-  return createBoundAgent(middleware, invoke, manifest);
+  return createBoundAgent(middleware, manifest);
 }

@@ -14,7 +14,6 @@ export function publicCreatorArguments(version) {
     "create-agent",
     "application",
     "--yes",
-    "--no-open",
     "--skip-config",
   ];
 }
@@ -49,13 +48,9 @@ export async function publicCreatorSmoke(version) {
       [npmCli(), ...publicCreatorArguments(version)],
       { cwd: temporary, env: publicCreatorEnvironment(process.env, npmrc, port) },
     );
-    await child.ready(`http://127.0.0.1:${port}/v1/agents`, 120_000);
-    const studioLine = await child.line((line) =>
-      line.includes("Studio on http"),
-    );
-    await child.ready(studioLine.match(/Studio on (https?:\/\/\S+)/)[1]);
+    await child.ready(`http://127.0.0.1:${port}/agents/v1/agents`, 120_000);
     const discovery = await (
-      await fetch(`http://127.0.0.1:${port}/v1/agents`)
+      await fetch(`http://127.0.0.1:${port}/agents/v1/agents`)
     ).json();
     if (!JSON.stringify(discovery).includes('"assistant"'))
       throw new Error("Public creator did not serve its seed agent.");

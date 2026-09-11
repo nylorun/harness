@@ -42,7 +42,7 @@ try {
   const protectedFiles = new Set([
     ...files.filter(
       (file) =>
-        file.startsWith("examples/agent/") || file.startsWith("examples/test/"),
+        file.startsWith("examples/agents/") || file.startsWith("examples/test/"),
     ),
     "examples/.scaffold-manifest.json",
     "package-lock.json",

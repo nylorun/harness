@@ -1,7 +1,7 @@
 {
   "name": "@nylorun/runtime",
   "version": "0.1.2-beta",
-  "description": "Portable agent hosting, model providers, and the Nylorun CLI.",
+  "description": "Portable agent runtime, Hono protocol router, model providers, and the Nylorun CLI.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -39,14 +39,15 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.85.1",
-    "@hono/node-server": "^1.19.10",
-    "hono": "^4.11.10",
-    "vite": "^8.2.2"
+    "@earendil-works/pi-ai": "0.85.1"
+  },
+  "peerDependencies": {
+    "hono": "^4.13.7"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",
     "@typescript/native": "npm:typescript@^7.0.2",
+    "hono": "^4.13.7",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "^5.0.0"
   }

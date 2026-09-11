@@ -63,13 +63,12 @@ it("completes a signed Gemini tool conversation across the published engine/runt
         }),
       ],
     })
-    .with(
-      piModel({
-        selection: { provider: "google", model: "gemini-flash-latest" },
-      }),
-    )
     .build();
-  const session = agent.run();
+  const session = agent.run({
+    onModelCall: piModel({
+      selection: { provider: "google", model: "gemini-flash-latest" },
+    }),
+  });
   try {
     const result = await session.input("Add 19 and 7").completed;
     expect(result.events.at(-1)).toMatchObject({ type: "final", output: "26" });

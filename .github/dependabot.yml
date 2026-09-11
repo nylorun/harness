@@ -1,19 +1,19 @@
 version: 2
 updates:
-  # Group patch/minor bumps so weekly updates do not open N lockfile-overlapping
-  # PRs that each re-run full CI after every sibling merge. Majors stay ungrouped
-  # for individual review. See .cursor/agents/dependabot-pr-merger.md.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 3
     groups:
       npm-production-minor-patch:
+        applies-to: version-updates
         dependency-type: production
         update-types:
           - minor
           - patch
       npm-development-minor-patch:
+        applies-to: version-updates
         dependency-type: development
         update-types:
           - minor
@@ -22,13 +22,16 @@ updates:
     directory: /examples
     schedule:
       interval: weekly
+    open-pull-requests-limit: 3
     groups:
       examples-production-minor-patch:
+        applies-to: version-updates
         dependency-type: production
         update-types:
           - minor
           - patch
       examples-development-minor-patch:
+        applies-to: version-updates
         dependency-type: development
         update-types:
           - minor
@@ -37,7 +40,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 3
     groups:
       github-actions:
+        applies-to: version-updates
         patterns:
           - "*"
+        update-types:
+          - minor
+          - patch

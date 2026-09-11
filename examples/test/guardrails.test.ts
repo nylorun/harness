@@ -7,10 +7,10 @@ import {
   publish,
   toolInputGuardrail,
   toolOutputGuardrail,
-} from "../agent/guardrails/capability.js";
+} from "../agents/guardrails/capability.js";
 
 function policyAgent(adapter: ReturnType<typeof model>) {
-  return Agent({
+  const agent = Agent({
     id: "guardrails",
     name: "Guardrails",
     instructions: "Be concise.",
@@ -21,8 +21,12 @@ function policyAgent(adapter: ReturnType<typeof model>) {
     .use("output", outputGuardrail)
     .use("tool-input", toolInputGuardrail)
     .use("tool-output", toolOutputGuardrail)
-    .with(adapter)
     .build();
+  return Object.freeze({
+    ...agent,
+    run: (options: { id?: string } = {}) =>
+      agent.run({ ...options, onModelCall: adapter }),
+  });
 }
 
 describe("guardrails", () => {
@@ -159,7 +163,9 @@ describe("guardrails", () => {
 });
 
 it("blocks Studio text content through Runtime before invoking the model", async () => {
-  const { createRuntime } = await import("@nylorun/runtime");
+  const { Runtime, memoryHistory, serveAgents } = await import(
+    "@nylorun/runtime"
+  );
   let calls = 0;
   const agent = policyAgent(
     model(async () => {
@@ -167,9 +173,13 @@ it("blocks Studio text content through Runtime before invoking the model", async
       return "should not run";
     }),
   );
-  const runtime = await createRuntime({ agents: [agent] });
+  const runtime = new Runtime({
+    observer: () => {},
+    durability: memoryHistory(),
+  });
+  const app = serveAgents({ agents: [agent], runtime });
   try {
-    const response = await runtime.app.request(
+    const response = await app.request(
       "http://local/agents/guardrails/v1/ag-ui",
       {
         method: "POST",
@@ -189,7 +199,7 @@ it("blocks Studio text content through Runtime before invoking the model", async
     expect(events).not.toContain('"type":"RUN_FINISHED"');
     expect(calls).toBe(0);
     const history = await (
-      await runtime.app.request(
+      await app.request(
         "http://local/agents/guardrails/v1/sessions/studio-input/events",
       )
     ).json();

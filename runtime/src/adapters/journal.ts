@@ -17,26 +17,26 @@ export type SessionSummary = Readonly<{
   endedAt?: number;
 }>;
 
-/** Explicit local-only JSONL persistence. Raw provider payloads never enter this service. */
+/** Explicit local-only JSONL durability. Raw provider payloads never enter this service. */
 export class JsonlJournal {
   constructor(
     private readonly root: string,
     private readonly secrets: readonly string[],
   ) {}
 
-  async append(agent: string, event: CanonicalEvent): Promise<void> {
-    const file = this.file(agent, event.session);
-    await mkdir(join(this.root, agent, event.session), { recursive: true });
+  async append(agentId: string, event: CanonicalEvent): Promise<void> {
+    const file = this.file(agentId, event.session);
+    await mkdir(join(this.root, agentId, event.session), { recursive: true });
     await appendFile(file, `${JSON.stringify(scrub(event, this.secrets))}\n`);
   }
 
   async events(
-    agent: string,
-    session: string,
+    agentId: string,
+    sessionId: string,
   ): Promise<readonly CanonicalEvent[]> {
     try {
       return Object.freeze(
-        (await readFile(this.file(agent, session), "utf8"))
+        (await readFile(this.file(agentId, sessionId), "utf8"))
           .split("\n")
           .filter(Boolean)
           .flatMap((line) => {
@@ -52,16 +52,16 @@ export class JsonlJournal {
     }
   }
 
-  async list(agent: string): Promise<readonly SessionSummary[]> {
+  async list(agentId: string): Promise<readonly SessionSummary[]> {
     try {
-      const ids = await readdir(join(this.root, agent));
+      const ids = await readdir(join(this.root, agentId));
       const summaries = await Promise.all(
-        ids.map(async (session) => {
-          const events = await this.events(agent, session);
+        ids.map(async (sessionId) => {
+          const events = await this.events(agentId, sessionId);
           const final = events.findLast((event) => event.type === "final");
           const title = sessionTitle(events);
           return {
-            session,
+            session: sessionId,
             ...(title === undefined ? {} : { title }),
             status: sessionStatus(events),
             startedAt: events[0] ? Date.parse(events[0].ts) : 0,
@@ -75,8 +75,8 @@ export class JsonlJournal {
     }
   }
 
-  private file(agent: string, session: string): string {
-    return join(this.root, safe(agent), safe(session), "events.jsonl");
+  private file(agentId: string, sessionId: string): string {
+    return join(this.root, safe(agentId), safe(sessionId), "events.jsonl");
   }
 }
 
@@ -139,34 +139,34 @@ export function scrub(value: unknown, secrets: readonly string[]): unknown {
   return value;
 }
 
-export interface RuntimePersistence {
-  append(agent: string, event: CanonicalEvent): Promise<void>;
-  events(agent: string, session: string): Promise<readonly CanonicalEvent[]>;
-  list(agent: string): Promise<readonly SessionSummary[]>;
+export interface RuntimeDurability {
+  append(agentId: string, event: CanonicalEvent): Promise<void>;
+  events(agentId: string, sessionId: string): Promise<readonly CanonicalEvent[]>;
+  list(agentId: string): Promise<readonly SessionSummary[]>;
 }
 export function localJsonl(
   options: { root?: string; secrets?: readonly string[] } = {},
-): RuntimePersistence {
+): RuntimeDurability {
   return new JsonlJournal(
     options.root ?? join(process.cwd(), ".data", "sessions"),
     options.secrets ?? [],
   );
 }
-export function memoryHistory(): RuntimePersistence {
+export function memoryHistory(): RuntimeDurability {
   const agents = new Map<string, Map<string, CanonicalEvent[]>>();
   return {
-    async append(agent, event) {
-      const sessions = agents.get(agent) ?? new Map<string, CanonicalEvent[]>();
-      agents.set(agent, sessions);
+    async append(agentId, event) {
+      const sessions = agents.get(agentId) ?? new Map<string, CanonicalEvent[]>();
+      agents.set(agentId, sessions);
       const events = sessions.get(event.session) ?? [];
       events.push(event);
       sessions.set(event.session, events);
     },
-    async events(agent, session) {
-      return agents.get(agent)?.get(session) ?? [];
+    async events(agentId, sessionId) {
+      return agents.get(agentId)?.get(sessionId) ?? [];
     },
-    async list(agent) {
-      return [...(agents.get(agent) ?? [])]
+    async list(agentId) {
+      return [...(agents.get(agentId) ?? [])]
         .map(([session, events]) => ({
           session,
           title: sessionTitle(events),

@@ -8,7 +8,7 @@ import {
   type ToolDefinition,
 } from "@nylorun/harness";
 import { afterEach, describe, expect, it } from "vitest";
-import { tools } from "../agent/shared/tools/index.js";
+import { tools } from "../agents/shared/tools/index.js";
 
 const adapter = model(async () => ({
   output: [{ type: "text" as const, text: "ok" }],
@@ -108,7 +108,6 @@ describe("tools()", () => {
       instructions: "Be concise.",
     })
       .use(await tools())
-      .with(adapter)
       .build();
     expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
       "agent",

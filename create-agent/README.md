@@ -4,9 +4,9 @@
 npm create @nylorun/agent@beta my-agent
 ```
 
-Creates a project that directly installs Harness and Runtime, with Studio as a development dependency. The project owns its ordinary `agent/` code and composes the packages in `nylorun.config.ts`. No server or provider implementation is copied into the project.
+Creates a project that directly installs Harness and Runtime, with Studio as a development dependency. The project owns its Hono application in `src/index.ts`; Runtime supplies the agent router and lifecycle only.
 
-Creation installs dependencies, runs Runtime’s provider/model configuration wizard in the same terminal, then starts development. Pass `-- --no-studio` for a headless project or `-- --no-open` to suppress the browser. `nylorun configure` connects a provider without importing the agent graph.
+Creation installs dependencies, runs Runtime’s provider/model configuration wizard in the same terminal, then starts the application and Studio. Pass `-- --no-studio` for a headless project or `-- --no-open` to start Studio without opening a browser. `nylorun configure` connects a provider without importing the agent graph.
 
 ## Configuration and recovery
 
@@ -38,7 +38,7 @@ model request to validate connectivity.
 
 ## Maintaining examples
 
-`starter/` is the canonical project template. `compatibility.json` pins tested Harness, Runtime, and Studio versions. `examples.recipe.json` explicitly adds the eleven-agent registry, local package references, persistence/media configuration, and test dependencies.
+`starter/` is the canonical project template. `compatibility.json` pins tested Harness, Runtime, and Studio versions. `examples.recipe.json` explicitly adds local package references and test dependencies. Persistence and media stay in the authored examples catalog.
 
 From the repository root:
 
@@ -48,7 +48,7 @@ npm install --prefix examples
 npm run examples:check
 ```
 
-The renderer is shared by project creation, the isolated starter development runner, and examples synchronization. Sync owns shell files listed in `examples/.scaffold-manifest.json`; it never edits `agent/`, tests, local model selection, credentials, or `.data/`. Edit generated configuration in the recipe or template. Conflicts with manual generated-file edits fail before any writes. CI checks the rendered shell and runs examples against the current stack. Package changes can require explicit adaptations in authored code; sync does not rewrite TypeScript imports.
+The renderer is shared by project creation, the isolated starter development runner, and examples synchronization. Sync owns shell files listed in `examples/.scaffold-manifest.json`, including the generated `scripts/dev.mjs` supervisor; it never edits `agents/`, tests, other scripts, local model selection, credentials, or `.data/`. Edit generated configuration in the recipe or template. Conflicts with manual generated-file edits fail before any writes. CI checks the rendered shell and runs examples against the current stack. Package changes can require explicit adaptations in authored code; sync does not rewrite TypeScript imports.
 
 `npm run dev:starter` from the repository root previews a fresh project using local packages, including unpublished changes. Each preview has its own retained directory and provider configuration.
 

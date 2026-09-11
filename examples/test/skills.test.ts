@@ -14,8 +14,8 @@ import {
   formatSkillCatalog,
   skills,
   SKILLS_USAGE,
-} from "../agent/skills/capability.js";
-import { SkillRoster } from "../agent/skills/roster.js";
+} from "../agents/skills/capability.js";
+import { SkillRoster } from "../agents/skills/roster.js";
 
 const adapter = model(async () => ({
   output: [{ type: "text" as const, text: "ok" }],
@@ -277,7 +277,6 @@ describe("skills()", () => {
       instructions: "Be concise.",
     })
       .use(await skills({ directory: root }))
-      .with(adapter)
       .build();
     expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
       "agent",
