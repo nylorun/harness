@@ -39,7 +39,7 @@
     "@changesets/config": "^4.0.0",
     "@changesets/read": "^1.0.1",
     "@manypkg/get-packages": "^3.1.0",
-    "chokidar": "^4.0.3",
+    "chokidar": "^5.0.0",
     "semver": "^7.7.4"
   }
 }
