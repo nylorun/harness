@@ -1,5 +1,5 @@
 import semver from "semver";
-import { setTimeout as delay } from "node:timers/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import { npm } from "../lib/repo.mjs";
 
 async function view(spec, field) {
@@ -16,6 +16,7 @@ async function view(spec, field) {
     throw error;
   }
 }
+
 export const registry = {
   async checkTag(name, version, channel) {
     const tags = (await view(`@nylorun/${name}`, "dist-tags")) ?? {};
@@ -40,18 +41,18 @@ export const registry = {
       "--ignore-scripts",
     ]);
   },
-  async waitFor(name, version, { sleep = delay } = {}) {
+  async waitFor(name, version, { sleep: pause = sleep } = {}) {
     // npm can accept a publish before several minutes of registry processing.
     for (let attempt = 0; attempt < 120; attempt++) {
       const value = await this.lookup(name, version);
       if (value) return value;
-      await sleep(5000);
+      await pause(5000);
     }
     throw new Error(
       `Registry has not exposed ${name}@${version}; retry this release later.`,
     );
   },
-  async ensureTag(name, version, channel) {
+  async ensureTag(name, version, channel, { sleep: pause = sleep } = {}) {
     for (let attempt = 0; attempt < 10; attempt++) {
       const tags = (await view(`@nylorun/${name}`, "dist-tags")) ?? {};
       if (tags[channel] === version) return;
@@ -59,11 +60,25 @@ export const registry = {
         throw new Error(
           `Refusing to move ${name}'s ${channel} tag backward from ${tags[channel]} to ${version}.`,
         );
-      await delay(2000);
+      // First publish sets the tag via `npm publish --tag`. Retagging an already
+      // published version (e.g. promote beta → latest) needs dist-tag add, which
+      // requires a classic npm token (OIDC covers publish, not tag edits).
+      if (attempt === 0 || attempt === 4) {
+        try {
+          await npm(
+            ["dist-tag", "add", `@nylorun/${name}@${version}`, channel],
+            { capture: true },
+          );
+          continue;
+        } catch {
+          // Keep polling; publish --tag may still be propagating, or an admin
+          // token may be required for standalone tag edits.
+        }
+      }
+      await pause(2000);
     }
-    // npm 11.15 exchanges OIDC credentials for publish, not dist-tag commands.
     throw new Error(
-      `Published ${name}@${version}, but its ${channel} tag differs. An npm administrator must verify/correct the tag before retrying.`,
+      `Published ${name}@${version}, but its ${channel} tag differs. An npm administrator must run: npm dist-tag add @nylorun/${name}@${version} ${channel}`,
     );
   },
 };

@@ -98,7 +98,8 @@ try {
             "--notes-file",
             notes,
             "--latest=false",
-            ...(plan.channel === "beta" ? ["--prerelease"] : []),
+            // Pre-1.0 product versions stay *-beta even on the latest npm channel.
+            ...(String(version).includes("-") ? ["--prerelease"] : []),
           ]);
       }
     } finally {

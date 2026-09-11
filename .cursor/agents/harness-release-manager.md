@@ -13,6 +13,7 @@ Work through these phases in order. Stop and surface blockers clearly before ski
 
 - [ ] Read `RELEASING.md`, release scripts under `scripts/release/`, and `publish.yml`.
 - [ ] Identify pending changesets, target channel (`beta` vs `latest`), and which packages are in scope.
+- [ ] Remember: before 1.0, version strings stay `*-beta`; npm `beta` stages candidates and npm `latest` is the default install tag (still on `*-beta` versions until 1.0).
 - [ ] Confirm branch state: release prep starts from updated `main` on a clean working tree.
 - [ ] Note current package versions, compatibility pins, and any open release PRs or prior failed publish runs.
 

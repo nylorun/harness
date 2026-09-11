@@ -57,27 +57,36 @@ export async function prepareVersions(repo, channel) {
   const consumed = new Set(legacy?.changesets ?? []);
   const pending = allChangesets.filter((item) => !consumed.has(item.id));
   const calculated = planVersions(before, compatibility, pending, channel);
-  await applyReleasePlan(
-    {
-      changesets: calculated.changesets,
-      releases: calculated.releases,
-      preState: undefined,
-    },
-    packagesForApplyReleasePlan(workspace),
-    config,
-    undefined,
-    root
+  const tagOnly = calculated.releases.every(
+    (release) => release.oldVersion === release.newVersion
   );
-  // Numbered prerelease state is retired; already-applied changes must not replay.
-  if (legacy) {
-    for (const item of allChangesets.filter((item) => consumed.has(item.id)))
-      await rm(join(repo, ".changeset", `${item.id}.md`));
-    await rm(join(repo, ".changeset/pre.json"));
+  if (!tagOnly) {
+    await applyReleasePlan(
+      {
+        changesets: calculated.changesets,
+        releases: calculated.releases,
+        preState: undefined,
+      },
+      packagesForApplyReleasePlan(workspace),
+      config,
+      undefined,
+      root
+    );
+    // Numbered prerelease state is retired; already-applied changes must not replay.
+    if (legacy) {
+      for (const item of allChangesets.filter((item) => consumed.has(item.id)))
+        await rm(join(repo, ".changeset", `${item.id}.md`));
+      await rm(join(repo, ".changeset/pre.json"));
+    }
+    await writeJson(
+      join(repo, "create-agent/compatibility.json"),
+      calculated.plan.compatibility
+    );
+  } else if (legacy) {
+    throw new Error(
+      "Clear legacy prerelease state before a latest dist-tag promotion."
+    );
   }
-  await writeJson(
-    join(repo, "create-agent/compatibility.json"),
-    calculated.plan.compatibility
-  );
   await validatePlan(calculated.plan, repo);
   for (const [name, version] of Object.entries(calculated.plan.packages))
     await releaseNotes(repo, name, version);
@@ -103,14 +112,24 @@ export async function validatePlan(plan, repo) {
     )
       throw new Error(`Invalid release package/version: ${name}`);
     const prerelease = semver.prerelease(version);
-    if (
-      (plan.channel === "latest" && prerelease) ||
-      (plan.channel === "beta" &&
-        (prerelease?.length !== 1 || prerelease[0] !== "beta"))
-    )
-      throw new Error(
-        `Version ${version} does not match channel ${plan.channel}.`
-      );
+    if (plan.channel === "beta") {
+      if (prerelease?.length !== 1 || prerelease[0] !== "beta")
+        throw new Error(
+          `Version ${version} does not match channel ${plan.channel}.`
+        );
+    } else if (plan.channel === "latest") {
+      // Pre-1.0 latest keeps *-beta product branding; post-1.0 latest is stable.
+      if (semver.major(version) === 0) {
+        if (prerelease?.length !== 1 || prerelease[0] !== "beta")
+          throw new Error(
+            `Pre-1.0 latest versions must use the -beta product suffix: ${version}`
+          );
+      } else if (prerelease) {
+        throw new Error(
+          `Version ${version} does not match channel ${plan.channel}.`
+        );
+      }
+    }
     if ((await readJson(join(repo, name, "package.json"))).version !== version)
       throw new Error(`Release version differs from ${name}/package.json.`);
   }
