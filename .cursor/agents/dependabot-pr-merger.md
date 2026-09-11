@@ -82,17 +82,29 @@ After merge or hold (and after a multi-PR batch), report:
 
 ## Multi-PR batch workflow (when N Dependabot PRs are open)
 
-Harness does **not** use stacked PRs for Dependabot. Open Dependabot PRs all target `main` independently; they serialize because they share lockfiles and because merges move `main` (required up-to-date / conflict recovery), not because they form a feature stack. There is **no merge queue** configured today (`mergeQueue` is null). Follow this operational loop instead:
+### CI cost (be explicit)
 
-1. **Inventory** all open Dependabot / dependency-bot PRs (title, update type, ecosystem/directory, CI, merge state, files touched).
-2. **Prioritize merge order:** security advisories → patch → minor → major (majors still need human confirmation when risk is flagged). Prefer green, non-conflicting, lowest-risk first. Skip or hold failed CI / breaking majors.
-3. **Review the next PR** fully (§2). Do not merge on CI alone.
-4. **Merge one PR** when ready (§3–4), using squash (or enable squash auto-merge after approval if waiting only on checks).
-5. **After that merge:** remaining PRs that touch overlapping lockfiles/manifests will usually go behind `main` or conflict. Wait for Dependabot’s default rebase (or comment `@dependabot rebase` if rebase is stuck), then wait for required CI on the refreshed head.
+Serial landing of N lockfile-overlapping PRs is **safe but CI-expensive**: after each merge, Dependabot rebases the rest and CI re-runs — roughly **O(N²)** full workflows for a weekly batch that all touch `package-lock.json`. Stacked PRs do **not** reduce that cost (each layer still runs CI; merges stay ordered). Prefer **fewer PRs** (Dependabot `groups`) or a **merge queue** over stacking.
+
+Harness `.github/dependabot.yml` groups patch/minor (prod vs dev) per npm directory and groups Actions updates so most weeks open a small number of PRs; **majors stay ungrouped** for individual review. When many PRs are already open anyway, use the serial loop below.
+
+### Runtime loop (do not stack)
+
+Open Dependabot PRs all target `main` independently; they serialize because they share lockfiles and because merges move `main` (required up-to-date / conflict recovery), not because they form a feature stack. There is **no merge queue** configured today (`mergeQueue` is null). Follow this loop:
+
+1. **Inventory** all open Dependabot / dependency-bot PRs (title, update type, ecosystem/directory, CI, merge state, files touched). Note which share lockfiles (expect rebase churn).
+2. **Prioritize merge order:** security advisories → patch → minor → major (majors still need human confirmation when risk is flagged). Prefer green, non-conflicting, lowest-risk first. Skip or hold failed CI / breaking majors. Prefer landing **grouped** PRs as single units — do not split them.
+3. **Review the next PR** fully (§2). Do not merge on CI alone. For a grouped PR, skim the whole set of bumps for any major/breaking sneak-in or advisory.
+4. **Merge one PR** when ready (§3–4), using squash. After approval, enable **squash auto-merge** on other already-reviewed green PRs so post-rebase they land without re-clicking (CI still re-runs; this only saves latency/toil).
+5. **After that merge:** remaining overlapping PRs will usually go behind `main` or conflict. Wait for Dependabot’s default rebase (or `@dependabot rebase` if stuck), then wait for required CI on the refreshed head.
 6. **Re-verify** the next PR after rebase (diff still sensible, lockfiles consistent, CI green) and repeat from step 3 until the batch is done or only holds remain.
 7. **Never** retarget Dependabot branches onto each other to fake a stack. **Never** merge several overlapping lockfile PRs in parallel hoping they will all apply cleanly.
 
-Optional repo improvements (recommend to humans; do not silently change config unless asked): Dependabot `groups` to cut PR volume; a GitHub **merge queue** for automatic serialize-and-revalidate; keep Dependabot `rebase-strategy` at auto (default) unless a queue is adopted and rebase fights the queue.
+### Recommend to humans when CI thrash is the complaint
+
+- **First:** Dependabot `groups` (already intended in this repo’s `dependabot.yml`) — cuts N at the source.
+- **Next:** GitHub **merge queue** if ungrouped/major PRs still thrash CI — serialize-and-revalidate without manual rebase babysitting; consider `rebase-strategy: disabled` if Dependabot rebase fights the queue.
+- **Not:** stacked PRs for Dependabot.
 
 ## Constraints
 
