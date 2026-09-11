@@ -1,11 +1,10 @@
-/// <reference types="vite/client" />
 import { readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { ToolDefinition } from "@nylorun/harness";
 
-const bundled = import.meta.glob("./catalog/*.ts", { eager: true });
-
 export async function loadToolsFromDirectory(
-  root: string,
+  root: string
 ): Promise<readonly ToolDefinition[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const loaded: ToolDefinition[] = [];
@@ -18,8 +17,7 @@ export async function loadToolsFromDirectory(
     )
       continue;
     if (entry.name.startsWith(".") || entry.name.endsWith(".test.ts")) continue;
-    const module = bundled[`./catalog/${entry.name}`];
-    if (module === undefined) continue;
+    const module = await import(pathToFileURL(join(root, entry.name)).href);
     for (const tool of toolsFromModule(module)) {
       if (seen.has(tool.name)) continue;
       seen.add(tool.name);
