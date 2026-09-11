@@ -10,7 +10,9 @@ import { planVersions } from "./version-policy.mjs";
 
 export async function prepareVersions(repo, channel) {
   const workspace = await getPackages(repo);
-  const { config, errors } = await readConfig(repo, workspace);
+  // @changesets/config v4 expects manypkg v3 package graphs (rootDir). Let it
+  // load packages itself rather than passing the repo's manypkg v1 workspace.
+  const { config, errors } = await readConfig(repo);
   if (config == null) {
     throw new Error(
       errors?.length ? errors.join("\n") : "Invalid @changesets/config",
