@@ -112,10 +112,8 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
       ),
       /must include create-agent/
     );
-    await assert.rejects(
-      validatePlan({ ...plan, channel: "latest" }, directory),
-      /does not match channel/
-    );
+    // Pre-1.0 *-beta versions are valid on the latest channel (dist-tag promotion).
+    await validatePlan({ ...plan, channel: "latest" }, directory);
     await assert.rejects(
       validatePlan(
         {
@@ -161,13 +159,14 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
         /Invalid release package/
       );
     }
-    const stable = await prepareVersions(directory, "latest");
-    assert.equal(stable.packages.runtime, "0.1.1");
-    assert.equal(stable.packages["create-agent"], "0.1.1");
+    const promoted = await prepareVersions(directory, "latest");
+    assert.equal(promoted.packages.runtime, "0.1.1-beta");
+    assert.equal(promoted.packages["create-agent"], "0.1.1-beta");
     assert.equal(
       (await readJson(join(directory, "runtime/package.json"))).version,
-      "0.1.1"
+      "0.1.1-beta"
     );
+    assert.equal(promoted.channel, "latest");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

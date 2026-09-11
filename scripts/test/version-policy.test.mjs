@@ -63,28 +63,42 @@ for (const [before, type, expected] of [
     );
   });
 
-test("stable promotion preserves numeric cores without pending intent", () => {
-  const { plan } = planVersions(versions, pins, [], "latest");
-  assert.deepEqual(plan.packages, {
-    harness: "0.10.0",
-    runtime: "0.1.0",
-    studio: "0.3.0",
-    "create-agent": "0.1.0",
-  });
+test("pre-1.0 latest promotion keeps *-beta versions for dist-tag moves", () => {
+  const current = {
+    harness: "0.10.0-beta",
+    runtime: "0.1.0-beta",
+    studio: "0.3.0-beta",
+    "create-agent": "0.1.0-beta",
+  };
+  const { plan, releases } = planVersions(
+    current,
+    {
+      harness: current.harness,
+      runtime: current.runtime,
+      studio: current.studio,
+    },
+    [],
+    "latest"
+  );
+  assert.deepEqual(plan.packages, current);
+  assert.equal(plan.channel, "latest");
+  for (const release of releases)
+    assert.equal(release.oldVersion, release.newVersion);
 });
 
-test("pending stable changes bump the core instead of simply stripping beta", () => {
+test("pending latest changes before 1.0 bump the core and keep -beta", () => {
   const { plan } = planVersions(
     { ...versions, runtime: "0.1.1-beta" },
     pins,
     [intent("runtime")],
     "latest"
   );
-  assert.equal(plan.packages.runtime, "0.1.2");
-  assert.equal(plan.compatibility.runtime, "0.1.2");
+  assert.equal(plan.packages.runtime, "0.1.2-beta");
+  assert.equal(plan.compatibility.runtime, "0.1.2-beta");
+  assert.equal(plan.packages["create-agent"], "0.1.1-beta");
 });
 
-test("a stable creator is patched when another package is promoted", () => {
+test("post-1.0 latest promotion strips -beta from the promoted package", () => {
   const before = {
     harness: "1.0.0",
     runtime: "1.1.0-beta",

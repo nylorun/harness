@@ -46,24 +46,38 @@ and writes `.release/plan.json`. It does not commit, push, or publish.
 
 Review and commit the versions, changelogs, compatibility, generated shell,
 lockfiles and release plan together. Open a normal PR.
-Changesets supplies release intent and changelog entries. The release policy uses
-`major.minor.patch-beta` for beta and `major.minor.patch` for stable, with no
-numeric prerelease counter. Packages remain independently versioned. Fixes bump
-patch, features bump minor, and breaking changes bump minor before 1.0 or major
-afterward. Every changed beta publication advances the numeric core; for example,
-`0.11.0-beta` plus a patch becomes `0.11.1-beta`.
+Changesets supplies release intent and changelog entries. Version strings and npm
+dist-tags are separate:
+
+- **Pre-1.0 branding:** every release keeps a `-beta` version suffix (`0.12.0-beta`)
+  until the package reaches 1.0. That suffix is product naming, not “temporary.”
+- **npm `beta` channel:** stage a candidate build (`npm publish --tag beta`).
+- **npm `latest` channel:** make a version the default install target. Before 1.0,
+  `latest` still points at `*-beta` version strings. After 1.0, `latest` uses plain
+  `major.minor.patch` versions.
+
+There is no numeric prerelease counter. Packages remain independently versioned.
+Fixes bump patch, features bump minor, and breaking changes bump minor before 1.0
+or major afterward. Every changed publication advances the numeric core; for
+example, `0.11.0-beta` plus a patch becomes `0.11.1-beta`.
 
 Historical numbered prereleases are accepted as inputs, but their numeric core
 is bumped rather than stripping the counter and moving backward. Legacy Changesets
 prerelease state is retired during preparation, without replaying consumed intent.
 Use `release:prepare`, not `changeset version` or `changeset pre`, to apply versions.
 
-For a stable release, use `--channel latest` explicitly. With no pending changes,
-this promotes beta packages without changing their numeric core (`0.11.2-beta`
-becomes `0.11.2`). Pending changes bump the core according to their impact before
-publication. Creator also releases whenever its compatibility pins change.
-Review the complete resulting stack; never retag a beta-version package as stable.
-Subsequent beta releases use `--channel beta`. The release plan controls publication.
+Typical pre-1.0 flow:
+
+1. `release:prepare -- --channel beta` — bump `*-beta` versions and publish to the
+   `beta` dist-tag for soak testing.
+2. `release:prepare -- --channel latest` with no pending changesets — keep the same
+   `*-beta` versions and move the `latest` dist-tag onto them (tag promotion).
+3. With pending changesets, `--channel latest` bumps the numeric core, keeps the
+   pre-1.0 `-beta` suffix, and publishes directly to `latest`.
+
+After 1.0, `--channel latest` with no pending changes strips `-beta`
+(`1.2.0-beta` → `1.2.0`). Creator also releases whenever its compatibility pins
+change. Review the complete resulting stack. The release plan controls publication.
 
 `release:check` validates the exact creator combination, using candidate tarballs
 for changed packages and registry versions for unchanged pins. It also exercises
@@ -95,7 +109,7 @@ model calls. Tags use `@nylorun/<package>@<version>`.
 | Partial publication/network failure | Rerun for the same release commit; matching artifact integrity allows completed packages to be skipped |
 | npm accepted publication but is still processing it | Wait for the version and tag to appear in ordinary npm reads before retrying; preparation/publication must not assign a new artifact to that version |
 | Published integrity differs | Stop; investigate the existing release and prepare a new version |
-| Missing/older dist-tag after publication | An npm administrator must verify/correct it, then retry; trusted publishing does not authenticate standalone tag edits |
+| Missing/older dist-tag after publication | Prefer rerunning the same commit so publish can retry `npm dist-tag add` (needs a classic token such as `NPM_BOOTSTRAP_TOKEN`). Otherwise an npm administrator must run `npm dist-tag add @nylorun/<pkg>@<version> <channel>`; OIDC alone does not authenticate standalone tag edits |
 | A newer dist-tag exists | Do not move it backward; prepare a newer release |
 | Public creator smoke or GitHub release creation failed | Inspect the already-published versions, then rerun the same commit |
 
