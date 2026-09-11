@@ -9,15 +9,15 @@ export interface ExamplesRecipe {
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
   scripts: Record<string, string>;
-  configuration: string;
+  index: string;
 }
 export async function examplesFiles(
   compatibility: Compatibility,
-  recipe: ExamplesRecipe,
+  recipe: ExamplesRecipe
 ) {
   const rendered = await starterFiles(compatibility, true);
   const files = Object.fromEntries(
-    Object.entries(rendered).filter(([path]) => managed(path)),
+    Object.entries(rendered).filter(([path]) => managed(path))
   );
   const manifest = JSON.parse(files["package.json"]!);
   manifest.name = recipe.name;
@@ -40,12 +40,11 @@ export async function examplesFiles(
   };
   manifest.scripts = Object.fromEntries(
     Object.entries(manifest.scripts).sort(
-      ([left], [right]) =>
-        rank(left) - rank(right) || left.localeCompare(right),
-    ),
+      ([left], [right]) => rank(left) - rank(right) || left.localeCompare(right)
+    )
   );
   files["package.json"] = JSON.stringify(manifest, null, 2) + "\n";
-  files["nylorun.config.ts"] = recipe.configuration;
+  files["src/index.ts"] = recipe.index;
   const tsconfig = JSON.parse(files["tsconfig.json"]!);
   tsconfig.include.push("test/**/*.ts");
   files["tsconfig.json"] = JSON.stringify(tsconfig, null, 2) + "\n";
@@ -53,7 +52,7 @@ export async function examplesFiles(
 }
 function managed(path: string): boolean {
   return (
-    !path.startsWith("agent/") &&
+    !path.startsWith("agents/") &&
     !path.startsWith("config/") &&
     path !== "README.md"
   );
@@ -74,7 +73,7 @@ export async function synchronize(
   root: string,
   files: Readonly<Record<string, string>>,
   compatibility: Compatibility,
-  options: { check?: boolean; adopt?: boolean; creatorVersion: string },
+  options: { check?: boolean; adopt?: boolean; creatorVersion: string }
 ): Promise<readonly string[]> {
   root = resolve(root);
   async function pathFor(path: string) {
@@ -84,7 +83,7 @@ export async function synchronize(
       path.split("/").some((part) => !part || part === "." || part === "..") ||
       !managed(path) ||
       path.startsWith("test/") ||
-      path.startsWith("scripts/") ||
+      (path.startsWith("scripts/") && path !== "scripts/dev.mjs") ||
       path.startsWith(".data/") ||
       path.startsWith("node_modules/") ||
       (path.startsWith(".env/") &&
@@ -99,7 +98,7 @@ export async function synchronize(
         if (stat.isSymbolicLink()) throw new Error(`Refusing symlink: ${path}`);
         if (current !== join(root, path) && !stat.isDirectory())
           throw new Error(
-            `Cannot write ${path}: relocate the legacy .env file before syncing; its contents will not be changed.`,
+            `Cannot write ${path}: relocate the legacy .env file before syncing; its contents will not be changed.`
           );
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -127,7 +126,7 @@ export async function synchronize(
   const hashes = Object.fromEntries(
     Object.keys(files)
       .sort()
-      .map((path) => [path, hash(files[path]!)]),
+      .map((path) => [path, hash(files[path]!)])
   );
   const provenance: Provenance = {
     version: 1,
@@ -154,7 +153,7 @@ export async function synchronize(
       !(options.adopt && !prior)
     )
       throw new Error(
-        `Generated-file conflict: ${path}. Move the intended change into the creator template or recipe before syncing.`,
+        `Generated-file conflict: ${path}. Move the intended change into the creator template or recipe before syncing.`
       );
     if (desired === undefined) removals.push(path);
     else writes.set(path, desired);

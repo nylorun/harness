@@ -12,8 +12,8 @@
     ]
   },
   "include": [
-    "agent/**/*.ts",
-    "nylorun.config.ts",
+    "agents/**/*.ts",
+    "src/**/*.ts",
     "test/**/*.ts"
   ]
 }

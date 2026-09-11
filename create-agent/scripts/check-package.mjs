@@ -29,9 +29,9 @@ try {
     "dist/starter/.env/README.md",
     "dist/starter/_gitignore",
     "dist/starter/.env/_gitignore",
-    "dist/starter/nylorun.config.ts",
-    "dist/starter/agent/registry.ts",
-    "dist/starter/agent/assistant/agent.ts",
+    "dist/starter/src/index.ts",
+    "dist/starter/agents/index.ts",
+    "dist/starter/agents/assistant/agent.ts",
   ])
     if (!files.includes(required))
       throw new Error(`Missing tarball file: ${required}`);

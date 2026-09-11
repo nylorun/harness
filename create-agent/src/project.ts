@@ -24,7 +24,7 @@ export class CreationError extends Error {
 export async function createProject(
   options: CreateOptions,
   compatibility: Compatibility,
-  dependencies: CreatorDependencies,
+  dependencies: CreatorDependencies
 ): Promise<void> {
   const currentDirectory = resolve(dependencies.currentDirectory());
   const destination = resolve(currentDirectory, options.directory);
@@ -34,11 +34,11 @@ export async function createProject(
     pathFromCurrentDirectory === "" ||
     pathFromCurrentDirectory === ".." ||
     pathFromCurrentDirectory.startsWith(
-      `..${process.platform === "win32" ? "\\" : "/"}`,
+      `..${process.platform === "win32" ? "\\" : "/"}`
     )
   )
     throw new Error(
-      "Target directory must be a new child of the current directory.",
+      "Target directory must be a new child of the current directory."
     );
   if (await dependencies.exists(destination))
     throw new Error(`Target directory already exists: ${destination}`);
@@ -46,19 +46,25 @@ export async function createProject(
     throw new Error(
       "Provider configuration requires interactive stdin and stdout. " +
         `To configure later, run: npm create @nylorun/agent@beta ${quote(
-          options.directory,
-        )} -- --skip-config`,
+          options.directory
+        )} -- --skip-config`
     );
   dependencies.signal?.throwIfAborted();
   const temporary = join(
     dirname(destination),
-    `.${basename(destination)}-${randomUUID()}`,
+    `.${basename(destination)}-${randomUUID()}`
   );
   await dependencies.makeDirectory(temporary);
   try {
-    for (const [relative, content] of Object.entries(
-      await starterFiles(compatibility, options.studio),
-    )) {
+    const files = {
+      ...(await starterFiles(compatibility, options.studio)),
+    };
+    const name = packageName(basename(destination));
+    const manifest = JSON.parse(files["package.json"]!);
+    manifest.name = name;
+    files["package.json"] = JSON.stringify(manifest, null, 2) + "\n";
+    files["README.md"] = files["README.md"]!.replace(/^# .+\n/u, `# ${name}\n`);
+    for (const [relative, content] of Object.entries(files)) {
       const file = join(temporary, relative);
       await dependencies.makeDirectory(dirname(file));
       await dependencies.write(file, content);
@@ -74,8 +80,8 @@ export async function createProject(
   if (options.skipConfig) {
     dependencies.log(
       `Provider configuration skipped. Configure later in another terminal:\ncd ${quote(
-        destination,
-      )}\nnpm run configure`,
+        destination
+      )}\nnpm run configure`
     );
   } else {
     dependencies.log("Configuring your provider and model...");
@@ -114,10 +120,19 @@ export async function createProject(
         } The generated project was kept.\n${
           name === "Development" ? "Restart" : "Resume"
         } with:\n${recovery}`,
-        cancelled ? error.exitCode : 1,
+        cancelled ? error.exitCode : 1
       );
     }
   }
+}
+
+function packageName(directory: string): string {
+  const name = directory
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/gu, "-")
+    .replace(/^[-.]+|[-.]+$/gu, "")
+    .replace(/-+/gu, "-");
+  return name || "my-nylorun-agent";
 }
 
 function quote(value: string): string {

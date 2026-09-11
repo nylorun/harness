@@ -12,7 +12,7 @@ import type {
   UserContentPart,
 } from "../types/session.js";
 import type { ToolSchemaSource } from "../types/tool.js";
-import type { JsonValue, Observer } from "../types/shared.js";
+import type { JsonValue } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
 import { SessionScheduler } from "./scheduler.js";
 import type { LoopAgent } from "../build/agent.js";
@@ -40,6 +40,7 @@ export class LiveSession implements Session {
     this.scheduler = new SessionScheduler(id, agent, session, {
       ...(seed === undefined ? {} : { seed }),
       ...(options.recorder === undefined ? {} : { recorder: options.recorder }),
+      ...(options.observer === undefined ? {} : { observer: options.observer }),
     });
   }
 
@@ -70,9 +71,6 @@ export class LiveSession implements Session {
   }
   stream(): AsyncIterable<SessionEvent<JsonValue>> {
     return this.scheduler.events;
-  }
-  observe(listener: Observer): () => void {
-    return this.scheduler.observe(listener);
   }
   stop(reason?: string): Promise<void> {
     return this.scheduler.stop(reason);

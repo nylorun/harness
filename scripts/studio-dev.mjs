@@ -20,7 +20,7 @@ process.on("SIGTERM", () => void close());
 process.on("SIGINT", () => void close());
 try {
   backend = await startStudio({
-    agentServerUrl: `http://127.0.0.1:${runtimePort}`,
+    agentServerUrl: `http://127.0.0.1:${runtimePort}/agents`,
     port: await availablePort(),
     open: false,
   });

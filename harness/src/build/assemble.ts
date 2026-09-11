@@ -1,6 +1,5 @@
 import type { BuildResult } from "../types/manifest.js";
 import type { BoundMiddleware } from "../types/middleware.js";
-import type { ModelAdapter } from "../types/model.js";
 import type { BuildDiagnostic } from "../types/shared.js";
 import { bindAgent, type BuiltAgent } from "./agent.js";
 import { createManifest } from "./manifest.js";
@@ -13,7 +12,6 @@ const diagnostic = (
 
 export function assembleAgent(
   middleware: readonly BoundMiddleware[],
-  invoke: ModelAdapter,
   identity: Readonly<{ id: string; name: string }>,
 ): BuildResult<BuiltAgent> {
   const diagnostics: BuildDiagnostic[] = [];
@@ -23,9 +21,6 @@ export function assembleAgent(
   }
   if (typeof identity.name !== "string" || identity.name.length === 0) {
     diagnostics.push(diagnostic("agent.invalid-name", "Agent name must be a non-empty string"));
-  }
-  if (typeof invoke !== "function") {
-    diagnostics.push(diagnostic("harness.invalid-model", "A model invoke function is required"));
   }
 
   const middlewareIds = new Set<string>();
@@ -62,6 +57,6 @@ export function assembleAgent(
     name: identity.name,
     middleware: frozenMiddleware,
   });
-  const agent = bindAgent(frozenMiddleware, invoke, manifest);
+  const agent = bindAgent(frozenMiddleware, manifest);
   return Object.freeze({ ok: true, agent, manifest });
 }

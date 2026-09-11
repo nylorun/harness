@@ -113,7 +113,7 @@ export type Connection = Readonly<{
 }>;
 
 function endpoint(base: string, value: string): string {
-  return new URL(value, base + "/").toString();
+  return new URL(value, base.replace(/\/$/u, "") + "/").toString();
 }
 function shortId(id: string): string {
   return id.length > 12 ? id.slice(0, 8) + "…" + id.slice(-4) : id;
@@ -197,7 +197,7 @@ function useConnection(): Connection {
         if (config.agentServerUrl === undefined)
           throw new Error("No Agent Server URL configured.");
         const response = await fetch(
-          endpoint(config.agentServerUrl, "/v1/agents"),
+          endpoint(config.agentServerUrl, "v1/agents"),
           { cache: "no-store" },
         );
         if (!response.ok)

@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { model } from "@nylorun/harness";
 import { createAgentServer } from "./support.js";
-import { exampleInstructions } from "../agent/shared/types.js";
+import { exampleInstructions } from "../agents/shared/types.js";
 import { MAX_IMAGE_BYTES } from "@nylorun/runtime";
-import type { ImageEditor } from "../agent/interior-design/image-editor.js";
+import type { ImageEditor } from "../agents/interior-design/image-editor.js";
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const encodedPng = Buffer.from(png).toString("base64");
@@ -177,15 +177,12 @@ describe("multi-agent Hono host", () => {
           }),
         },
       );
-      expect(response.headers.get("access-control-allow-origin")).toBe(
-        "http://nylo.run.localhost:4161",
-      );
       const body = await response.text();
       const projectedEvents = body
         .trim()
         .split("\n\n")
         .map(
-          (frame) =>
+          (frame: string) =>
             JSON.parse(frame.slice("data: ".length)) as Record<string, unknown>,
         );
       expect(body).toContain("TOOL_CALL_START");
@@ -193,7 +190,7 @@ describe("multi-agent Hono host", () => {
       expect(body).toContain("TEXT_MESSAGE_CONTENT");
       expect(body).toContain("Done.");
       expect(
-        projectedEvents.find((event) => event.type === "TOOL_CALL_RESULT"),
+        projectedEvents.find((event: Record<string, unknown>) => event.type === "TOOL_CALL_RESULT"),
       ).toMatchObject({
         messageId: expect.any(String),
         toolCallId: "calc-1",

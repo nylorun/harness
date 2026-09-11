@@ -33,6 +33,7 @@ try {
     await npm(["run", "build"], { cwd: join(root, "examples") });
   }
   if (command === "stack") {
+    await npm(["run", "build"], { cwd: join(root, "examples") });
     await node("create-agent/scripts/check-stack.mjs");
     await node("create-agent/scripts/check-example-assets.mjs");
   }

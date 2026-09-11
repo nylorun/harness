@@ -8,7 +8,7 @@ This repository contains independent Harness, Runtime, Studio, and creator packa
 ## Packages
 
 - [`@nylorun/harness`](./harness) — model/tool loop and capability composition.
-- [`@nylorun/runtime`](./runtime) — portable hosting, pi-ai providers, and the `nylorun` CLI.
+- [`@nylorun/runtime`](./runtime) — agent lifecycle, Hono protocol routing, pi-ai providers, and the `nylorun` CLI.
 - [`@nylorun/studio`](./studio) — local dashboard for compatible agent servers.
 - [`@nylorun/create-agent`](./create-agent) — project creation, compatibility pins, and examples synchronization.
 - [`examples`](./examples) — eleven authored capability demonstrations on the generated project shell.

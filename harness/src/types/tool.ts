@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 import type { DeferredOutcome, JsonObject, JsonValue } from "./shared.js";
+import type { ModelAdapter } from "./model.js";
 
 export interface SchemaIssue {
   readonly path: readonly (string | number)[];
@@ -119,6 +120,8 @@ interface ToolExecutionContextBase {
   readonly callId: string;
   readonly invocationId: string;
   readonly signal: AbortSignal;
+  /** The session's model callable, for tools that explicitly run a child agent. */
+  readonly onModelCall?: ModelAdapter;
   readonly resume?: ToolExecutionResume;
 }
 

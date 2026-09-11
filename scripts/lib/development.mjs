@@ -5,7 +5,7 @@ import { ProcessGroup } from "./processes.mjs";
 import { npmCli, root } from "./repo.mjs";
 
 export function developmentOptions(args) {
-  const options = { studio: true, open: true, port: 4111, studioPort: 4161 };
+  const options = { studio: true, open: true, port: 3000, studioPort: 4161 };
   const seen = new Set();
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
@@ -102,17 +102,10 @@ export async function develop(
     runtime = group.start(
       "runtime",
       process.execPath,
-      [
-        join(repo, "runtime/dist/cli.js"),
-        "dev",
-        "--no-studio",
-        "--no-open",
-        "--port",
-        String(options.port),
-      ],
-      { cwd: project },
+      [npmCli(), "run", "dev"],
+      { cwd: project, env: { ...process.env, PORT: String(options.port) } },
     );
-    await runtime.ready(`http://127.0.0.1:${options.port}/v1/agents`);
+    await runtime.ready(`http://127.0.0.1:${options.port}/agents/v1/agents`);
   }
   async function startStudio(open) {
     if (stopping || !options.studio) return;

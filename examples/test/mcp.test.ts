@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { LocalMcp } from "../agent/mcp/client.js";
+import { LocalMcp } from "../agents/mcp/client.js";
 it("runs and closes the bundled MCP subprocess", async () => {
   const mcp = new LocalMcp();
   try {

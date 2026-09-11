@@ -1,13 +1,13 @@
 import { join } from "node:path";
 import type { ModelAdapter } from "@nylorun/harness";
 import {
-  createRuntime,
-  defineRuntime,
+  Runtime,
   localJsonl,
   localMedia,
+  serveAgents,
 } from "@nylorun/runtime";
-import { createRegistry } from "../agent/registry.js";
-import type { ImageEditor } from "../agent/interior-design/image-editor.js";
+import { createRegistry } from "../agents/index.js";
+import type { ImageEditor } from "../agents/interior-design/image-editor.js";
 
 export async function createAgentServer(
   options: {
@@ -24,18 +24,20 @@ export async function createAgentServer(
     root,
     options.adapter
       ? {
-          adapter: options.adapter,
           provider: options.provider ?? "test",
           model: options.model ?? "test-model",
         }
       : undefined,
     { media, imageEditor: options.imageEditor },
   );
-  return createRuntime(
-    defineRuntime({
-      agents,
-      media,
-      persistence: localJsonl({ root: join(root, ".data", "sessions") }),
-    }),
-  );
+  const runtime = new Runtime({
+    media,
+    observer: () => {},
+    ...(options.adapter === undefined ? {} : { onModelCall: options.adapter }),
+    durability: localJsonl({ root: join(root, ".data", "sessions") }),
+  });
+  return Object.freeze({
+    app: serveAgents({ agents, runtime }),
+    close: () => runtime.close(),
+  });
 }

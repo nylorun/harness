@@ -5,7 +5,7 @@ import type {
   MiddlewareContributions,
   StepMiddleware,
 } from "../types/middleware.js";
-import type { ModelAdapter, ModelDirective } from "../types/model.js";
+import type { ModelDirective } from "../types/model.js";
 import type { BuildDiagnostic } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
 import type { BuiltAgent } from "./agent.js";
@@ -21,8 +21,6 @@ interface BuilderState {
   readonly id: string;
   readonly name: string;
   readonly middleware: BoundMiddleware[];
-  invoke?: ModelAdapter;
-  bound: boolean;
   sealed: boolean;
   agent?: BuiltAgent;
   error?: AgentBuildError;
@@ -67,11 +65,20 @@ export class AgentBuilder {
     return this.push({ id: idOrMiddleware, handle: middleware! });
   }
 
-  with(onModelCall: ModelAdapter): BoundAgentBuilder {
-    this.assertOpen("with()");
-    this.state.bound = true;
-    this.state.invoke = onModelCall;
-    return new BoundAgentBuilder(this.state);
+  build(): BuiltAgent {
+    if (this.state.agent) return this.state.agent;
+    if (this.state.error) throw this.state.error;
+    this.state.sealed = true;
+    const result = assembleAgent(this.state.middleware, {
+      id: this.state.id,
+      name: this.state.name,
+    });
+    if (!result.ok) {
+      this.state.error = new AgentBuildError(result.diagnostics);
+      throw this.state.error;
+    }
+    this.state.agent = result.agent;
+    return this.state.agent;
   }
 
   private nextMiddlewareId(): string {
@@ -85,36 +92,14 @@ export class AgentBuilder {
   }
 
   private push(entry: BoundMiddleware): this {
-    this.assertOpen("build()");
+    this.assertOpen();
     this.state.middleware.push(entry);
     return this;
   }
 
-  private assertOpen(after: "with()" | "build()"): void {
-    if (this.state.bound)
-      throw new AgentLifecycleError("AgentBuilder cannot be changed after with()");
+  private assertOpen(): void {
     if (this.state.sealed)
-      throw new AgentLifecycleError(`AgentBuilder cannot be changed after ${after}`);
-  }
-}
-
-export class BoundAgentBuilder {
-  constructor(private readonly state: BuilderState) {}
-
-  build(): BuiltAgent {
-    if (this.state.agent) return this.state.agent;
-    if (this.state.error) throw this.state.error;
-    this.state.sealed = true;
-    const result = assembleAgent(this.state.middleware, this.state.invoke as ModelAdapter, {
-      id: this.state.id,
-      name: this.state.name,
-    });
-    if (!result.ok) {
-      this.state.error = new AgentBuildError(result.diagnostics);
-      throw this.state.error;
-    }
-    this.state.agent = result.agent;
-    return this.state.agent;
+      throw new AgentLifecycleError("AgentBuilder cannot be changed after build()");
   }
 }
 
@@ -129,7 +114,6 @@ function createState(options: AgentOptions): BuilderState {
     id: options.id,
     name: options.name,
     middleware,
-    bound: false,
     sealed: false,
     middlewareSeq: 0,
   };

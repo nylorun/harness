@@ -1,10 +1,4 @@
-export {
-  Agent,
-  AgentBuilder,
-  AgentBuildError,
-  AgentLifecycleError,
-  BoundAgentBuilder,
-} from "./build/builder.js";
+export { Agent, AgentBuilder, AgentBuildError, AgentLifecycleError } from "./build/builder.js";
 export type { AgentOptions } from "./build/builder.js";
 export { HarnessError, isHarnessError } from "./errors.js";
 export type { HarnessErrorCode, HarnessErrorDetails, HarnessErrorOptions } from "./errors.js";

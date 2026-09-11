@@ -6,13 +6,15 @@
     "studio": "0.4.1-beta",
     "runtime": "0.1.2-beta"
   },
-  "templateHash": "1f64b8adcd034444587acdfaf3c3cb11d144012678a31594c22e69cd52b943c3",
+  "templateHash": "7fa735cbdb48d0d4cd51effadddce3ec5686c3aa934d9d019f71e6750920d572",
   "files": {
     ".env/.gitignore": "aae815b9313ef60fb99d51bec324f3de1cea5256d6bbf58a660578b3e2d5815c",
     ".env/README.md": "25c1570cc9febdcfaefb9be0eccf8edbe30dec3202fb2063f9e88fbab6a67889",
     ".gitignore": "4f847734ef0ea8461f2c30d0baaea4190b2db88830a3d02d5afcf3edf781a867",
-    "nylorun.config.ts": "02b68fe9a2cf0f427ce732135fe4f1321bd8fab604aff06f6d451c76254973df",
-    "package.json": "ee9a3d8a708fc6c9505cc8ef622a453efc9c33139e45b36b1e349cf647863ceb",
-    "tsconfig.json": "878880e8ca66aa32247ae6ea58f988681c3b7453e93d9fc66bcbffe47ea361e9"
+    "package.json": "d2390888a467c88169b3c1997c702dfe57a7f5e3c547e3b8fa177b98c19acee3",
+    "scripts/dev.mjs": "b02afa5156aa6b43a394af481f2e582cddb64cbc7cd8d41bb2bc6fb288b4beac",
+    "src/index.ts": "0787fad371e01de3af418fb9a15007a073d160bf2b914712be939933bbe356fe",
+    "tsconfig.build.json": "47cc9a9107b76f9cb44f472309887cf240b96cf255893506793246fee4c52db5",
+    "tsconfig.json": "9ccca230fa35246b01a2b08d7148e2b91d450c470f2b533d9f702a73199fb7c4"
   }
 }

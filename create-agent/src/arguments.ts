@@ -9,13 +9,7 @@ export function parse(argv: readonly string[]): CreateOptions {
   if (
     flags.some(
       (flag) =>
-        ![
-          "--studio",
-          "--no-studio",
-          "--no-open",
-          "--skip-config",
-          "--yes",
-        ].includes(flag),
+        !["--no-studio", "--no-open", "--skip-config", "--yes"].includes(flag)
     )
   )
     throw new Error(usage);

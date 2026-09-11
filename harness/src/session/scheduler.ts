@@ -10,7 +10,7 @@ import type {
 import type { ObserveEvent, Observer } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
 import { createId } from "../utils/ids.js";
-import { createObserverRegistry, type ObserveEmit } from "../utils/observe.js";
+import { emitObserve, type ObserveEmit } from "../utils/observe.js";
 import {
   InputQueue,
   isInteractionReply,
@@ -46,7 +46,6 @@ export class SessionScheduler {
   private generation = 0;
   private stopPromise?: Promise<void>;
   private recordFailure?: HarnessError;
-  private readonly observers = createObserverRegistry();
   private readonly turns: TurnRunner;
   private readonly states: CapabilityStateRegistry;
 
@@ -60,12 +59,14 @@ export class SessionScheduler {
     options: {
       readonly seed?: NormalizedSessionSeed;
       readonly recorder?: SessionRecorder;
+      readonly observer?: Observer;
     } = {},
   ) {
     this.snapshotValue = initialState(id, options.seed);
     this.turns = new TurnRunner(agent, id, session);
     this.session = session;
     this.recorder = options.recorder;
+    this.observer = options.observer;
     this.states = new CapabilityStateRegistry(
       agent.middleware,
       Object.freeze({ id, ...session }),
@@ -77,11 +78,7 @@ export class SessionScheduler {
         revision: options.seed.revision,
         transcriptEntries: options.seed.transcript.length,
       });
-      // Construction precedes public observer registration. Defer this live-only fact
-      // by one microtask so callers can subscribe immediately after run({ seed }).
-      queueMicrotask(() => {
-        if (!this.stopped) this.emitObserve(event);
-      });
+      this.emitObserve(event);
     }
   }
 
@@ -90,14 +87,10 @@ export class SessionScheduler {
     readonly context?: import("../types/shared.js").JsonObject;
   }>;
   private readonly recorder?: SessionRecorder;
+  private readonly observer?: Observer;
 
   get snapshot(): SessionSnapshot {
     return this.snapshotValue;
-  }
-
-  observe(listener: Observer): () => void {
-    if (this.stopped) return () => undefined;
-    return this.observers.observe(listener);
   }
 
   submit(event: InputEvent, options?: InputOptions): SubmissionStream {
@@ -165,7 +158,6 @@ export class SessionScheduler {
       }
       this.emitObserve({ type: "session.stopped", reason });
       await this.states.shutdown(stopError);
-      this.observers.clear();
     })();
     return this.stopPromise;
   }
@@ -450,7 +442,7 @@ export class SessionScheduler {
   }
 
   private emitObserve(event: ObserveEvent | (() => ObserveEvent)): void {
-    this.observers.emit(event);
+    emitObserve(this.observer, event);
   }
 
   private async commitCancelledPlan(pending: PendingTurn, reason: string): Promise<void> {

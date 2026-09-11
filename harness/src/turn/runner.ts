@@ -311,6 +311,7 @@ export class TurnRunner {
         observe: context.observe,
         ids: { sessionId: this.sessionId, turnId: pending.turnId, stepId: pending.stepId },
         states: context.states,
+        onModelCall: this.agent.invoke,
       },
       resume,
     );

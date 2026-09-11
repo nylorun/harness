@@ -1,5 +1,6 @@
 import { HarnessError, isHarnessError } from "../errors.js";
 import type { ObserveEmit } from "../utils/observe.js";
+import type { ModelAdapter } from "../types/model.js";
 import type { InputEvent } from "../types/session.js";
 import type {
   ActiveInteractionExecutionRecord,
@@ -49,6 +50,7 @@ export interface ToolPlanRunContext {
   readonly observe: ObserveEmit;
   readonly ids: { readonly sessionId: string; readonly turnId: string; readonly stepId: string };
   readonly states?: CapabilityStateRegistry;
+  readonly onModelCall: ModelAdapter;
 }
 
 /** Owns one sealed plan's deterministic interaction and concurrent execution progress. */
@@ -254,6 +256,7 @@ export class ToolPlanRunner {
         callId: entry.call.callId,
         invocationId: entry.invocationId,
         signal: context.signal,
+        onModelCall: context.onModelCall,
         resume: this.takeResume(entry.call.callId),
       };
       if (context.states?.has(entry.owner.middlewareId))

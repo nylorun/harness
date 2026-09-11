@@ -56,18 +56,20 @@ export interface RuntimeSession {
     options?: { readonly signal?: AbortSignal },
   ): { readonly completed: Promise<RuntimeCompletion> };
   stream(): AsyncIterable<RuntimeEvent>;
-  observe(listener: (event: RuntimeEvent) => void | Promise<void>): () => void;
   stop(reason?: string): Promise<void>;
+}
+export interface RuntimeRunOptions {
+  readonly id?: string;
+  readonly userId?: string;
+  readonly context?: JsonObject;
+  readonly onModelCall: RuntimeModelAdapter;
+  readonly observer?: { (event: { readonly type: string }): void | Promise<void> };
 }
 export interface RuntimeAgent {
   readonly id: string;
   readonly name: string;
   readonly manifest: { readonly id: string; readonly name: string };
-  run(options?: {
-    readonly id?: string;
-    readonly userId?: string;
-    readonly context?: JsonObject;
-  }): RuntimeSession;
+  run(options: RuntimeRunOptions): RuntimeSession;
   close?(): Promise<void>;
 }
 export type PromptContentPart =

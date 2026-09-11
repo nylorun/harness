@@ -1,6 +1,6 @@
 # Harness examples
 
-An exact create-agent project shell with eleven authored Harness demonstrations under `agent/`. Each capability folder contains its agent and supporting domain code. `nylorun.config.ts` composes them with Runtime's JSONL persistence and shared local media adapter. Runtime owns HTTP, AG-UI, providers, server lifecycle, and Studio startup.
+An exact create-agent project shell with eleven authored Harness demonstrations under `agents/`. `src/index.ts` is the Hono entrypoint; the authored catalog serves agents with Runtime (local JSONL durability/observer and the media adapter). The application owns HTTP and lifecycle.
 
 ## Install and configure
 
@@ -12,7 +12,7 @@ npm run configure
 npm run dev
 ```
 
-Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 4111. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup.
+Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 3000. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup.
 
 Model selection lives in `config/model.json`, credentials in `.env/auth.json`. If upgrading a checkout with a flat `.env` file, move it aside, create the `.env/` directory, and relocate the original file to `.env/integrations.env` without replacing its contents. Run `npm run configure` to select a pi-ai provider or custom OpenAI-compatible endpoint. Legacy `NYLO_*` chat settings are not the new provider configuration.
 
@@ -20,7 +20,7 @@ Optional integration variables are loaded from `.env/integrations.env`. Interior
 
 ## Generated shell and authored examples
 
-The creator owns the shell files listed in `.scaffold-manifest.json`, including `nylorun.config.ts` and `package.json`. Change their source in `create-agent/starter/` or `create-agent/examples.recipe.json`, then run `npm run examples:sync` from the repository root. Sync never changes the authored `agent/` tree, tests, credentials, model selection, or application data. CI rejects shell drift and incompatible integrations.
+The creator owns the shell files listed in `.scaffold-manifest.json`, including `src/index.ts`, `scripts/dev.mjs`, and `package.json`. Change their source in `create-agent/starter/` or `create-agent/examples.recipe.json`, then run `npm run examples:sync` from the repository root. Sync never changes the authored `agents/` tree, tests, other scripts, credentials, model selection, or application data. CI rejects shell drift and incompatible integrations.
 
 ## Try every agent in Studio
 
@@ -69,7 +69,11 @@ const conversion = await tools.convert({
   to: "fahrenheit",
 });
 const time = await tools.now({});
-return { celsius: calculation.value, fahrenheit: conversion.result, iso: time.iso };
+return {
+  celsius: calculation.value,
+  fahrenheit: conversion.result,
+  iso: time.iso,
+};
 ```
 
 For Coding Agent, `codex_exec.task` is a plain-language task for the Codex CLI. Its
@@ -78,15 +82,17 @@ For example: `Preserve hello in the seeded hello.js, add an exported goodbye fun
 show the resulting file, and verify both functions.` Review that task in Studio's
 approval prompt before allowing execution.
 
-Studio discovers these agents through `GET /v1/agents`, then reads each Runtime-served
-`/agents/:id/manifest.json`. The agent-scoped endpoints are:
+`GET /` is the application-owned agent list. Studio discovers agents through
+`GET /agents/v1/agents`, then reads each Runtime-served
+`/agents/agents/:id/manifest.json`. The agent-scoped endpoints are:
 
-| Endpoint                               | Purpose                                                     |
-| -------------------------------------- | ----------------------------------------------------------- |
-| `GET /v1/agents`                       | Agent IDs and manifest URLs                                 |
-| `GET /agents/:id/manifest.json`        | One neutral agent manifest                           |
-| `POST /agents/:id/v1/ag-ui`            | AG-UI SSE run stream                                        |
-| `GET/POST /agents/:id/v1/sessions/...` | Sessions, canonical events, history, approvals, and replies |
+| Endpoint                                      | Purpose                                                     |
+| --------------------------------------------- | ----------------------------------------------------------- |
+| `GET /`                                       | Application agent list and manifests                        |
+| `GET /agents/v1/agents`                       | Agent IDs and manifest URLs                                 |
+| `GET /agents/agents/:id/manifest.json`        | One neutral agent manifest                                  |
+| `POST /agents/agents/:id/v1/ag-ui`            | AG-UI SSE run stream                                        |
+| `GET/POST /agents/agents/:id/v1/sessions/...` | Sessions, canonical events, history, approvals, and replies |
 
 ### Image input
 
@@ -129,20 +135,20 @@ process so it uses the updated executable. Codex uses its host configuration and
 
 ## Learn from the code
 
-Start with [Instructions](./agent/instructions/agent.ts), then [Tool Use](./agent/tool-use/agent.ts).
+Start with [Instructions](./agents/instructions/agent.ts), then [Tool Use](./agents/tool-use/agent.ts).
 Capability modules stay small:
 
-- [tools](./agent/shared/tools/index.ts) is one `.use(await tools())` call: every `*.ts` module in [agent/shared/tools/catalog](./agent/shared/tools/catalog) is offered as a model tool.
-- [code-mode](./agent/code-mode/capability.ts) is one `.use(await codeMode())` call: the same catalog becomes a generated TypeScript SDK, and only `run_code` is offered to the model.
-- [notes](./agent/interactions/notes.ts) uses an ordinary JSONL service.
-- [ask-user](./agent/interactions/ask-user.ts) pauses for a human reply.
-- [review](./agent/interactions/approval.ts) requires approval before a write candidate is accepted.
-- [guardrails](./agent/guardrails/capability.ts) maps OpenAI-style input, output, tool-input, and tool-output checks onto middleware timing.
-- [skills](./agent/skills/capability.ts) is one `.use(await skills())` call: a SKILL.md catalog plus `load_skill`.
-- [sandbox](./agent/sandbox/capability.ts) and [codex](./agent/coding-agent/capability.ts) wrap host runtimes.
-- [subagents](./agent/subagents/capability.ts) runs another `BuiltAgent` through a delegate tool.
+- [tools](./agents/shared/tools/index.ts) is one `.use(await tools())` call: every `*.ts` module in [agents/shared/tools/catalog](./agents/shared/tools/catalog) is offered as a model tool.
+- [code-mode](./agents/code-mode/capability.ts) is one `.use(await codeMode())` call: the same catalog becomes a generated TypeScript SDK, and only `run_code` is offered to the model.
+- [notes](./agents/interactions/notes.ts) uses an ordinary JSONL service.
+- [ask-user](./agents/interactions/ask-user.ts) pauses for a human reply.
+- [review](./agents/interactions/approval.ts) requires approval before a write candidate is accepted.
+- [guardrails](./agents/guardrails/capability.ts) maps OpenAI-style input, output, tool-input, and tool-output checks onto middleware timing.
+- [skills](./agents/skills/capability.ts) is one `.use(await skills())` call: a SKILL.md catalog plus `load_skill`.
+- [sandbox](./agents/sandbox/capability.ts) and [codex](./agents/coding-agent/capability.ts) wrap host runtimes.
+- [subagents](./agents/subagents/capability.ts) runs another `BuiltAgent` through a delegate tool.
 
-Add or remove skills on an agent with one capability. Author `name/SKILL.md` (frontmatter `name` + `description`) under [agent/skills/catalog](./agent/skills/catalog), then:
+Add or remove skills on an agent with one capability. Author `name/SKILL.md` (frontmatter `name` + `description`) under [agents/skills/catalog](./agents/skills/catalog), then:
 
 ```ts
 .use(await skills())
@@ -150,7 +156,7 @@ Add or remove skills on an agent with one capability. Author `name/SKILL.md` (fr
 
 Delete that `.use` line to drop the capability. Drop another `SKILL.md` folder in the same catalog to add a skill without changing agent code. Pass `{ directory }` to load a different root.
 
-Tools follow the same catalog shape. Export a `tools` array from a module in [agent/shared/tools/catalog](./agent/shared/tools/catalog), then:
+Tools follow the same catalog shape. Export a `tools` array from a module in [agents/shared/tools/catalog](./agents/shared/tools/catalog), then:
 
 ```ts
 .use(await tools())

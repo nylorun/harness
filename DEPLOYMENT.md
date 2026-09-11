@@ -19,7 +19,7 @@ Build before omitting development dependencies. Keep these in the deployment:
 
 | Item | Purpose |
 |---|---|
-| `dist/` | Built configuration, agent graph, and application assets |
+| `dist/` | Built Hono app, agent graph, and application assets |
 | `package.json`, `package-lock.json` | Reproducible production dependencies |
 | `config/model.json` | Selected provider/model |
 | Private `.env/` configuration | Provider credentials and integration settings |
@@ -30,25 +30,27 @@ never bake them into source control or a public image. Current Runtime reads
 provider credentials from `.env/auth.json` and optional integration variables
 from `.env/integrations.env`, relative to the application working directory.
 
-Studio is a development dependency and is not started by `nylorun start`.
+Studio is a development dependency and is attached separately with `npm run studio`.
 External integrations may require additional runtimes, executables, or network
 access. Use `projectAsset()` for catalogs and bundled subprocess assets so they
 resolve from the built application.
 
 ## Hosting requirements and current limits
 
-- Runtime binds to **127.0.0.1** and serves only its own loopback Host headers
-  unless told otherwise. Behind a same-host reverse proxy, list the public names
-  in `ALLOWED_HOSTS` (for example `agent.example.com`). For container port
-  publishing, set `HOST=0.0.0.0`; a published bind serves every Host header
-  unless `ALLOWED_HOSTS` narrows it. `PORT` chooses the port in both cases.
+- The generated Node entrypoint listens on **all interfaces, port 3000** by
+  default. Your Hono application owns public binds, CORS, trusted-host handling,
+  reverse-proxy policy, authentication, and authorization; set `PORT`
+  deliberately for deployments. The template does not set `HOST`.
 - An ingress proxy must support long-lived streaming responses without buffering
   and use suitable idle timeouts. Supply TLS and access controls at the hosting
   boundary; this repository does not configure them.
 - Keep `.data/` on durable storage when using local adapters. JSONL history
   survives restart, but archived sessions cannot resume execution.
-- Deliver SIGTERM during shutdown and allow cleanup time. Restart ends active
-  sessions and pending interactions. Choose deployment/restart policy accordingly.
+- Process lifecycle is the application's job; the generated entrypoint does not
+  register signal handlers. Graceful shutdown is optional: handlers may await
+  `runtime.close()` to stop live sessions, flush pending journal writes, and run
+  optional agent cleanup. Without handlers, restart ends live sessions. JSONL
+  history survives only to the last durable write.
 - Local JSONL/media adapters are filesystem-based. Do not assume shared mutable
   state works across replicas; choose storage adapters before scaling out.
 

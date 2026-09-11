@@ -19,7 +19,7 @@ test("starter previews resolve local packages and never overwrite an earlier pre
       `file:${join(root, "studio").replaceAll("\\", "/")}`,
     );
     await writeFile(
-      join(first, "agent/assistant/agent.ts"),
+      join(first, "agents/assistant/agent.ts"),
       "authored preview",
     );
     await writeFile(join(first, ".env/auth.json"), '{"fixture":"local-only"}');
@@ -32,7 +32,7 @@ test("starter previews resolve local packages and never overwrite an earlier pre
       undefined,
     );
     assert.equal(
-      await readFile(join(first, "agent/assistant/agent.ts"), "utf8"),
+      await readFile(join(first, "agents/assistant/agent.ts"), "utf8"),
       "authored preview",
     );
     assert.equal(

@@ -1,4 +1,4 @@
-import type { ModelCall, ModelCandidate } from "./model.js";
+import type { ModelAdapter, ModelCall, ModelCandidate } from "./model.js";
 import type { JsonObject, JsonValue, Observer, Tripwire } from "./shared.js";
 import type {
   RequiredInteraction,
@@ -62,11 +62,13 @@ export interface InputHandle<Output = string> {
 }
 
 export interface SessionOptions {
+  readonly onModelCall: ModelAdapter;
   readonly id?: string;
   readonly userId?: string;
   readonly context?: JsonObject;
   readonly seed?: never;
   readonly recorder?: SessionRecorder;
+  readonly observer?: Observer;
 }
 
 /** Stable host-owned facts available while a capability creates session-local state. */
@@ -77,8 +79,10 @@ export interface SessionIdentity {
 }
 
 export interface SeededSessionOptions {
+  readonly onModelCall: ModelAdapter;
   readonly seed: SessionSeed;
   readonly recorder?: SessionRecorder;
+  readonly observer?: Observer;
   readonly id?: never;
   readonly userId?: never;
   readonly context?: never;
@@ -228,6 +232,5 @@ export interface Session {
   interrupt(event: MessageInput, options?: InputOptions): InputHandle;
   continue(options?: InputOptions): InputHandle;
   stream(): AsyncIterable<SessionEvent<JsonValue>>;
-  observe(listener: Observer): () => void;
   stop(reason?: string): Promise<void>;
 }

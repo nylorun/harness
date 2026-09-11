@@ -12,7 +12,7 @@ import {
   CODE_MODE_RULE,
   CODE_MODE_USAGE,
   codeMode,
-} from "../agent/code-mode/capability.js";
+} from "../agents/code-mode/capability.js";
 
 const adapter = model(async () => ({
   output: [{ type: "text" as const, text: "ok" }],
@@ -183,7 +183,6 @@ describe("codeMode()", () => {
       instructions: "Be concise.",
     })
       .use(await codeMode())
-      .with(adapter)
       .build();
     expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
       "agent",

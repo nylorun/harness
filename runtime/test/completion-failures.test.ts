@@ -4,7 +4,8 @@ import type {
   RuntimeCompletion,
   RuntimeEvent,
 } from "../src/contracts.js";
-import { createRuntime } from "../src/server/host.js";
+import { memoryHistory } from "../src/adapters/journal.js";
+import { Runtime, serveAgents } from "../src/server/host.js";
 
 const failures: { completion: RuntimeCompletion; message: string }[] = [
   {
@@ -56,11 +57,15 @@ it.each(failures)(
         async stop() {},
       }),
     };
-    const runtime = await createRuntime({ agents: [agent] });
+    const runtime = new Runtime({
+      observer: () => {},
+      durability: memoryHistory(),
+    });
+    const app = serveAgents({ agents: [agent], runtime });
     try {
       // A previous run's failure must not suppress this run's terminal event.
       for (let run = 0; run < 2; run++) {
-        const response = await runtime.app.request(
+        const response = await app.request(
           "http://local/agents/failure/v1/ag-ui",
           {
             method: "POST",
@@ -80,13 +85,13 @@ it.each(failures)(
         ]);
         expect(events[1].message).toBe(message);
         const status = await (
-          await runtime.app.request(
+          await app.request(
             "http://local/agents/failure/v1/sessions/session",
           )
         ).json();
         expect(status.state).toBe("failed");
         const history = await (
-          await runtime.app.request(
+          await app.request(
             "http://local/agents/failure/v1/sessions/session/events",
           )
         ).json();

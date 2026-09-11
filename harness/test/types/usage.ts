@@ -57,9 +57,8 @@ tool({
 
 Agent({ id: "echo", name: "Echo" })
   .use("echo", async (_request, next) => next())
-  .with(async () => "done")
   .build()
-  .run();
+  .run({ onModelCall: async () => "done" });
 
 // @ts-expect-error bind-time model directives were removed; use a declaration.
 Agent({ id: "echo", name: "Echo" }, { id: "opus" });
@@ -113,23 +112,12 @@ Agent({ invoke: async () => "done" });
 // @ts-expect-error Agent takes identity options, not a create-options bag
 Agent({ model: { invoke: async () => "done" } });
 
-// @ts-expect-error build belongs on BoundAgentBuilder after with()
-Agent({ id: "echo", name: "Echo" }).build();
-
 Agent({ id: "echo", name: "Echo" })
   .use("echo", async (_request, next) => next())
-  // @ts-expect-error build belongs on BoundAgentBuilder after with()
   .build();
 
-Agent({ id: "echo", name: "Echo" })
-  .with(async () => "done")
-  // @ts-expect-error use belongs on AgentBuilder, not BoundAgentBuilder
-  .use("echo", async (_request, next) => next());
-
-Agent({ id: "echo", name: "Echo" })
-  .with(async () => "done")
-  // @ts-expect-error with may be called only once
-  .with(async () => "other");
+// @ts-expect-error with() was removed; model execution belongs to run().
+Agent({ id: "echo", name: "Echo" }).with(async () => "done");
 
 // @ts-expect-error run belongs on BuiltAgent, not the builder
 Agent({ id: "echo", name: "Echo" }).run();
@@ -164,7 +152,7 @@ void [agentId, agentName];
 
 const seed: SessionSeed = { transcript: [], revision: 4 };
 const recorder: SessionRecorder = { async record(_value: SessionRecord) {} };
-agent.run({ seed, recorder }).continue();
+agent.run({ seed, recorder, onModelCall: async () => "done" }).continue();
 
 // @ts-expect-error adapters were removed
 agent.with({});
@@ -175,8 +163,10 @@ agent.run({ limits: { maxTurns: 1 } });
 // @ts-expect-error run is a Session factory; submit work through session.input
 agent.run("hello");
 
-// @ts-expect-error SessionOptions.model was removed
+// @ts-expect-error SessionOptions.model was removed and onModelCall is required.
 const sessionOptions: SessionOptions = { model: "opus" };
+// @ts-expect-error observation is configured when the session is created.
+session.observe(() => undefined);
 
 declare const request: StepRequest;
 request.context.set("note", [{ type: "note", value: 1 }]);
