@@ -1,0 +1,28 @@
+name: Queue routine Dependabot updates
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  queue:
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'nylorun/harness'
+    runs-on: ubuntu-latest
+    env:
+      DEPENDABOT_AUTOMERGE_TOKEN: ${{ secrets.DEPENDABOT_AUTOMERGE_TOKEN }}
+    steps:
+      - id: metadata
+        uses: dependabot/fetch-metadata@d7267f607e9d3fb96fc2fbe83e0af444713e90b7
+      - name: Enable squash auto-merge for routine updates
+        if: >-
+          env.DEPENDABOT_AUTOMERGE_TOKEN != '' &&
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor')
+        env:
+          GH_TOKEN: ${{ env.DEPENDABOT_AUTOMERGE_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
