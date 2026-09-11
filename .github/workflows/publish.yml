@@ -21,11 +21,11 @@ jobs:
       - name: Validate commit input
         shell: bash
         run: '[[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]'
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: npm
@@ -53,11 +53,11 @@ jobs:
       RELEASE_SHA: ${{ inputs.commit }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           registry-url: https://registry.npmjs.org
