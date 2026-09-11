@@ -3,14 +3,21 @@ import { join } from "node:path";
 import semver from "semver";
 import applyReleasePlan from "@changesets/apply-release-plan";
 import readChangesets from "@changesets/read";
-import { read as readConfig } from "@changesets/config";
+import { readConfig } from "@changesets/config";
 import { getPackages } from "@manypkg/get-packages";
 import { root, packages, readJson, writeJson, run } from "../lib/repo.mjs";
 import { planVersions } from "./version-policy.mjs";
 
 export async function prepareVersions(repo, channel) {
   const workspace = await getPackages(repo);
-  const config = await readConfig(repo, workspace);
+  // @changesets/config v4 expects manypkg v3 package graphs (rootDir). Let it
+  // load packages itself rather than passing the repo's manypkg v1 workspace.
+  const { config, errors } = await readConfig(repo);
+  if (config == null) {
+    throw new Error(
+      errors?.length ? errors.join("\n") : "Invalid @changesets/config",
+    );
+  }
   if (config.fixed.length || config.linked.length || config.ignore.length)
     throw new Error(
       "Release policy requires independently versioned, non-ignored packages."
