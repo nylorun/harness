@@ -20,6 +20,19 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
       private: true,
       workspaces: ["harness", "runtime", "studio", "create-agent"],
     });
+    // @manypkg/get-packages@3 NpmTool only treats a directory as an npm
+    // workspace root when package-lock.json is present.
+    await writeJson(join(directory, "package-lock.json"), {
+      name: "fixture",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": {
+          name: "fixture",
+          workspaces: ["harness", "runtime", "studio", "create-agent"],
+        },
+      },
+    });
     await mkdir(join(directory, ".changeset"));
     await cp(
       join(root, ".changeset/config.json"),
