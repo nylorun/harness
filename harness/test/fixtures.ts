@@ -5,6 +5,7 @@ import {
   model as typedModel,
   tool as typedTool,
   type AgentOptions,
+  type AgentBuilder,
   type BuiltAgent,
   type InputOptions,
   type JsonObject,
@@ -12,6 +13,7 @@ import {
   type ModelAdapter,
   type SessionOptions,
   type SessionInput,
+  type Observer,
   type StepRequest,
   type StepResponse,
   type ToolDefinition,
@@ -19,14 +21,80 @@ import {
   type ToolOutcome,
 } from "../src/index.js";
 
+/**
+ * Test-only bridge for suites written before model invocation became a
+ * per-session concern. Production builders deliberately do not expose this
+ * method; the bridge injects the fixture adapter at run time.
+ */
+type FixtureAgent = BuiltAgent & {
+  run(options?: Omit<SessionOptions, "onModelCall">): FixtureSession;
+};
+
+type FixtureSession = ReturnType<BuiltAgent["run"]> & {
+  observe(listener: Observer): () => void;
+};
+
+type FixtureBuilder = AgentBuilder & {
+  with(adapter: ModelAdapter): FixtureBuilder;
+  build(): FixtureAgent;
+};
+
 export const objectSchema = z.object({}).passthrough();
 
 export function testAgent(options: Partial<AgentOptions> = {}) {
-  return Agent({
+  const builder = Agent({
     id: options.id ?? "test",
     name: options.name ?? "Test",
     ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
-  });
+  }) as FixtureBuilder;
+  const build = builder.build.bind(builder);
+  let adapter: ModelAdapter | undefined;
+  let fixtureAgent: FixtureAgent | undefined;
+  builder.with = (value) => {
+    adapter = value;
+    return builder;
+  };
+  builder.build = () => {
+    if (fixtureAgent) return fixtureAgent;
+    const agent = build();
+    fixtureAgent = Object.create(agent) as FixtureAgent;
+    fixtureAgent.run = (options = {}) => {
+      if (!adapter) throw new Error("Test agent requires a model adapter via with().");
+      const observers = new Set<Observer>();
+      const bootstrapEvents: Parameters<Observer>[0][] = [];
+      let subscribed = false;
+      const session = agent.run({
+        ...options,
+        onModelCall: adapter,
+        observer: (event) => {
+          options.observer?.(event);
+          if (!subscribed) bootstrapEvents.push(event);
+          for (const observer of [...observers]) {
+            try {
+              const result = observer(event);
+              if (result && typeof (result as PromiseLike<void>).then === "function")
+                void Promise.resolve(result).catch(() => undefined);
+            } catch {
+              // Fixture observers retain the public API's fail-open contract.
+            }
+          }
+        },
+      });
+      const fixtureSession = Object.create(session) as FixtureSession;
+      fixtureSession.observe = (observer) => {
+        if (!subscribed) {
+          subscribed = true;
+          for (const event of bootstrapEvents) observer(event);
+          bootstrapEvents.length = 0;
+        }
+        observers.add(observer);
+        return () => observers.delete(observer);
+      };
+      return fixtureSession;
+    };
+    return fixtureAgent;
+  };
+  return builder;
 }
 
 export function tool(

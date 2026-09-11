@@ -6,8 +6,7 @@ describe("build", () => {
   it("seals middleware order and returns a frozen adapter-free manifest", () => {
     const builder = testAgent()
       .use("first", async (_request, next) => next())
-      .use("second", async (_request, next) => next())
-      .with(model(async () => "done"));
+      .use("second", async (_request, next) => next());
     const agent = builder.build();
     expect(builder.build()).toBe(agent);
     expect(agent.id).toBe("test");
@@ -21,25 +20,22 @@ describe("build", () => {
     expect(Object.isFrozen(agent.manifest)).toBe(true);
   });
 
-  it("rejects middleware mutation after with()", () => {
+  it("rejects middleware mutation after build()", () => {
     const builder = testAgent();
-    builder.with(model(async () => "done"));
-    expect(() => builder.use("late", async (_request, next) => next())).toThrow(/after with/);
-    expect(() => builder.with(model(async () => "other"))).toThrow(/after with/);
+    builder.build();
+    expect(() => builder.use("late", async (_request, next) => next())).toThrow(/after build/);
   });
 
   it("rejects duplicate middleware ids", () => {
     const builder = testAgent()
       .use("same", async (_request, next) => next())
-      .use("same", async (_request, next) => next())
-      .with(model(async () => "done"));
+      .use("same", async (_request, next) => next());
     expect(() => builder.build()).toThrow(/Duplicate middleware id/);
   });
 
   it("records a model declaration as middleware rather than manifest model state", () => {
     const agent = testAgent()
       .use({ id: "model", model: { id: "opus", controls: { temperature: 0.2 } } })
-      .with(model(async () => "done"))
       .build();
     expect(agent.manifest).toEqual({
       id: "test",
@@ -57,7 +53,6 @@ describe("build", () => {
         tools: [tool("write_note")],
         model: { id: "opus", controls: { temperature: 0.2 } },
       })
-      .with(model(async () => "done"))
       .build();
     expect(agent.manifest.middleware).toEqual([
       {
@@ -69,21 +64,8 @@ describe("build", () => {
     ]);
   });
 
-  it("reports a missing model callback", () => {
-    const error = expectBuildError(() =>
-      testAgent()
-        .with({} as never)
-        .build(),
-    );
-    expect(error.diagnostics.some((item) => item.code === "harness.invalid-model")).toBe(true);
-  });
-
   it("reports empty identity at build", () => {
-    const error = expectBuildError(() =>
-      Agent({ id: "", name: "" })
-        .with(model(async () => "done"))
-        .build(),
-    );
+    const error = expectBuildError(() => Agent({ id: "", name: "" }).build());
     expect(error.diagnostics.map((item) => item.code)).toEqual([
       "agent.invalid-id",
       "agent.invalid-name",
@@ -95,7 +77,6 @@ describe("build", () => {
       .use("middleware-1", async (_request, next) => next())
       .use(async (_request, next) => next())
       .use("named", async (_request, next) => next())
-      .with(model(async () => "done"))
       .build();
     expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
       "middleware-1",
@@ -106,17 +87,13 @@ describe("build", () => {
 
   it("snapshots middleware descriptors when build starts", () => {
     const id = { value: "original" };
-    const builder = testAgent()
-      .use(id.value, async (_request, next) => next())
-      .with(model(async () => "done"));
+    const builder = testAgent().use(id.value, async (_request, next) => next());
     id.value = "mutated";
     expect(builder.build().manifest.middleware).toEqual([{ id: "original" }]);
   });
 
   it("hides internal model and tool registries", () => {
-    const agent = testAgent()
-      .with(model(async () => "done"))
-      .build() as unknown as Record<string, unknown>;
+    const agent = testAgent().build() as unknown as Record<string, unknown>;
     expect(agent.models).toBeUndefined();
     expect(agent.model).toBeUndefined();
     expect(agent.adapters).toBeUndefined();
@@ -150,10 +127,11 @@ describe("build", () => {
         }),
       )
       .build();
-    const session = agent.run();
-    session.observe((event) => {
-      if (event.type === "model.requested")
-        contributors.push(...event.attributes.configuration.contributors);
+    const session = agent.run({
+      observer: (event) => {
+        if (event.type === "model.requested")
+          contributors.push(...event.attributes.configuration.contributors);
+      },
     });
     await session.input("go").completed;
     expect(seen).toEqual(["Be concise."]);
@@ -168,7 +146,6 @@ describe("build", () => {
     const error = expectBuildError(() =>
       testAgent({ instructions: "Stay reserved." })
         .use({ id: "agent", instructions: ["overlap"] })
-        .with(model(async () => "done"))
         .build(),
     );
     expect(error.diagnostics.some((item) => item.code === "middleware.duplicate-id")).toBe(true);

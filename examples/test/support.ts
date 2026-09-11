@@ -1,10 +1,10 @@
 import { join } from "node:path";
-import type { ModelAdapter } from "@nylorun/harness";
 import {
   Runtime,
   localJsonl,
   localMedia,
   serveAgents,
+  type RuntimeModelAdapter,
 } from "@nylorun/runtime";
 import { createRegistry } from "../agents/index.js";
 import type { ImageEditor } from "../agents/interior-design/image-editor.js";
@@ -12,11 +12,11 @@ import type { ImageEditor } from "../agents/interior-design/image-editor.js";
 export async function createAgentServer(
   options: {
     root?: string;
-    adapter?: ModelAdapter;
+    adapter?: RuntimeModelAdapter;
     provider?: string;
     model?: string;
     imageEditor?: ImageEditor;
-  } = {},
+  } = {}
 ) {
   const root = options.root ?? process.cwd();
   const media = localMedia({ root: join(root, ".data", "media") });
@@ -28,7 +28,7 @@ export async function createAgentServer(
           model: options.model ?? "test-model",
         }
       : undefined,
-    { media, imageEditor: options.imageEditor },
+    { media, imageEditor: options.imageEditor }
   );
   const runtime = new Runtime({
     media,
