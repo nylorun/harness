@@ -111,6 +111,7 @@ model calls. Tags use `@nylorun/<package>@<version>`.
 | Published integrity differs | Stop; investigate the existing release and prepare a new version |
 | Missing/older dist-tag after publication | Prefer rerunning the same commit so publish can retry `npm dist-tag add` (needs a classic token such as `NPM_BOOTSTRAP_TOKEN`). Otherwise an npm administrator must run `npm dist-tag add @nylorun/<pkg>@<version> <channel>`; OIDC alone does not authenticate standalone tag edits |
 | A newer dist-tag exists | Do not move it backward; prepare a newer release |
+| `Tag … points to a different commit` on a channel promotion | Expected when version tags already exist from an earlier publish of the same versions. Publish tooling allows this when the version is already on the registry; fix/rerun on a commit that updates `.release/plan.json` if an older publish script still rejects it |
 | Public creator smoke or GitHub release creation failed | Inspect the already-published versions, then rerun the same commit |
 
 Publication cannot be treated as an atomic transaction. Do not delete/reuse a

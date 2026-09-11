@@ -34,6 +34,9 @@ try {
     ),
   );
   // Reject conflicting tags before any registry write; publication cannot be undone.
+  // Version tags are immutable once cut. A different SHA is expected when promoting
+  // an already-published version onto another npm channel (e.g. beta → latest).
+  const priorVersionTags = new Set();
   for (const [name, version] of Object.entries(plan.packages)) {
     const tag = `@nylorun/${name}@${version}`;
     const existing = await run(
@@ -52,8 +55,11 @@ try {
     const target = (
       lines.find((line) => line.endsWith("^{}")) ?? lines[0]
     ).split(/\s+/)[0];
-    if (target !== process.env.RELEASE_SHA)
+    if (target === process.env.RELEASE_SHA) continue;
+    const published = await registry.lookup(name, version);
+    if (!published)
       throw new Error(`Tag ${tag} points to a different commit.`);
+    priorVersionTags.add(name);
   }
   const messages = [];
   try {
@@ -86,7 +92,9 @@ try {
           }),
         );
         releaseExists = releases !== null;
-        if (!releaseExists)
+        // Skip when the version tag/release already exists from a prior channel
+        // publication; promotion commits must not retarget immutable version tags.
+        if (!releaseExists && !priorVersionTags.has(name))
           await run("gh", [
             "release",
             "create",
