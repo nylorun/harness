@@ -39,7 +39,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-ai": "0.85.1",
     "@hono/node-server": "^1.19.10",
     "hono": "^4.11.10",
     "vite": "^8.2.2"
