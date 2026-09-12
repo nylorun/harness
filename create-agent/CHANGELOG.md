@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0-beta
+
+### Minor Changes
+
+- 9c350be: Provide `nylorun dev` with optional Studio and browser opening, automatic development loopback CORS, and inferred Hono mount paths. Move local model selection to `.env/model.json` with legacy fallback and migration. Generate starters without copied launcher scripts, a top-level config directory, or a separate TypeScript build config. Release preparation must update the creator's Runtime compatibility pin together with these changes.
+
+### Patch Changes
+
+- Update the tested Harness, Runtime, and Studio compatibility combination.
+
 ## 0.3.1-beta
 
 ### Patch Changes
