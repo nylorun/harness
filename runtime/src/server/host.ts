@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
+import { basePath as mountedPath } from "hono/route";
+import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import type {
   JsonValue,
@@ -48,7 +50,7 @@ export type RuntimeActor = Readonly<{
   context?: Record<string, JsonValue>;
 }>;
 export type AgentRouterOptions = Readonly<{
-  /** Public URL prefix of this router, matching the Hono mount path. */
+  /** Override the public URL prefix; defaults to the current Hono mount path. */
   basePath?: string;
   getActor?: (
     context: Context
@@ -100,9 +102,36 @@ export class Runtime {
     const configuredObserver = this.#config.observer;
     const redact = (value: unknown) => scrub(value, projectSecrets());
     const live = new Map<string, Live>();
-    let publicPath = (path: string) => path;
     const routerOptions = options;
     const app = new Hono();
+    if (process.env.NYLORUN_DEV === "1") {
+      app.use(
+        "*",
+        cors({
+          origin: (origin) => {
+            try {
+              const url = new URL(origin);
+              return ["http:", "https:"].includes(url.protocol) &&
+                ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) &&
+                url.origin === origin
+                ? origin
+                : undefined;
+            } catch {
+              return undefined;
+            }
+          },
+          allowMethods: [
+            "GET",
+            "HEAD",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS",
+          ],
+        })
+      );
+    }
     app.onError((error, context) =>
       context.json(
         { error: String(redact(error.message)) },
@@ -122,15 +151,17 @@ export class Runtime {
         });
       }
     });
-    publicPath = (path: string) =>
-      `${normalizeBasePath(routerOptions.basePath)}${path}`;
+    const publicPath = (context: Context, path: string) =>
+      `${normalizeBasePath(
+        routerOptions.basePath ?? mountedPath(context)
+      )}${path}`;
 
     app.get("/v1/agents", (context) =>
       context.json({
         protocolVersion: 2,
         agents: agents.map((agent) => ({
           id: agent.id,
-          manifestUrl: publicPath(`/${agent.id}/manifest.json`),
+          manifestUrl: publicPath(context, `/${agent.id}/manifest.json`),
         })),
       })
     );
@@ -139,7 +170,11 @@ export class Runtime {
       const agent = byId.get(context.req.param("agentId"));
       return agent === undefined
         ? context.json({ error: "unknown agent" }, 404)
-        : context.json(manifest(agent, media !== undefined, publicPath));
+        : context.json(
+            manifest(agent, media !== undefined, (path) =>
+              publicPath(context, path)
+            )
+          );
     });
 
     app.get("/:agentId/v1/media/:session/:assetId", async (context) => {

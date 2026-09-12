@@ -24,7 +24,7 @@ const roots: string[] = [];
 afterEach(async () => {
   login.mockReset();
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
 });
 
@@ -54,7 +54,7 @@ it("saves selection after authentication and cleans up prompt and abort listener
   const controller = new AbortController();
   await configureProvider({ ...test, signal: controller.signal });
   expect(
-    JSON.parse(await readFile(join(test.root, "config/model.json"), "utf8")),
+    JSON.parse(await readFile(join(test.root, ".env/model.json"), "utf8"))
   ).toEqual({
     provider: "fixture",
     model: "fixture-model",
@@ -79,7 +79,7 @@ it.each(["SIGINT", "SIGTERM"] as const)(
     expect(login).not.toHaveBeenCalled();
     expect(test.input.listenerCount("data")).toBe(0);
     expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
-  },
+  }
 );
 
 it("fails rather than hanging when stdin ends during a question", async () => {
@@ -116,18 +116,18 @@ it.each(["signal", "eof"])(
       }
     });
     await expect(
-      configureProvider({ ...test, signal: controller.signal }),
+      configureProvider({ ...test, signal: controller.signal })
     ).rejects.toThrow();
     expect(authSignal?.aborted).toBe(true);
     expect(await readFile(join(test.root, "config/model.json"), "utf8")).toBe(
-      selection,
+      selection
     );
     expect(await readFile(join(test.root, ".env/auth.json"), "utf8")).toBe(
-      credentials,
+      credentials
     );
     expect(test.input.listenerCount("data")).toBe(0);
     expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
-  },
+  }
 );
 
 it("rejects a pre-cancelled configuration without prompting", async () => {
@@ -136,8 +136,40 @@ it("rejects a pre-cancelled configuration without prompting", async () => {
     configureProvider({
       ...test,
       signal: AbortSignal.abort(new ConfigurationCancelled("SIGTERM")),
-    }),
+    })
   ).rejects.toMatchObject({ exitCode: 143 });
   expect(test.text()).toBe("");
   expect(login).not.toHaveBeenCalled();
 });
+
+it.each([false, true])(
+  "migrates legacy selection and preserves unrelated config files (%s)",
+  async (otherFile) => {
+    const test = await fixture();
+    await mkdir(join(test.root, "config"));
+    await writeFile(
+      join(test.root, "config/model.json"),
+      '{"provider":"old","model":"old"}'
+    );
+    if (otherFile) await writeFile(join(test.root, "config/keep.json"), "{}");
+    login.mockResolvedValue(undefined);
+    await configureProvider(test);
+    expect(
+      JSON.parse(await readFile(join(test.root, ".env/model.json"), "utf8"))
+        .model
+    ).toBe("fixture-model");
+    await expect(
+      readFile(join(test.root, "config/model.json"))
+    ).rejects.toThrow();
+    if (otherFile)
+      expect(await readFile(join(test.root, "config/keep.json"), "utf8")).toBe(
+        "{}"
+      );
+    else
+      await expect(
+        import("node:fs/promises").then((fs) =>
+          fs.stat(join(test.root, "config"))
+        )
+      ).rejects.toThrow();
+  }
+);

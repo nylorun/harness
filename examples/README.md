@@ -14,13 +14,13 @@ npm run dev
 
 Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 3000. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup.
 
-Model selection lives in `config/model.json`, credentials in `.env/auth.json`. If upgrading a checkout with a flat `.env` file, move it aside, create the `.env/` directory, and relocate the original file to `.env/integrations.env` without replacing its contents. Run `npm run configure` to select a pi-ai provider or custom OpenAI-compatible endpoint. Legacy `NYLO_*` chat settings are not the new provider configuration.
+Model selection lives in `.env/model.json`, credentials in `.env/auth.json`. If upgrading a checkout with a flat `.env` file, move it aside, create the `.env/` directory, and relocate the original file to `.env/integrations.env` without replacing its contents. Run `npm run configure` to select a pi-ai provider or custom OpenAI-compatible endpoint. Legacy `NYLO_*` chat settings are not the new provider configuration.
 
 Optional integration variables are loaded from `.env/integrations.env`. Interior Design uses `OPENAI_API_KEY` and optional `OPENAI_IMAGE_MODEL` independently of the chat provider. Its selected chat model must support images. Codex continues using its own authentication. Never commit credentials.
 
 ## Generated shell and authored examples
 
-The creator owns the shell files listed in `.scaffold-manifest.json`, including `src/index.ts`, `scripts/dev.mjs`, and `package.json`. Change their source in `create-agent/starter/` or `create-agent/examples.recipe.json`, then run `npm run examples:sync` from the repository root. Sync never changes the authored `agents/` tree, tests, other scripts, credentials, model selection, or application data. CI rejects shell drift and incompatible integrations.
+The creator owns the shell files listed in `.scaffold-manifest.json`, including `src/index.ts`, `tsconfig.json`, and `package.json`. Change their source in `create-agent/starter/` or `create-agent/examples.recipe.json`, then run `npm run examples:sync` from the repository root. Sync never changes the authored `agents/` tree, tests, other scripts, credentials, model selection, or application data. CI rejects shell drift and incompatible integrations.
 
 ## Try every agent in Studio
 

@@ -102,7 +102,7 @@ export async function develop(
     runtime = group.start(
       "runtime",
       process.execPath,
-      [npmCli(), "run", "dev"],
+      [join(repo, "runtime/dist/cli.js"), "dev", "--no-studio"],
       { cwd: project, env: { ...process.env, PORT: String(options.port) } },
     );
     await runtime.ready(`http://127.0.0.1:${options.port}/agents/v1/agents`);

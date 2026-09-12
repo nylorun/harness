@@ -1,4 +1,4 @@
-import { mkdir, writeFile, rename, rm } from "node:fs/promises";
+import { mkdir, writeFile, rename, rm, rmdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
@@ -21,7 +21,7 @@ export async function configureProvider(
     root?: string;
     input?: Readable;
     output?: Writable;
-  } = {},
+  } = {}
 ) {
   const root = options.root ?? process.cwd();
   const output = options.output ?? process.stdout;
@@ -40,7 +40,7 @@ export async function configureProvider(
   const onInt = () => controller.abort(new ConfigurationCancelled("SIGINT"));
   const onClose = () =>
     controller.abort(
-      new Error("Configuration input closed before setup completed."),
+      new Error("Configuration input closed before setup completed.")
     );
   const closeOnAbort = () => prompt.close();
   prompt.on("SIGINT", onInt);
@@ -58,7 +58,7 @@ export async function configureProvider(
     signal.throwIfAborted();
     output.write("0. Custom OpenAI-compatible provider\n");
     providers.forEach((provider, index) =>
-      output.write(`${index + 1}. ${provider.name} (${provider.id})\n`),
+      output.write(`${index + 1}. ${provider.name} (${provider.id})\n`)
     );
     const choice = Number(await question("Choose a provider: "));
     if (choice === 0) {
@@ -81,7 +81,7 @@ export async function configureProvider(
       if (!chosen) throw new Error("Choose a listed provider.");
       const available = models.getModels(chosen.id);
       available.forEach((model, index) =>
-        output.write(`${index + 1}. ${model.name} (${model.id})\n`),
+        output.write(`${index + 1}. ${model.name} (${model.id})\n`)
       );
       const model = available[Number(await question("Choose a model: ")) - 1];
       if (!model) throw new Error("Choose a listed model.");
@@ -89,7 +89,7 @@ export async function configureProvider(
         await models.login(
           chosen.id,
           chosen.auth.oauth ? "oauth" : "api_key",
-          interaction(),
+          interaction()
         );
       }
       await save({ provider: chosen.id, model: model.id });
@@ -112,14 +112,14 @@ export async function configureProvider(
       prompt: async (item: any) => question(item.message + ": "),
       notify: (event: any) =>
         output.write(
-          (event.url ?? event.verificationUri ?? event.message) + "\n",
+          (event.url ?? event.verificationUri ?? event.message) + "\n"
         ),
     };
   }
 
   async function save(selection: Selection) {
     signal.throwIfAborted();
-    const directory = join(root, "config");
+    const directory = join(root, ".env");
     const temporary = join(directory, `.model-${randomUUID()}.json`);
     try {
       await mkdir(directory, { recursive: true });
@@ -128,6 +128,17 @@ export async function configureProvider(
       });
       signal.throwIfAborted();
       await rename(temporary, join(directory, "model.json"));
+      await rm(join(root, "config", "model.json"), { force: true });
+      try {
+        await rmdir(join(root, "config"));
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !("code" in error) ||
+          !["ENOENT", "ENOTEMPTY", "EEXIST"].includes(String(error.code))
+        )
+          throw error;
+      }
     } finally {
       await rm(temporary, { force: true });
     }

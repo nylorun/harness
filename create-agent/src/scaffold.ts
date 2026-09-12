@@ -42,10 +42,8 @@ export async function starterFiles(
   if (!studio) {
     const manifest = JSON.parse(files["package.json"]!);
     delete manifest.devDependencies["@nylorun/studio"];
-    manifest.scripts.dev = manifest.scripts["dev:app"];
-    delete manifest.scripts["dev:app"];
+    manifest.scripts.dev = "nylorun dev --no-studio";
     delete manifest.scripts.studio;
-    delete files["scripts/dev.mjs"];
     files["package.json"] = JSON.stringify(manifest, null, 2) + "\n";
     files["README.md"] = files["README.md"]!.replace(
       "`npm run dev` starts your app on port 3000, waits until its agent endpoint is ready, then starts Studio and opens it in your browser. Use `npm run dev -- --no-open` to start Studio without opening a browser. Run `npm run studio` in another terminal to attach Studio separately.",

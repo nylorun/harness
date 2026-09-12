@@ -18,7 +18,7 @@ app.get("/", (c) =>
 const runtime = new Runtime();
 app.route(
   "/agents",
-  serveAgents({ agents, runtime, basePath: "/agents" })
+  serveAgents({ agents, runtime })
 );
 
 serve(

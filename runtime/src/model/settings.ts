@@ -4,9 +4,19 @@ import type { Selection } from "./models.js";
 
 export function modelSelection(root = process.cwd()): Selection {
   try {
-    const value = JSON.parse(
-      readFileSync(join(root, "config", "model.json"), "utf8"),
-    );
+    let contents: string;
+    try {
+      contents = readFileSync(join(root, ".env", "model.json"), "utf8");
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        error.code !== "ENOENT"
+      )
+        throw error;
+      contents = readFileSync(join(root, "config", "model.json"), "utf8");
+    }
+    const value = JSON.parse(contents);
     if (
       typeof value.provider === "string" &&
       value.provider &&

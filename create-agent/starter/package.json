@@ -8,10 +8,9 @@
   },
   "scripts": {
     "configure": "nylorun configure",
-    "dev": "node scripts/dev.mjs",
-    "dev:app": "tsx watch src/index.ts",
+    "dev": "nylorun dev",
     "studio": "nylorun studio --agent-url http://localhost:3000/agents",
-    "build": "node -e \"import('node:fs/promises').then(async ({rm,cp}) => { await rm('dist', { recursive: true, force: true }); await cp('agents', 'dist/agents', { recursive: true, filter: (source) => !source.endsWith('.ts') }); })\" && tsc -p tsconfig.build.json",
+    "build": "node -e \"import('node:fs/promises').then(async ({rm,cp}) => { await rm('dist', { recursive: true, force: true }); await cp('agents', 'dist/agents', { recursive: true, filter: (source) => !source.endsWith('.ts') }); })\" && tsc -p tsconfig.json",
     "start": "node dist/src/index.js",
     "check": "tsc --noEmit"
   },

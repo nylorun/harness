@@ -43,9 +43,26 @@ export async function examplesFiles(
       ([left], [right]) => rank(left) - rank(right) || left.localeCompare(right)
     )
   );
+  manifest.scripts.build = manifest.scripts.build.replace(
+    "tsc -p tsconfig.json",
+    "tsc -p tsconfig.build.json"
+  );
+  files["tsconfig.build.json"] =
+    JSON.stringify(
+      {
+        extends: "./tsconfig.json",
+        compilerOptions: { noEmit: false, rootDir: ".", outDir: "dist" },
+        include: ["agents/**/*.ts", "src/**/*.ts"],
+      },
+      null,
+      2
+    ) + "\n";
   files["package.json"] = JSON.stringify(manifest, null, 2) + "\n";
   files["src/index.ts"] = recipe.index;
   const tsconfig = JSON.parse(files["tsconfig.json"]!);
+  tsconfig.compilerOptions.noEmit = true;
+  delete tsconfig.compilerOptions.rootDir;
+  delete tsconfig.compilerOptions.outDir;
   tsconfig.include.push("test/**/*.ts");
   files["tsconfig.json"] = JSON.stringify(tsconfig, null, 2) + "\n";
   return files;

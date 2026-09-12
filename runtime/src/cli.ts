@@ -4,21 +4,37 @@ import { loadEnvFile } from "node:process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { ConfigurationCancelled, configureProvider } from "./model/configure.js";
+import {
+  ConfigurationCancelled,
+  configureProvider,
+} from "./model/configure.js";
 
-const usage = `nylorun <configure|studio>
+import { develop } from "./dev.js";
+
+const usage = `nylorun <configure|dev|studio>
+  dev [--no-studio] [--no-open]
   configure
   studio --agent-url <http(s)-url> [--port <n>] [--no-open]`;
 
-async function startStudio(agentServerUrl: string, open: boolean, port?: number) {
+async function startStudio(
+  agentServerUrl: string,
+  open: boolean,
+  port?: number
+) {
   let entry: string;
   try {
-    entry = createRequire(join(process.cwd(), "package.json")).resolve("@nylorun/studio");
+    entry = createRequire(join(process.cwd(), "package.json")).resolve(
+      "@nylorun/studio"
+    );
   } catch {
     throw new Error("Install @nylorun/studio to use the Studio dashboard.");
   }
   const studio = await import(pathToFileURL(entry).href);
-  return studio.startStudio({ agentServerUrl, open, ...(port === undefined ? {} : { port }) });
+  return studio.startStudio({
+    agentServerUrl,
+    open,
+    ...(port === undefined ? {} : { port }),
+  });
 }
 
 function parsePort(value: string | undefined): number | undefined {
@@ -31,11 +47,17 @@ function parsePort(value: string | undefined): number | undefined {
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
-  if (!command || command === "--help" || command === "-h") return void console.log(usage);
+  if (!command || command === "--help" || command === "-h")
+    return void console.log(usage);
+  if (command === "dev") {
+    process.exitCode = await develop(args);
+    return;
+  }
   if (command === "configure") {
     if (args.length) throw new Error(usage);
     const controller = new AbortController();
-    const cancel = (signal: "SIGINT" | "SIGTERM") => controller.abort(new ConfigurationCancelled(signal));
+    const cancel = (signal: "SIGINT" | "SIGTERM") =>
+      controller.abort(new ConfigurationCancelled(signal));
     process.once("SIGINT", () => cancel("SIGINT"));
     process.once("SIGTERM", () => cancel("SIGTERM"));
     const integrations = join(process.cwd(), ".env", "integrations.env");
@@ -50,11 +72,14 @@ async function main() {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
     if (arg === "--agent-url") {
-      if (agentUrl !== undefined) throw new Error("--agent-url may only be supplied once.");
+      if (agentUrl !== undefined)
+        throw new Error("--agent-url may only be supplied once.");
       agentUrl = args[++index];
-      if (!agentUrl || agentUrl.startsWith("--")) throw new Error("--agent-url requires a value.");
+      if (!agentUrl || agentUrl.startsWith("--"))
+        throw new Error("--agent-url requires a value.");
     } else if (arg === "--port") {
-      if (port !== undefined) throw new Error("--port may only be supplied once.");
+      if (port !== undefined)
+        throw new Error("--port may only be supplied once.");
       port = parsePort(args[++index]);
     } else if (arg === "--no-open" && open) open = false;
     else throw new Error(usage);
@@ -71,5 +96,6 @@ async function main() {
 
 void main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = error instanceof ConfigurationCancelled ? error.exitCode : 1;
+  process.exitCode =
+    error instanceof ConfigurationCancelled ? error.exitCode : 1;
 });

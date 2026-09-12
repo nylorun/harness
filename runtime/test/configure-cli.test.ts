@@ -61,7 +61,7 @@ it("configures a custom provider using scripted stdin and no live model calls", 
   });
   expect(result.code, result.text).toBe(0);
   expect(
-    JSON.parse(await readFile(join(result.root, "config/model.json"), "utf8"))
+    JSON.parse(await readFile(join(result.root, ".env/model.json"), "utf8"))
       .model,
   ).toBe("fixture");
   expect(
