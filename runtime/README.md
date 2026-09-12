@@ -16,7 +16,10 @@ app.route(
 
 The application owns Hono composition, authentication, CORS, logging, process lifecycle, and deployment. Runtime owns agent sessions, durability, media, and AG-UI/session protocol routes. Graceful shutdown is optional: if the application installs signal handlers and wants to drain live sessions, flush pending journal writes, and run optional agent cleanup, it should await `runtime.close()`. An application that does not install handlers exits normally on its host's shutdown policy; `runtime.close()` does not run on crash, OOM, or SIGKILL.
 
-Runtime infers root-relative discovery and endpoint URLs from the Hono mount on each request. Mount at `/agents` or `/api/agents` without repeating that path in `serveAgents`. An explicit `basePath` remains available when a reverse proxy rewrites the public prefix.
+Runtime publishes root-relative discovery and endpoint URLs. It infers the Hono
+mount from each request URL (so a separate consumer `hono` install still works).
+Mount at `/agents` or `/api/agents` without repeating that path in `serveAgents`.
+Pass explicit `basePath` when a reverse proxy rewrites the public prefix.
 
 `nylorun dev` enables local Studio connections automatically by setting `NYLORUN_DEV=1` for its child application. This allows HTTP/HTTPS browser origins on `localhost`, `127.0.0.1`, or `[::1]`, including Studio's fallback ports. Ordinary production startup does not enable this policy; the application owns production CORS and authorization.
 
