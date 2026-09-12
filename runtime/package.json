@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/runtime",
-  "version": "0.2.0-beta",
+  "version": "0.2.1-beta",
   "description": "Portable agent runtime, Hono protocol router, model providers, and the Nylorun CLI.",
   "type": "module",
   "license": "Apache-2.0",

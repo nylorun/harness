@@ -23,7 +23,7 @@ export function agentContract(
       const { runtime, app } = isolated(factory(), model?.());
       try {
         const manifest = await (
-          await app.request("http://local/agents/echo/manifest.json")
+          await app.request("http://local/echo/manifest.json")
         ).json();
         expect(manifest).toMatchObject({
           protocolVersion: 2,
@@ -33,7 +33,7 @@ export function agentContract(
         expect(manifest).not.toHaveProperty("harness");
         for (const content of ["first", "second"]) {
           const result = await app.request(
-            "http://local/agents/echo/v1/ag-ui",
+            "http://local/echo/v1/ag-ui",
             {
               method: "POST",
               headers: { "content-type": "application/json" },
@@ -48,7 +48,7 @@ export function agentContract(
         }
         const events = await (
           await app.request(
-            "http://local/agents/echo/v1/sessions/conversation/events",
+            "http://local/echo/v1/sessions/conversation/events",
           )
         ).json();
         expect(events.events.map((e: { seq: number }) => e.seq)).toEqual(
@@ -59,14 +59,14 @@ export function agentContract(
         ).toHaveLength(2);
         const history = await (
           await app.request(
-            "http://local/agents/echo/v1/ag-ui/sessions/conversation",
+            "http://local/echo/v1/ag-ui/sessions/conversation",
           )
         ).json();
         expect(history.messages).toHaveLength(4);
         expect(
           (
               await app.request(
-              "http://local/agents/missing/manifest.json",
+              "http://local/missing/manifest.json",
             )
           ).status,
         ).toBe(404);
@@ -79,7 +79,7 @@ export function agentContract(
       async (kind) => {
         const { runtime, app } = isolated(factory(kind), model?.(kind));
         try {
-          await app.request("http://local/agents/echo/v1/ag-ui", {
+          await app.request("http://local/echo/v1/ag-ui", {
             method: "POST",
             body: JSON.stringify({
               threadId: "waiting",
@@ -88,7 +88,7 @@ export function agentContract(
           });
           const session = await (
             await app.request(
-              "http://local/agents/echo/v1/sessions/waiting",
+              "http://local/echo/v1/sessions/waiting",
             )
           ).json();
           expect(session.state).toBe("waiting");
@@ -106,13 +106,13 @@ export function agentContract(
                   value: "answer",
                 };
           const reply = await app.request(
-            "http://local/agents/echo/v1/sessions/waiting",
+            "http://local/echo/v1/sessions/waiting",
             { method: "POST", body: JSON.stringify({ interaction }) },
           );
           expect(reply.status).toBe(202);
           expect(await reply.json()).toMatchObject({ state: "completed" });
           const stale = await app.request(
-            "http://local/agents/echo/v1/sessions/waiting",
+            "http://local/echo/v1/sessions/waiting",
             { method: "POST", body: JSON.stringify({ interaction }) },
           );
           expect(stale.status).toBe(409);

@@ -21,7 +21,9 @@ try {
     await writeFile(target, content);
   }
   assert.ok(
-    files["src/index.ts"]?.includes("serveAgents({ agents, runtime })")
+    files["src/index.ts"]?.includes(
+      'serveAgents({ agents, runtime, basePath: "/agents" })'
+    )
   );
   assert.ok(files["src/index.ts"]?.includes("@hono/node-server"));
   assert.equal(files["nylorun.config.ts"], undefined);

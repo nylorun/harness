@@ -75,6 +75,63 @@ function engine(
 agentContract("Independent engine", (kind) =>
   engine(undefined, undefined, kind)
 );
+it("advertises root-mounted agent routes without an agents segment", async () => {
+  const { runtime, app } = isolated([engine()]);
+  try {
+    const discovery = await (await app.request("http://local/v1/agents")).json();
+    expect(discovery.agents[0].manifestUrl).toBe("/echo/manifest.json");
+    const manifest = await (
+      await app.request("http://local/echo/manifest.json")
+    ).json();
+    expect(manifest.endpoints.agUi).toBe("/echo/v1/ag-ui");
+  } finally {
+    await runtime.close();
+  }
+});
+
+it("advertises and serves routes from the agents mount", async () => {
+  const runtime = new Runtime({
+    observer: () => {},
+    durability: memoryHistory(),
+  });
+  const app = new Hono();
+  app.route(
+    "/agents",
+    serveAgents({ agents: [engine()], runtime, basePath: "/agents" })
+  );
+  try {
+    const discovery = await (
+      await app.request("http://local/agents/v1/agents")
+    ).json();
+    expect(discovery.agents[0].manifestUrl).toBe(
+      "/agents/echo/manifest.json"
+    );
+    const manifest = await (
+      await app.request("http://local/agents/echo/manifest.json")
+    ).json();
+    expect(manifest.endpoints.agUi).toBe("/agents/echo/v1/ag-ui");
+    expect(
+      (
+        await app.request(
+          "http://local/agents/agents/echo/manifest.json"
+        )
+      ).status
+    ).toBe(404);
+    expect(
+      (
+        await app.request("http://local/agents/echo/v1/ag-ui", {
+          method: "POST",
+          body: JSON.stringify({
+            messages: [{ role: "user", content: "hello" }],
+          }),
+        })
+      ).status
+    ).toBe(200);
+  } finally {
+    await runtime.close();
+  }
+});
+
 it("stops sessions and then closes agent resources", async () => {
   const steps: string[] = [];
   const { runtime, app } = isolated([
@@ -85,7 +142,7 @@ it("stops sessions and then closes agent resources", async () => {
       }
     ),
   ]);
-  await app.request("http://local/agents/echo/v1/ag-ui", {
+  await app.request("http://local/echo/v1/ag-ui", {
     method: "POST",
     body: JSON.stringify({ messages: [{ role: "user", content: "hello" }] }),
   });
@@ -118,7 +175,7 @@ it("persists history across restarts without overwriting archived session events
   let runtime = new Runtime(isolatedConfig);
   let app = serveAgents({ agents, runtime });
   try {
-    await app.request("http://local/agents/echo/v1/ag-ui", {
+    await app.request("http://local/echo/v1/ag-ui", {
       method: "POST",
       body: JSON.stringify({
         threadId: "saved",
@@ -129,10 +186,10 @@ it("persists history across restarts without overwriting archived session events
     runtime = new Runtime(isolatedConfig);
     app = serveAgents({ agents, runtime });
     const history = await (
-      await app.request("http://local/agents/echo/v1/ag-ui/sessions/saved")
+      await app.request("http://local/echo/v1/ag-ui/sessions/saved")
     ).json();
     expect(history.messages).toHaveLength(2);
-    const archived = await app.request("http://local/agents/echo/v1/ag-ui", {
+    const archived = await app.request("http://local/echo/v1/ag-ui", {
       method: "POST",
       body: JSON.stringify({
         threadId: "saved",
@@ -165,7 +222,7 @@ it("rejects path-shaped thread IDs before running the agent", async () => {
   );
   try {
     for (const threadId of ["../escape", "a/b", "..", ""]) {
-      const response = await app.request("http://local/agents/echo/v1/ag-ui", {
+      const response = await app.request("http://local/echo/v1/ag-ui", {
         method: "POST",
         body: JSON.stringify({
           threadId,
@@ -220,20 +277,20 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
       await app.request("http://local/api/agents/v1/agents")
     ).json();
     expect(discovery.agents[0].manifestUrl).toBe(
-      "/api/agents/agents/echo/manifest.json"
+      "/api/agents/echo/manifest.json"
     );
     const manifest = await (
-      await app.request("http://local/api/agents/agents/echo/manifest.json")
+      await app.request("http://local/api/agents/echo/manifest.json")
     ).json();
-    expect(manifest.endpoints.agUi).toBe("/api/agents/agents/echo/v1/ag-ui");
+    expect(manifest.endpoints.agUi).toBe("/api/agents/echo/v1/ag-ui");
     expect(
       new URL(discovery.agents[0].manifestUrl, "http://local/api/agents/")
         .pathname
-    ).toBe("/api/agents/agents/echo/manifest.json");
+    ).toBe("/api/agents/echo/manifest.json");
     expect(
       new URL(manifest.endpoints.agUi, "http://local/api/agents/").pathname
-    ).toBe("/api/agents/agents/echo/v1/ag-ui");
-    await app.request("http://local/api/agents/agents/echo/v1/ag-ui", {
+    ).toBe("/api/agents/echo/v1/ag-ui");
+    await app.request("http://local/api/agents/echo/v1/ag-ui", {
       method: "POST",
       body: JSON.stringify({ messages: [{ role: "user", content: "hello" }] }),
     });

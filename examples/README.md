@@ -84,15 +84,17 @@ approval prompt before allowing execution.
 
 `GET /` is the application-owned agent list. Studio discovers agents through
 `GET /agents/v1/agents`, then reads each Runtime-served
-`/agents/agents/:id/manifest.json`. The agent-scoped endpoints are:
+`/agents/:id/manifest.json`. Pass matching `basePath: "/agents"` when the app
+mounts `serveAgents` at `/agents` so discovery advertises those live URLs. The
+agent-scoped endpoints are:
 
 | Endpoint                                      | Purpose                                                     |
 | --------------------------------------------- | ----------------------------------------------------------- |
 | `GET /`                                       | Application agent list and manifests                        |
 | `GET /agents/v1/agents`                       | Agent IDs and manifest URLs                                 |
-| `GET /agents/agents/:id/manifest.json`        | One neutral agent manifest                                  |
-| `POST /agents/agents/:id/v1/ag-ui`            | AG-UI SSE run stream                                        |
-| `GET/POST /agents/agents/:id/v1/sessions/...` | Sessions, canonical events, history, approvals, and replies |
+| `GET /agents/:id/manifest.json`        | One neutral agent manifest                                  |
+| `POST /agents/:id/v1/ag-ui`            | AG-UI SSE run stream                                        |
+| `GET/POST /agents/:id/v1/sessions/...` | Sessions, canonical events, history, approvals, and replies |
 
 ### Image input
 

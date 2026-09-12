@@ -15,7 +15,10 @@ app.get("/", (c) =>
     })),
   }),
 );
-app.route("/agents", serveAgents({ agents, runtime }));
+app.route(
+  "/agents",
+  serveAgents({ agents, runtime, basePath: "/agents" })
+);
 
 serve(
   {

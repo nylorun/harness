@@ -180,7 +180,7 @@ it("blocks Studio text content through Runtime before invoking the model", async
   const app = serveAgents({ agents: [agent], runtime });
   try {
     const response = await app.request(
-      "http://local/agents/guardrails/v1/ag-ui",
+      "http://local/guardrails/v1/ag-ui",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -200,7 +200,7 @@ it("blocks Studio text content through Runtime before invoking the model", async
     expect(calls).toBe(0);
     const history = await (
       await app.request(
-        "http://local/agents/guardrails/v1/sessions/studio-input/events",
+        "http://local/guardrails/v1/sessions/studio-input/events",
       )
     ).json();
     expect(
