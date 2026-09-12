@@ -25,7 +25,9 @@ describe("starter template", () => {
         .sort()
     ).toEqual(["agents/assistant/agent.ts", "agents/index.ts", "src/index.ts"]);
     expect(files[".env/auth.json"]).toBeUndefined();
-    expect(files["src/index.ts"]).toContain("serveAgents({ agents, runtime })");
+    expect(files["src/index.ts"]).toContain(
+      'serveAgents({ agents, runtime, basePath: "/agents" })'
+    );
     expect(files["src/index.ts"]).toContain("new Runtime()");
     expect(JSON.parse(files["package.json"]!).name).toBe("my-nylorun-agent");
     expect(files["README.md"]).toMatch(/^# My agent\n/u);

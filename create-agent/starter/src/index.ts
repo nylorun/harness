@@ -16,7 +16,10 @@ app.get("/", (c) =>
 );
 
 const runtime = new Runtime();
-app.route("/agents", serveAgents({ agents, runtime }));
+app.route(
+  "/agents",
+  serveAgents({ agents, runtime, basePath: "/agents" }),
+);
 
 serve(
   {

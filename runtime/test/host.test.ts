@@ -246,3 +246,54 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
     await runtime.close();
   }
 });
+
+it("advertises live double-/agents paths when mounted at /agents with matching basePath", async () => {
+  const runtime = new Runtime({
+    observer: () => {},
+    durability: memoryHistory(),
+  });
+  const app = new Hono();
+  app.route(
+    "/agents",
+    serveAgents({ agents: [engine()], runtime, basePath: "/agents" })
+  );
+  try {
+    const discovery = await (
+      await app.request("http://local/agents/v1/agents")
+    ).json();
+    expect(discovery.agents[0].manifestUrl).toBe(
+      "/agents/agents/echo/manifest.json"
+    );
+    expect(
+      (
+        await app.request(
+          new URL(
+            discovery.agents[0].manifestUrl,
+            "http://local/agents/"
+          ).toString()
+        )
+      ).status
+    ).toBe(200);
+    const manifest = await (
+      await app.request("http://local/agents/agents/echo/manifest.json")
+    ).json();
+    expect(manifest.endpoints.agUi).toBe("/agents/agents/echo/v1/ag-ui");
+    const agUi = await app.request("http://local/agents/agents/echo/v1/ag-ui", {
+      method: "POST",
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    });
+    expect(agUi.status).toBe(200);
+    expect(
+      (await app.request("http://local/agents/echo/v1/ag-ui", {
+        method: "POST",
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "hello" }],
+        }),
+      })).status
+    ).toBe(404);
+  } finally {
+    await runtime.close();
+  }
+});

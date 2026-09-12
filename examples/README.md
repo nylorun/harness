@@ -84,7 +84,11 @@ approval prompt before allowing execution.
 
 `GET /` is the application-owned agent list. Studio discovers agents through
 `GET /agents/v1/agents`, then reads each Runtime-served
-`/agents/agents/:id/manifest.json`. The agent-scoped endpoints are:
+`/agents/agents/:id/manifest.json`. The doubled `/agents/agents` segment is
+intentional: the app mounts `serveAgents` at `/agents`, and the router already
+defines agent-scoped routes under `/agents/:id/...`. Pass matching
+`basePath: "/agents"` so discovery advertises those live URLs. The agent-scoped
+endpoints are:
 
 | Endpoint                                      | Purpose                                                     |
 | --------------------------------------------- | ----------------------------------------------------------- |
