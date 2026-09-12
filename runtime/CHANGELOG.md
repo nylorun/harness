@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1-beta
+
+### Patch Changes
+
+- fd24b00: Flatten Runtime agent routes to `/:id/...` and pass matching `basePath` from the Hono mount so discovery, manifests, and AG-UI resolve at `/agents/:id/...` for Studio.
+
 ## 0.2.0-beta
 
 ### Minor Changes
