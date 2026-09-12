@@ -117,8 +117,11 @@ it("runs local tsx with development enabled, waits for readiness, and closes bot
   });
   task.child.kill("SIGTERM");
   expect(await task.closed).toBe(143);
-  expect(await readFile(join(root, "app-stopped"), "utf8")).toBe("yes");
-  expect(await readFile(join(root, "studio-stopped"), "utf8")).toBe("yes");
+  // Children may finish writing stop markers slightly after the supervisor exits.
+  await wait(async () => {
+    expect(await readFile(join(root, "app-stopped"), "utf8")).toBe("yes");
+    expect(await readFile(join(root, "studio-stopped"), "utf8")).toBe("yes");
+  });
 });
 it("runs without a Studio dependency and accepts both flags", async () => {
   const root = await fixture(true, false);
@@ -166,7 +169,9 @@ it("stops the application when Studio fails", async () => {
   const task = run(root, [], { PORT: String(await port()) });
   expect(await task.closed).toBe(1);
   expect(task.output()).toContain("fixture Studio failure");
-  expect(await readFile(join(root, "app-stopped"), "utf8")).toBe("yes");
+  await wait(async () => {
+    expect(await readFile(join(root, "app-stopped"), "utf8")).toBe("yes");
+  });
 });
 it("times out an unready application and shuts it down", async () => {
   const root = await fixture();
