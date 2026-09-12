@@ -1,15 +1,13 @@
 {
   "version": 1,
-  "channel": "latest",
+  "channel": "beta",
   "packages": {
-    "harness": "0.12.0-beta",
-    "runtime": "0.2.1-beta",
-    "studio": "0.4.2-beta",
-    "create-agent": "0.3.1-beta"
+    "runtime": "0.3.0-beta",
+    "create-agent": "0.4.0-beta"
   },
   "compatibility": {
     "harness": "0.12.0-beta",
     "studio": "0.4.2-beta",
-    "runtime": "0.2.1-beta"
+    "runtime": "0.3.0-beta"
   }
 }
