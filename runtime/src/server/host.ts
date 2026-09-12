@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
+import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import type {
   JsonValue,
@@ -48,7 +49,7 @@ export type RuntimeActor = Readonly<{
   context?: Record<string, JsonValue>;
 }>;
 export type AgentRouterOptions = Readonly<{
-  /** Public URL prefix of this router, matching the Hono mount path. */
+  /** Override the public URL prefix; defaults to the current Hono mount path. */
   basePath?: string;
   getActor?: (
     context: Context
@@ -100,9 +101,36 @@ export class Runtime {
     const configuredObserver = this.#config.observer;
     const redact = (value: unknown) => scrub(value, projectSecrets());
     const live = new Map<string, Live>();
-    let publicPath = (path: string) => path;
     const routerOptions = options;
     const app = new Hono();
+    if (process.env.NYLORUN_DEV === "1") {
+      app.use(
+        "*",
+        cors({
+          origin: (origin) => {
+            try {
+              const url = new URL(origin);
+              return ["http:", "https:"].includes(url.protocol) &&
+                ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) &&
+                url.origin === origin
+                ? origin
+                : undefined;
+            } catch {
+              return undefined;
+            }
+          },
+          allowMethods: [
+            "GET",
+            "HEAD",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS",
+          ],
+        })
+      );
+    }
     app.onError((error, context) =>
       context.json(
         { error: String(redact(error.message)) },
@@ -122,15 +150,24 @@ export class Runtime {
         });
       }
     });
-    publicPath = (path: string) =>
-      `${normalizeBasePath(routerOptions.basePath)}${path}`;
+    // Infer the public mount from this request URL and the local route path.
+    // Do not use hono/route basePath: consumers often install a separate `hono`
+    // copy, and that helper's match-result Symbol then misses the parent's match.
+    const publicPath = (context: Context, routePath: string, path: string) =>
+      `${normalizeBasePath(
+        routerOptions.basePath ?? inferMountPath(context, routePath)
+      )}${path}`;
 
     app.get("/v1/agents", (context) =>
       context.json({
         protocolVersion: 2,
         agents: agents.map((agent) => ({
           id: agent.id,
-          manifestUrl: publicPath(`/${agent.id}/manifest.json`),
+          manifestUrl: publicPath(
+            context,
+            "/v1/agents",
+            `/${agent.id}/manifest.json`
+          ),
         })),
       })
     );
@@ -139,7 +176,11 @@ export class Runtime {
       const agent = byId.get(context.req.param("agentId"));
       return agent === undefined
         ? context.json({ error: "unknown agent" }, 404)
-        : context.json(manifest(agent, media !== undefined, publicPath));
+        : context.json(
+            manifest(agent, media !== undefined, (path) =>
+              publicPath(context, "/:agentId/manifest.json", path)
+            )
+          );
     });
 
     app.get("/:agentId/v1/media/:session/:assetId", async (context) => {
@@ -805,4 +846,25 @@ function normalizeBasePath(value: string | undefined): string {
   if (!value.startsWith("/") || value.endsWith("/"))
     throw new Error("basePath must start with / and must not end with /.");
   return value;
+}
+
+/** Public mount prefix for this request, derived without hono/route Symbols. */
+function inferMountPath(context: Context, routePath: string): string {
+  const pathname = new URL(context.req.url).pathname;
+  const suffix = routePath.replace(/:([A-Za-z0-9_]+)/g, (_, key: string) => {
+    const value = context.req.param(key);
+    if (value === undefined)
+      throw new Error(
+        `Unable to infer Runtime mount path from ${pathname}. Pass basePath matching the Hono mount.`
+      );
+    return value;
+  });
+  if (suffix !== "/" && pathname.endsWith(suffix)) {
+    const base = pathname.slice(0, -suffix.length);
+    return base === "" ? "/" : base;
+  }
+  if (pathname === suffix || `${pathname}/` === suffix) return "/";
+  throw new Error(
+    `Unable to infer Runtime mount path from ${pathname}. Pass basePath matching the Hono mount.`
+  );
 }

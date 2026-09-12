@@ -16,18 +16,25 @@ describe("starter template", () => {
     expect(manifest.dependencies["@nylorun/harness"]).toBe("1.2.3");
     expect(manifest.dependencies["@nylorun/runtime"]).toBe("7.8.9");
     expect(manifest.devDependencies["@nylorun/studio"]).toBe("4.5.6");
-    expect(manifest.scripts.dev).toBe("node scripts/dev.mjs");
-    expect(manifest.scripts["dev:app"]).toBe("tsx watch src/index.ts");
-    expect(files["scripts/dev.mjs"]).toContain("waitForReady");
+    expect(manifest.scripts.dev).toBe("nylorun dev");
+    expect(manifest.scripts["dev:app"]).toBeUndefined();
+    expect(files["scripts/dev.mjs"]).toBeUndefined();
+    expect(files["tsconfig.build.json"]).toBeUndefined();
+    expect(JSON.parse(files["tsconfig.json"]!).compilerOptions.outDir).toBe(
+      "dist"
+    );
+    expect(
+      Object.keys(files).some(
+        (path) => path.startsWith("config/") || path.startsWith("scripts/")
+      )
+    ).toBe(false);
     expect(
       Object.keys(files)
         .filter((path) => path.endsWith(".ts"))
         .sort()
     ).toEqual(["agents/assistant/agent.ts", "agents/index.ts", "src/index.ts"]);
     expect(files[".env/auth.json"]).toBeUndefined();
-    expect(files["src/index.ts"]).toContain(
-      'serveAgents({ agents, runtime, basePath: "/agents" })'
-    );
+    expect(files["src/index.ts"]).toContain("serveAgents({ agents, runtime })");
     expect(files["src/index.ts"]).toContain("new Runtime()");
     expect(JSON.parse(files["package.json"]!).name).toBe("my-nylorun-agent");
     expect(files["README.md"]).toMatch(/^# My agent\n/u);
@@ -36,7 +43,7 @@ describe("starter template", () => {
     const files = await starterFiles(compatibility, false);
     const manifest = JSON.parse(files["package.json"]!);
     expect(manifest.devDependencies["@nylorun/studio"]).toBeUndefined();
-    expect(manifest.scripts.dev).toBe("tsx watch src/index.ts");
+    expect(manifest.scripts.dev).toBe("nylorun dev --no-studio");
     expect(manifest.scripts.studio).toBeUndefined();
     expect(manifest.scripts["dev:app"]).toBeUndefined();
     expect(files["scripts/dev.mjs"]).toBeUndefined();

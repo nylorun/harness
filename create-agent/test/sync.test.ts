@@ -28,6 +28,7 @@ it("updates, deletes and renames generated files without touching authored code 
   for (const path of [
     "agents/demo/agent.ts",
     ".env/auth.json",
+    ".env/model.json",
     "config/model.json",
     ".data/session.json",
   ]) {
@@ -58,6 +59,7 @@ it("updates, deletes and renames generated files without touching authored code 
   for (const path of [
     "agents/demo/agent.ts",
     ".env/auth.json",
+    ".env/model.json",
     "config/model.json",
     ".data/session.json",
   ])
@@ -88,6 +90,7 @@ it("rejects authored paths, traversal, and symlinks", async () => {
     "agents/a.ts",
     "config/model.json",
     ".env/auth.json",
+    ".env/model.json",
     "scripts/manual.mjs",
     "../escape.json",
   ])

@@ -48,8 +48,12 @@ npm install --prefix examples
 npm run examples:check
 ```
 
-The renderer is shared by project creation, the isolated starter development runner, and examples synchronization. Sync owns shell files listed in `examples/.scaffold-manifest.json`, including the generated `scripts/dev.mjs` supervisor; it never edits `agents/`, tests, other scripts, local model selection, credentials, or `.data/`. Edit generated configuration in the recipe or template. Conflicts with manual generated-file edits fail before any writes. CI checks the rendered shell and runs examples against the current stack. Package changes can require explicit adaptations in authored code; sync does not rewrite TypeScript imports.
+The renderer is shared by project creation, the isolated starter development runner, and examples synchronization. Sync owns shell files listed in `examples/.scaffold-manifest.json`, including `src/index.ts`, `package.json`, and TypeScript configuration; it never edits `agents/`, tests, other scripts, local model selection, credentials, or `.data/`. Edit generated configuration in the recipe or template. Conflicts with manual generated-file edits fail before any writes. CI checks the rendered shell and runs examples against the current stack. Package changes can require explicit adaptations in authored code; sync does not rewrite TypeScript imports.
 
 `npm run dev:starter` from the repository root previews a fresh project using local packages, including unpublished changes. Each preview has its own retained directory and provider configuration.
 
 Repository development: [contributing](../CONTRIBUTING.md). Package publication: [releasing](../RELEASING.md).
+
+Generated projects use `nylorun dev`, with `--no-studio` and `--no-open` options, rather than a copied supervisor script. They contain one `tsconfig.json`; `npm run check` checks without emitting and `npm run build` emits to `dist/`. Repository examples add their own build configuration to exclude tests. Provider/model selection lives in `.env/model.json`, so configuration creates no top-level `config/` directory.
+
+To verify the packed starter after building all packages, run `node create-agent/scripts/smoke-starter.mjs` from the repository root. It installs candidate tarballs into a disposable project and checks type checking, production output, agent assets, development CORS, streaming, watch reload, and shutdown. Add `--serve` to keep the fixture Studio running for browser verification; stop it with Ctrl-C. It uses a deterministic model adapter and makes no provider calls.

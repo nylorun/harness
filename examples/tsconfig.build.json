@@ -1,5 +1,12 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "noEmit": false, "outDir": "dist", "rootDir": "." },
-  "include": ["agents/**/*.ts", "src/**/*.ts"]
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": ".",
+    "outDir": "dist"
+  },
+  "include": [
+    "agents/**/*.ts",
+    "src/**/*.ts"
+  ]
 }

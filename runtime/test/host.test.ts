@@ -78,7 +78,9 @@ agentContract("Independent engine", (kind) =>
 it("advertises root-mounted agent routes without an agents segment", async () => {
   const { runtime, app } = isolated([engine()]);
   try {
-    const discovery = await (await app.request("http://local/v1/agents")).json();
+    const discovery = await (
+      await app.request("http://local/v1/agents")
+    ).json();
     expect(discovery.agents[0].manifestUrl).toBe("/echo/manifest.json");
     const manifest = await (
       await app.request("http://local/echo/manifest.json")
@@ -103,19 +105,14 @@ it("advertises and serves routes from the agents mount", async () => {
     const discovery = await (
       await app.request("http://local/agents/v1/agents")
     ).json();
-    expect(discovery.agents[0].manifestUrl).toBe(
-      "/agents/echo/manifest.json"
-    );
+    expect(discovery.agents[0].manifestUrl).toBe("/agents/echo/manifest.json");
     const manifest = await (
       await app.request("http://local/agents/echo/manifest.json")
     ).json();
     expect(manifest.endpoints.agUi).toBe("/agents/echo/v1/ag-ui");
     expect(
-      (
-        await app.request(
-          "http://local/agents/agents/echo/manifest.json"
-        )
-      ).status
+      (await app.request("http://local/agents/agents/echo/manifest.json"))
+        .status
     ).toBe(404);
     expect(
       (
@@ -301,5 +298,112 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
     expect(received).toMatchObject({ metadata: { requestId: "request-1" } });
   } finally {
     await runtime.close();
+  }
+});
+
+it("infers each request's mount including parameterized and multiple mounts", async () => {
+  const { runtime, app: router } = isolated([engine()]);
+  const app = new Hono();
+  app.route("/agents", router);
+  app.route("/teams/:team/agents", router);
+  try {
+    for (const prefix of [
+      "/agents",
+      "/teams/one/agents",
+      "/teams/two/agents",
+    ]) {
+      const discovery = await (await app.request(`${prefix}/v1/agents`)).json();
+      expect(discovery.agents[0].manifestUrl).toBe(
+        `${prefix}/echo/manifest.json`
+      );
+      const manifest = await (
+        await app.request(discovery.agents[0].manifestUrl)
+      ).json();
+      expect(manifest.endpoints.sessions).toBe(`${prefix}/echo/v1/sessions`);
+      expect(manifest.endpoints.agUi).toBe(`${prefix}/echo/v1/ag-ui`);
+    }
+  } finally {
+    await runtime.close();
+  }
+});
+
+it("allows local Studio discovery and preflight only in development", async () => {
+  const previous = process.env.NYLORUN_DEV;
+  try {
+    for (const development of [false, true]) {
+      if (development) process.env.NYLORUN_DEV = "1";
+      else delete process.env.NYLORUN_DEV;
+      const { runtime, app } = isolated([engine()]);
+      try {
+        for (const origin of [
+          "http://localhost:4161",
+          "https://127.0.0.1:4260",
+          "http://[::1]:4161",
+          "https://example.com",
+          "http://localhost.evil:4161",
+          "null",
+        ]) {
+          const allowed =
+            development &&
+            !origin.includes("evil") &&
+            !origin.includes("example") &&
+            origin !== "null";
+          for (const path of [
+            "/v1/agents",
+            "/echo/manifest.json",
+            "/echo/v1/sessions",
+            "/missing/manifest.json",
+          ]) {
+            const response = await app.request(path, { headers: { origin } });
+            expect(response.headers.get("access-control-allow-origin")).toBe(
+              allowed ? origin : null
+            );
+            expect(
+              response.headers.get("access-control-allow-credentials")
+            ).toBeNull();
+          }
+          if (allowed) {
+            const stream = await app.request("/echo/v1/ag-ui", {
+              method: "POST",
+              headers: { origin, "content-type": "application/json" },
+              body: JSON.stringify({
+                threadId: "cors-stream",
+                messages: [{ role: "user", content: "hello" }],
+              }),
+            });
+            expect(stream.headers.get("access-control-allow-origin")).toBe(
+              origin
+            );
+            expect(stream.headers.get("vary")).toContain("Origin");
+            expect(stream.headers.get("content-type")).toContain(
+              "text/event-stream"
+            );
+            expect(await stream.text()).toContain("RUN_FINISHED");
+          }
+          const preflight = await app.request("/echo/v1/ag-ui", {
+            method: "OPTIONS",
+            headers: {
+              origin,
+              "access-control-request-method": "POST",
+              "access-control-request-headers": "content-type",
+            },
+          });
+          if (allowed) {
+            expect(preflight.status).toBe(204);
+            expect(
+              preflight.headers.get("access-control-allow-methods")
+            ).toContain("POST");
+            expect(
+              preflight.headers.get("access-control-allow-headers")
+            ).toContain("content-type");
+          }
+        }
+      } finally {
+        await runtime.close();
+      }
+    }
+  } finally {
+    if (previous === undefined) delete process.env.NYLORUN_DEV;
+    else process.env.NYLORUN_DEV = previous;
   }
 });

@@ -21,7 +21,7 @@ Build before omitting development dependencies. Keep these in the deployment:
 |---|---|
 | `dist/` | Built Hono app, agent graph, and application assets |
 | `package.json`, `package-lock.json` | Reproducible production dependencies |
-| `config/model.json` | Selected provider/model |
+| `.env/model.json` | Selected provider/model |
 | Private `.env/` configuration | Provider credentials and integration settings |
 | Persistent `.data/` volume, when configured | Session history and media |
 

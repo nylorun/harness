@@ -22,15 +22,16 @@ try {
   }
   assert.ok(
     files["src/index.ts"]?.includes(
-      'serveAgents({ agents, runtime, basePath: "/agents" })'
+      'serveAgents({ agents, runtime })'
     )
   );
   assert.ok(files["src/index.ts"]?.includes("@hono/node-server"));
   assert.equal(files["nylorun.config.ts"], undefined);
   const manifest = JSON.parse(files["package.json"]);
-  assert.equal(manifest.scripts.dev, "node scripts/dev.mjs");
-  assert.equal(manifest.scripts["dev:app"], "tsx watch src/index.ts");
-  assert.ok(files["scripts/dev.mjs"]?.includes("waitForReady"));
+  assert.equal(manifest.scripts.dev, "nylorun dev");
+  assert.equal(manifest.scripts["dev:app"], undefined);
+  assert.equal(files["scripts/dev.mjs"], undefined);
+  assert.equal(files["tsconfig.build.json"], undefined);
   assert.equal(manifest.scripts.start, "node dist/src/index.js");
   assert.ok(manifest.dependencies.hono);
   assert.ok(manifest.dependencies["@hono/node-server"]);
