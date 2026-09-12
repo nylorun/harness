@@ -1,21 +1,33 @@
 # Nylorun Harness
 
-Nylorun Harness is a provider-neutral TypeScript agent loop with direct capability composition.
-This repository contains independent Harness, Runtime, Studio, and creator packages, plus runnable examples.
+Provider-neutral TypeScript agent runtime with direct capability composition.
 
-> **Experimental beta.** APIs may change before 1.0.
+This repository is a monorepo of independently versioned packages—Harness, Runtime, Studio, and the project creator—plus runnable examples.
 
-## Packages
+> **Experimental beta.** Public APIs may change before 1.0. Prefer the `@beta` dist-tag for installs until then.
 
-- [`@nylorun/harness`](./harness) — model/tool loop and capability composition.
-- [`@nylorun/runtime`](./runtime) — agent lifecycle, Hono protocol routing, pi-ai providers, and the `nylorun` CLI.
-- [`@nylorun/studio`](./studio) — local dashboard for compatible agent servers.
-- [`@nylorun/create-agent`](./create-agent) — project creation, compatibility pins, and examples synchronization.
-- [`examples`](./examples) — eleven authored capability demonstrations on the generated project shell.
+## Quick start
 
-## Develop
+Create a local agent project (Studio enabled by default):
 
-Use Node 24 and npm 11; see [contributor setup](./CONTRIBUTING.md).
+```sh
+npm create @nylorun/agent@beta my-agent
+```
+
+Then follow the terminal prompts to configure a model provider and start development.
+
+Useful flags (after `--`):
+
+| Flag | Effect |
+|---|---|
+| `--skip-config` | Skip provider setup (required when stdin/stdout are not interactive) |
+| `--no-studio` | Scaffold a headless project without Studio |
+
+The creator only scaffolds the project. The generated app depends on Harness and Runtime; Studio is a development dependency. Runtime provides the `nylorun` CLI.
+
+## Develop this repository
+
+Requires **Node 24** and **npm 11**. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ```sh
 git clone https://github.com/nylorun/harness.git
@@ -24,21 +36,30 @@ npm run setup
 npm run dev
 ```
 
-## Create an agent
+`npm run setup` installs both lockfiles and builds packages. Before the first conversation in the examples app, run `npm run configure` in another terminal.
 
-Create a local TypeScript agent project with Studio enabled by default:
+## Packages
 
-```sh
-npm create @nylorun/agent@beta my-agent
-```
+| Package | Role |
+|---|---|
+| [`@nylorun/harness`](./harness) | Model/tool loop and capability composition |
+| [`@nylorun/runtime`](./runtime) | Agent lifecycle, Hono protocol routing, providers, and the `nylorun` CLI |
+| [`@nylorun/studio`](./studio) | Local dashboard for compatible agent servers |
+| [`@nylorun/create-agent`](./create-agent) | Project scaffolding, compatibility pins, and examples sync |
+| [`examples`](./examples) | Authored capability demonstrations on the generated project shell |
 
-The generated project directly installs Harness and Runtime, with Studio as a development dependency. Creation installs dependencies, opens provider/model configuration in the same terminal, then starts development. Pass `-- --skip-config` to configure later; this flag is required without interactive stdin and stdout. Use `-- --no-studio` to create a headless project. Runtime supplies the `nylorun` CLI; the creator is used only to scaffold the project.
+## Documentation
 
-See the [Harness package](./harness/README.md), [Runtime](./runtime/README.md), [Studio](./studio/README.md), and
-[Examples](./examples/README.md).
-Contributor commands: [CONTRIBUTING.md](./CONTRIBUTING.md). Administrators: [RELEASING.md](./RELEASING.md). Application hosting: [DEPLOYMENT.md](./DEPLOYMENT.md). Security reports
-follow [SECURITY.md](./SECURITY.md).
+| Doc | Audience |
+|---|---|
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Contributors — setup, checks, workflow |
+| [RELEASING.md](./RELEASING.md) | Maintainers — version, publish, dist-tags |
+| [DEPLOYMENT.md](./DEPLOYMENT.md) | Application hosting |
+| [SECURITY.md](./SECURITY.md) | Vulnerability reports |
+| [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Community standards |
 
-Licensed under [Apache-2.0](./LICENSE).
+Package-level READMEs: [Harness](./harness/README.md) · [Runtime](./runtime/README.md) · [Studio](./studio/README.md) · [Examples](./examples/README.md)
 
-Run `npm run check:stack` for isolated packed-project CLI, Studio, reload, and built-asset integration checks.
+## License
+
+[Apache-2.0](./LICENSE)
