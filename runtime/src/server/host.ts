@@ -130,19 +130,19 @@ export class Runtime {
         protocolVersion: 2,
         agents: agents.map((agent) => ({
           id: agent.id,
-          manifestUrl: publicPath(`/agents/${agent.id}/manifest.json`),
+          manifestUrl: publicPath(`/${agent.id}/manifest.json`),
         })),
       })
     );
 
-    app.get("/agents/:agentId/manifest.json", (context) => {
+    app.get("/:agentId/manifest.json", (context) => {
       const agent = byId.get(context.req.param("agentId"));
       return agent === undefined
         ? context.json({ error: "unknown agent" }, 404)
         : context.json(manifest(agent, media !== undefined, publicPath));
     });
 
-    app.get("/agents/:agentId/v1/media/:session/:assetId", async (context) => {
+    app.get("/:agentId/v1/media/:session/:assetId", async (context) => {
       const agent = requireAgent(context.req.param("agentId"));
       if (!agent) return context.json({ error: "unknown agent" }, 404);
       const asset = await media?.read(
@@ -157,7 +157,7 @@ export class Runtime {
       });
     });
 
-    app.get("/agents/:agentId/v1/sessions", async (context) => {
+    app.get("/:agentId/v1/sessions", async (context) => {
       const agent = requireAgent(context.req.param("agentId"));
       if (agent === undefined)
         return context.json({ error: "unknown agent" }, 404);
@@ -174,7 +174,7 @@ export class Runtime {
       });
     });
 
-    app.get("/agents/:agentId/v1/sessions/:session", async (context) => {
+    app.get("/:agentId/v1/sessions/:session", async (context) => {
       const agent = requireAgent(context.req.param("agentId"));
       if (!agent) return context.json({ error: "unknown agent" }, 404);
       const key = keyOf(agent.id, context.req.param("session"));
@@ -191,7 +191,7 @@ export class Runtime {
       });
     });
 
-    app.post("/agents/:agentId/v1/sessions/:session", async (context) => {
+    app.post("/:agentId/v1/sessions/:session", async (context) => {
       const agent = requireAgent(context.req.param("agentId"));
       if (!agent) return context.json({ error: "unknown agent" }, 404);
       const found = live.get(keyOf(agent.id, context.req.param("session")));
@@ -248,7 +248,7 @@ export class Runtime {
       );
     });
 
-    app.get("/agents/:agentId/v1/sessions/:session/events", async (context) => {
+    app.get("/:agentId/v1/sessions/:session/events", async (context) => {
       const agent = requireAgent(context.req.param("agentId"));
       if (!agent) return context.json({ error: "unknown agent" }, 404);
       const after = Number(context.req.query("after") ?? "0");
@@ -262,7 +262,7 @@ export class Runtime {
       });
     });
 
-    app.get("/agents/:agentId/v1/ag-ui/sessions/:session", async (context) => {
+    app.get("/:agentId/v1/ag-ui/sessions/:session", async (context) => {
       const agent = requireAgent(context.req.param("agentId"));
       if (!agent) return context.json({ error: "unknown agent" }, 404);
       const found = live.get(keyOf(agent.id, context.req.param("session")));
@@ -276,7 +276,7 @@ export class Runtime {
       });
     });
 
-    app.post("/agents/:agentId/v1/ag-ui", async (context) => {
+    app.post("/:agentId/v1/ag-ui", async (context) => {
       const agent = requireAgent(context.req.param("agentId"));
       if (!agent) return context.json({ error: "unknown agent" }, 404);
       const payload = await context.req
@@ -517,8 +517,8 @@ function manifest(
     name: agent.manifest.name,
     manifest: agent.manifest,
     endpoints: {
-      agUi: publicPath(`/agents/${agent.id}/v1/ag-ui`),
-      sessions: publicPath(`/agents/${agent.id}/v1/sessions`),
+      agUi: publicPath(`/${agent.id}/v1/ag-ui`),
+      sessions: publicPath(`/${agent.id}/v1/sessions`),
     },
     ...(media
       ? {

@@ -6,14 +6,14 @@
     "studio": "0.4.2-beta",
     "runtime": "0.2.0-beta"
   },
-  "templateHash": "7fa735cbdb48d0d4cd51effadddce3ec5686c3aa934d9d019f71e6750920d572",
+  "templateHash": "8300329dc9edf62f5323ff144e4bc34a591b8c48a33935f3653ed95daf39f1c7",
   "files": {
     ".env/.gitignore": "aae815b9313ef60fb99d51bec324f3de1cea5256d6bbf58a660578b3e2d5815c",
     ".env/README.md": "25c1570cc9febdcfaefb9be0eccf8edbe30dec3202fb2063f9e88fbab6a67889",
     ".gitignore": "4f847734ef0ea8461f2c30d0baaea4190b2db88830a3d02d5afcf3edf781a867",
     "package.json": "d2390888a467c88169b3c1997c702dfe57a7f5e3c547e3b8fa177b98c19acee3",
     "scripts/dev.mjs": "b02afa5156aa6b43a394af481f2e582cddb64cbc7cd8d41bb2bc6fb288b4beac",
-    "src/index.ts": "0787fad371e01de3af418fb9a15007a073d160bf2b914712be939933bbe356fe",
+    "src/index.ts": "3a95635b53973e3a8596cc237f84b38c6631607f6c42cf7ef9a8ffdc1844cebf",
     "tsconfig.build.json": "47cc9a9107b76f9cb44f472309887cf240b96cf255893506793246fee4c52db5",
     "tsconfig.json": "9ccca230fa35246b01a2b08d7148e2b91d450c470f2b533d9f702a73199fb7c4"
   }

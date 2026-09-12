@@ -78,7 +78,7 @@ describe("multi-agent Hono host", () => {
     });
     try {
       const response = await runtime.app.request(
-        "http://local/agents/interactions/manifest.json"
+        "http://local/interactions/manifest.json"
       );
       const body = (await response.json()) as Record<string, unknown>;
       expect(body).toMatchObject({
@@ -164,7 +164,7 @@ describe("multi-agent Hono host", () => {
         ]),
       });
       const response = await runtime.app.request(
-        "http://local/agents/tool-use/v1/ag-ui",
+        "http://local/tool-use/v1/ag-ui",
         {
           method: "POST",
           headers: {
@@ -199,7 +199,7 @@ describe("multi-agent Hono host", () => {
         toolCallId: "calc-1",
       });
       const listed = await runtime.app.request(
-        "http://local/agents/tool-use/v1/sessions"
+        "http://local/tool-use/v1/sessions"
       );
       await expect(listed.json()).resolves.toMatchObject({
         sessions: expect.arrayContaining([
@@ -211,7 +211,7 @@ describe("multi-agent Hono host", () => {
         ]),
       });
       const eventsResponse = await runtime.app.request(
-        "http://local/agents/tool-use/v1/sessions/calculator/events"
+        "http://local/tool-use/v1/sessions/calculator/events"
       );
       const events = (await eventsResponse.json()) as {
         events: Array<{ type: string; payload: Record<string, unknown> }>;
@@ -259,7 +259,7 @@ describe("multi-agent Hono host", () => {
       model: "deterministic",
     });
     try {
-      await runtime.app.request("http://local/agents/interactions/v1/ag-ui", {
+      await runtime.app.request("http://local/interactions/v1/ag-ui", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -269,14 +269,14 @@ describe("multi-agent Hono host", () => {
         }),
       });
       const waiting = await runtime.app.request(
-        "http://local/agents/interactions/v1/sessions/notes"
+        "http://local/interactions/v1/sessions/notes"
       );
       const state = (await waiting.json()) as {
         pending_interaction?: { id: string };
       };
       expect(state.pending_interaction?.id).toBeTruthy();
       const listed = await runtime.app.request(
-        "http://local/agents/interactions/v1/sessions"
+        "http://local/interactions/v1/sessions"
       );
       await expect(listed.json()).resolves.toMatchObject({
         sessions: expect.arrayContaining([
@@ -288,7 +288,7 @@ describe("multi-agent Hono host", () => {
         ]),
       });
       await runtime.app.request(
-        "http://local/agents/interactions/v1/sessions/notes",
+        "http://local/interactions/v1/sessions/notes",
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -331,7 +331,7 @@ describe("multi-agent Hono host", () => {
     });
     try {
       const response = await runtime.app.request(
-        "http://local/agents/interior-design/v1/ag-ui",
+        "http://local/interior-design/v1/ag-ui",
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -365,7 +365,7 @@ describe("multi-agent Hono host", () => {
         }),
       ]);
       const eventsResponse = await runtime.app.request(
-        "http://local/agents/interior-design/v1/sessions/room/events"
+        "http://local/interior-design/v1/sessions/room/events"
       );
       const events = (await eventsResponse.json()) as {
         events: Array<{ type: string; payload: Record<string, any> }>;
@@ -409,7 +409,7 @@ describe("multi-agent Hono host", () => {
       );
       const assetId = completed?.payload.attributes.output.image.id;
       const image = await runtime.app.request(
-        `http://local/agents/interior-design/v1/media/room/${assetId}`
+        `http://local/interior-design/v1/media/room/${assetId}`
       );
       expect(image.headers.get("content-type")).toBe("image/png");
       await expect(image.arrayBuffer()).resolves.toHaveProperty(
@@ -417,7 +417,7 @@ describe("multi-agent Hono host", () => {
         png.byteLength
       );
       const history = await runtime.app.request(
-        "http://local/agents/interior-design/v1/ag-ui/sessions/room"
+        "http://local/interior-design/v1/ag-ui/sessions/room"
       );
       await expect(history.json()).resolves.toMatchObject({
         messages: expect.arrayContaining([
@@ -451,7 +451,7 @@ describe("multi-agent Hono host", () => {
     });
     try {
       const unsupported = await runtime.app.request(
-        "http://local/agents/instructions/v1/ag-ui",
+        "http://local/instructions/v1/ag-ui",
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -476,7 +476,7 @@ describe("multi-agent Hono host", () => {
       );
       expect(unsupported.status).toBe(400);
       const oversized = await runtime.app.request(
-        "http://local/agents/instructions/v1/ag-ui",
+        "http://local/instructions/v1/ag-ui",
         {
           method: "POST",
           headers: { "content-type": "application/json" },

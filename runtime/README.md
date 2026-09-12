@@ -6,14 +6,17 @@ Portable agent lifecycle, a mountable Hono protocol router, pi-ai model provider
 import { Runtime, serveAgents } from "@nylorun/runtime";
 
 const runtime = new Runtime();
-app.route("/agents", serveAgents({ agents, runtime }));
+app.route(
+  "/agents",
+  serveAgents({ agents, runtime, basePath: "/agents" })
+);
 ```
 
 `Runtime` is the primitive stack: model adapter (`piModel` by default), observer (`jsonlObserver` per session by default), and durability (`localJsonl` by default). Session files live together under `.data/sessions/<agent>/<session>/` as `events.jsonl` and `observe.jsonl`. Agents bind only when served.
 
 The application owns Hono composition, authentication, CORS, logging, process lifecycle, and deployment. Runtime owns agent sessions, durability, media, and AG-UI/session protocol routes. Graceful shutdown is optional: if the application installs signal handlers and wants to drain live sessions, flush pending journal writes, and run optional agent cleanup, it should await `runtime.close()`. An application that does not install handlers exits normally on its host's shutdown policy; `runtime.close()` does not run on crash, OOM, or SIGKILL.
 
-Runtime publishes root-relative discovery and endpoint URLs. Mounting below root requires the matching public prefix, so Studio and other clients can resolve those URLs against any configured agent-server URL:
+Runtime publishes root-relative discovery and endpoint URLs. `basePath` must match the Hono mount path so advertised manifests and AG-UI endpoints resolve. Agent-scoped routes are `/:id/...` inside the router, so mounting at `/agents` with `basePath: "/agents"` yields `/agents/:id/...`. Pass the same prefix for other mounts:
 
 ```ts
 app.route(

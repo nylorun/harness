@@ -66,7 +66,7 @@ it.each(failures)(
       // A previous run's failure must not suppress this run's terminal event.
       for (let run = 0; run < 2; run++) {
         const response = await app.request(
-          "http://local/agents/failure/v1/ag-ui",
+          "http://local/failure/v1/ag-ui",
           {
             method: "POST",
             body: JSON.stringify({
@@ -86,13 +86,13 @@ it.each(failures)(
         expect(events[1].message).toBe(message);
         const status = await (
           await app.request(
-            "http://local/agents/failure/v1/sessions/session",
+            "http://local/failure/v1/sessions/session",
           )
         ).json();
         expect(status.state).toBe("failed");
         const history = await (
           await app.request(
-            "http://local/agents/failure/v1/sessions/session/events",
+            "http://local/failure/v1/sessions/session/events",
           )
         ).json();
         expect(
