@@ -43,7 +43,10 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
     const selection = options.selection ?? modelSelection(root);
     const registry = modelsFor(
       selection,
-      new ProjectCredentialStore(join(root, ".env", "auth.json")),
+      new ProjectCredentialStore(
+        join(root, ".nylorun", "auth.json"),
+        join(root, ".env", "auth.json"),
+      ),
     );
     const selected = registry.getModel(selection.provider, selection.model);
     if (!selected) throw new Error("Unknown model. Run nylorun configure.");

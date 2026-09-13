@@ -1,4 +1,3 @@
-import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { Runtime, serveAgents } from "@nylorun/runtime";
 import { agents } from "../agents/index.js";
@@ -21,12 +20,4 @@ app.route(
   serveAgents({ agents, runtime })
 );
 
-serve(
-  {
-    fetch: app.fetch,
-    port: Number(process.env.PORT ?? "3000"),
-  },
-  (info) => {
-    console.log(`Server is running on http://localhost:${info.port}`);
-  },
-);
+export default app;

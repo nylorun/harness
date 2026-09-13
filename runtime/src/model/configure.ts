@@ -1,8 +1,8 @@
-import { mkdir, writeFile, rename, rm, rmdir } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
+import { saveEnvironment } from "../environment.js";
+import type { AuthInteraction, CredentialStore } from "@earendil-works/pi-ai";
 import { ProjectCredentialStore } from "./auth-store.js";
 import { modelsFor, type Selection } from "./models.js";
 
@@ -29,7 +29,27 @@ export async function configureProvider(
   const signal = controller.signal;
   const forwardAbort = () => controller.abort(options.signal!.reason);
   options.signal?.throwIfAborted();
-  const store = new ProjectCredentialStore(join(root, ".env", "auth.json"));
+  let enteredKey: string | undefined;
+  let enteredEnvironment: Record<string, string | undefined> = {};
+  const oauthStore = new ProjectCredentialStore(
+    join(root, ".nylorun", "auth.json"),
+    join(root, ".env", "auth.json")
+  );
+  const store: CredentialStore = {
+    read: (id) => oauthStore.read(id),
+    list: () => oauthStore.list(),
+    delete: (id) => oauthStore.delete(id),
+    async modify(id, fn) {
+      const next = await fn(await oauthStore.read(id));
+      if (next?.type === "api_key") {
+        if (next.key === "") throw new Error("An API key is required.");
+        enteredKey = next.key;
+        enteredEnvironment = { ...next.env };
+        return next;
+      }
+      return oauthStore.modify(id, async () => next);
+    },
+  };
   const models = modelsFor({ provider: "", model: "" }, store);
   const providers = models.getProviders();
   const prompt = createInterface({
@@ -74,7 +94,8 @@ export async function configureProvider(
         custom: { baseUrl },
       };
       const customModels = modelsFor(selection, store);
-      await customModels.login("custom", "api_key", interaction());
+      if (!(await customModels.checkAuth("custom", { signal })))
+        await customModels.login("custom", "api_key", interaction());
       await save(selection);
     } else {
       const chosen = providers[choice - 1];
@@ -86,11 +107,20 @@ export async function configureProvider(
       const model = available[Number(await question("Choose a model: ")) - 1];
       if (!model) throw new Error("Choose a listed model.");
       if (!(await models.checkAuth(chosen.id, { signal }))) {
-        await models.login(
-          chosen.id,
-          chosen.auth.oauth ? "oauth" : "api_key",
-          interaction()
-        );
+        let method: "api_key" | "oauth" = chosen.auth.apiKey
+          ? "api_key"
+          : "oauth";
+        if (chosen.auth.apiKey && chosen.auth.oauth) {
+          const answer = (
+            await question(
+              "Choose authentication: 1. API key (default), 2. OAuth: "
+            )
+          ).trim();
+          if (answer && !["1", "2"].includes(answer))
+            throw new Error("Choose authentication 1 or 2.");
+          if (answer === "2") method = "oauth";
+        }
+        await models.login(chosen.id, method, interaction());
       }
       await save({ provider: chosen.id, model: model.id });
     }
@@ -106,41 +136,47 @@ export async function configureProvider(
     prompt.close();
   }
 
-  function interaction() {
+  function interaction(): AuthInteraction {
     return {
       signal,
-      prompt: async (item: any) => question(item.message + ": "),
-      notify: (event: any) =>
+      prompt: async (item) => {
+        if (item.type !== "select") return question(item.message + ": ");
+        item.options.forEach((option, index) =>
+          output.write(`${index + 1}. ${option.label}\n`)
+        );
+        const answer = (await question(item.message + " ")).trim();
+        const option =
+          item.options.find((option) => option.id === answer) ??
+          item.options[Number(answer) - 1];
+        if (!option) throw new Error("Choose a listed authentication option.");
+        return option.id;
+      },
+      notify: (event) => {
         output.write(
-          (event.url ?? event.verificationUri ?? event.message) + "\n"
-        ),
+          ("url" in event
+            ? event.url
+            : "verificationUri" in event
+            ? event.verificationUri
+            : event.message) + "\n"
+        );
+      },
     };
   }
 
   async function save(selection: Selection) {
     signal.throwIfAborted();
-    const directory = join(root, ".env");
-    const temporary = join(directory, `.model-${randomUUID()}.json`);
-    try {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporary, JSON.stringify(selection, null, 2) + "\n", {
-        signal,
-      });
-      signal.throwIfAborted();
-      await rename(temporary, join(directory, "model.json"));
-      await rm(join(root, "config", "model.json"), { force: true });
-      try {
-        await rmdir(join(root, "config"));
-      } catch (error) {
-        if (
-          !(error instanceof Error) ||
-          !("code" in error) ||
-          !["ENOENT", "ENOTEMPTY", "EEXIST"].includes(String(error.code))
-        )
-          throw error;
-      }
-    } finally {
-      await rm(temporary, { force: true });
-    }
+    await saveEnvironment(
+      root,
+      {
+        ...enteredEnvironment,
+        MODEL_PROVIDER: selection.provider,
+        MODEL: selection.model,
+        MODEL_PROVIDER_BASE_URL: selection.custom?.baseUrl,
+        ...(enteredKey === undefined
+          ? {}
+          : { MODEL_PROVIDER_API_KEY: enteredKey }),
+      },
+      signal
+    );
   }
 }

@@ -11,13 +11,12 @@
     "dev": "nylorun dev",
     "studio": "nylorun studio --agent-url http://localhost:3000/agents",
     "build": "node -e \"import('node:fs/promises').then(async ({rm,cp}) => { await rm('dist', { recursive: true, force: true }); await cp('agents', 'dist/agents', { recursive: true, filter: (source) => !source.endsWith('.ts') }); })\" && tsc -p tsconfig.json",
-    "start": "node dist/src/index.js",
+    "start": "nylorun start",
     "check": "tsc --noEmit"
   },
   "dependencies": {
     "@nylorun/harness": "{{HARNESS_VERSION}}",
     "@nylorun/runtime": "{{RUNTIME_VERSION}}",
-    "@hono/node-server": "^2.1.1",
     "hono": "^4.13.7",
     "zod": "^4.1.12"
   },

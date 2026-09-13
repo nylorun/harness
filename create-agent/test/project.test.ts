@@ -51,12 +51,13 @@ describe("starter template", () => {
       "`npm run dev` starts your app on port 3000."
     );
     expect(files["README.md"]).not.toContain("starts Studio");
-    expect(manifest.scripts.start).toBe("node dist/src/index.js");
+    expect(manifest.scripts.start).toBe("nylorun start");
   });
   it("renders ignore files under their real names so npm cannot drop them", async () => {
     const files = await starterFiles(compatibility, true);
     expect(files[".gitignore"]).toContain("node_modules/");
-    expect(files[".env/.gitignore"]).toContain("*");
+    expect(files[".env.example"]).toContain("MODEL_PROVIDER=");
+    expect(files[".gitignore"]).toContain(".nylorun/");
     expect(Object.keys(files).some((path) => path.includes("_gitignore"))).toBe(
       false
     );

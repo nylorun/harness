@@ -25,16 +25,19 @@ try {
       'serveAgents({ agents, runtime })'
     )
   );
-  assert.ok(files["src/index.ts"]?.includes("@hono/node-server"));
+  assert.ok(files["src/index.ts"]?.includes("export default app"));
+  assert.ok(!files["src/index.ts"]?.includes("@hono/node-server"));
+  assert.ok(files[".env.example"]?.includes("MODEL_PROVIDER_API_KEY="));
+  assert.ok(!Object.keys(files).some((path) => path.startsWith(".env/")));
   assert.equal(files["nylorun.config.ts"], undefined);
   const manifest = JSON.parse(files["package.json"]);
   assert.equal(manifest.scripts.dev, "nylorun dev");
   assert.equal(manifest.scripts["dev:app"], undefined);
   assert.equal(files["scripts/dev.mjs"], undefined);
   assert.equal(files["tsconfig.build.json"], undefined);
-  assert.equal(manifest.scripts.start, "node dist/src/index.js");
+  assert.equal(manifest.scripts.start, "nylorun start");
   assert.ok(manifest.dependencies.hono);
-  assert.ok(manifest.dependencies["@hono/node-server"]);
+  assert.equal(manifest.dependencies["@hono/node-server"], undefined);
   console.log("Hono-first starter stack contract passed.");
 } finally {
   await rm(temporary, { recursive: true, force: true });

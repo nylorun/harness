@@ -22,7 +22,7 @@ test("starter previews resolve local packages and never overwrite an earlier pre
       join(first, "agents/assistant/agent.ts"),
       "authored preview",
     );
-    await writeFile(join(first, ".env/auth.json"), '{"fixture":"local-only"}');
+    await writeFile(join(first, ".env"), "MODEL_PROVIDER_API_KEY=local-only\n");
     second = await renderPreview({ studio: false });
     assert.notEqual(first, second);
     assert.equal(
@@ -36,8 +36,8 @@ test("starter previews resolve local packages and never overwrite an earlier pre
       "authored preview",
     );
     assert.equal(
-      await readFile(join(first, ".env/auth.json"), "utf8"),
-      '{"fixture":"local-only"}',
+      await readFile(join(first, ".env"), "utf8"),
+      "MODEL_PROVIDER_API_KEY=local-only\n",
     );
   } finally {
     await rm(first, { recursive: true, force: true });

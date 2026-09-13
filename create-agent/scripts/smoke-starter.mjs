@@ -81,13 +81,17 @@ try {
     await readFile(join(project, "dist/agents/assistant/fixture.txt"), "utf8"),
     "asset"
   );
+  // An imported application must be usable without starting a listening server.
+  await run(process.execPath, ["--input-type=module", "-e",
+    "import app from './dist/src/index.js'; const response = await app.request('/agents/v1/agents'); if (response.status !== 200) throw new Error('Exported app routes failed');"
+  ], { cwd: project, timeout: 5_000 });
   const port = await availablePort();
   const productionEnv = { ...process.env, PORT: String(port) };
   delete productionEnv.NYLORUN_DEV;
   const production = group.start(
     "production",
     process.execPath,
-    ["dist/src/index.js"],
+    [join(project, "node_modules/@nylorun/runtime/dist/cli.js"), "start"],
     { cwd: project, env: productionEnv }
   );
   const discoveryUrl = `http://127.0.0.1:${port}/agents/v1/agents`;

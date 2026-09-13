@@ -1,28 +1,41 @@
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { parseEnv } from "node:util";
 import { PassThrough, Writable } from "node:stream";
 import { getEventListeners } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
+import type { CredentialStore } from "@earendil-works/pi-ai";
 import {
   configureProvider,
   ConfigurationCancelled,
 } from "../src/model/configure.js";
 
-const { login } = vi.hoisted(() => ({ login: vi.fn() }));
+const { login, state } = vi.hoisted(() => ({
+  login: vi.fn(),
+  state: { store: undefined as CredentialStore | undefined, apiKey: false },
+}));
 vi.mock("../src/model/models.js", () => ({
-  modelsFor: () => ({
-    getProviders: () => [
-      { id: "fixture", name: "Fixture", auth: { oauth: {} } },
-    ],
-    getModels: () => [{ id: "fixture-model", name: "Fixture model" }],
-    checkAuth: async () => false,
-    login,
-  }),
+  modelsFor: (_selection: unknown, store: CredentialStore) => {
+    state.store = store;
+    return {
+      getProviders: () => [
+        {
+          id: "fixture",
+          name: "Fixture",
+          auth: { oauth: {}, ...(state.apiKey ? { apiKey: {} } : {}) },
+        },
+      ],
+      getModels: () => [{ id: "fixture-model", name: "Fixture model" }],
+      checkAuth: async () => false,
+      login,
+    };
+  },
 }));
 const roots: string[] = [];
 afterEach(async () => {
   login.mockReset();
+  state.apiKey = false;
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
@@ -53,16 +66,60 @@ it("saves selection after authentication and cleans up prompt and abort listener
   login.mockResolvedValue(undefined);
   const controller = new AbortController();
   await configureProvider({ ...test, signal: controller.signal });
-  expect(
-    JSON.parse(await readFile(join(test.root, ".env/model.json"), "utf8"))
-  ).toEqual({
-    provider: "fixture",
-    model: "fixture-model",
+  expect(parseEnv(await readFile(join(test.root, ".env"), "utf8"))).toEqual({
+    MODEL_PROVIDER: "fixture",
+    MODEL: "fixture-model",
   });
   expect(test.text()).toContain("Provider configuration saved.");
   expect(test.text()).not.toContain("Return to Studio");
   expect(test.input.listenerCount("data")).toBe(0);
   expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+});
+
+it("defaults to API keys and saves entered provider settings without a vault", async () => {
+  state.apiKey = true;
+  const test = await fixture(["1", "1", ""]);
+  await writeFile(join(test.root, ".env"), "# integration\nINTEGRATION=keep\n");
+  login.mockImplementation(async () =>
+    state.store!.modify("fixture", async () => ({
+      type: "api_key",
+      key: "key-with-#-and-'",
+      env: { PROVIDER_ACCOUNT: "account" },
+    }))
+  );
+  await configureProvider(test);
+  expect(login).toHaveBeenCalledWith("fixture", "api_key", expect.anything());
+  const text = await readFile(join(test.root, ".env"), "utf8");
+  expect(text).toContain("# integration\nINTEGRATION=keep\n");
+  expect(parseEnv(text)).toMatchObject({
+    MODEL_PROVIDER_API_KEY: "key-with-#-and-'",
+    PROVIDER_ACCOUNT: "account",
+  });
+  await expect(
+    readFile(join(test.root, ".nylorun/auth.json"))
+  ).rejects.toThrow();
+});
+
+it("keeps explicitly selected OAuth credentials separate from dotenv", async () => {
+  state.apiKey = true;
+  const test = await fixture(["1", "1", "2"]);
+  const credential = {
+    type: "oauth" as const,
+    access: "oauth-access",
+    refresh: "oauth-refresh",
+    expires: 9999999999999,
+  };
+  login.mockImplementation(async () =>
+    state.store!.modify("fixture", async () => credential)
+  );
+  await configureProvider(test);
+  expect(login).toHaveBeenCalledWith("fixture", "oauth", expect.anything());
+  expect(
+    JSON.parse(await readFile(join(test.root, ".nylorun/auth.json"), "utf8"))
+  ).toEqual({ fixture: credential });
+  expect(await readFile(join(test.root, ".env"), "utf8")).not.toContain(
+    "oauth-access"
+  );
 });
 
 it.each(["SIGINT", "SIGTERM"] as const)(
@@ -143,7 +200,7 @@ it("rejects a pre-cancelled configuration without prompting", async () => {
 });
 
 it.each([false, true])(
-  "migrates legacy selection and preserves unrelated config files (%s)",
+  "preserves legacy selection and unrelated config files (%s)",
   async (otherFile) => {
     const test = await fixture();
     await mkdir(join(test.root, "config"));
@@ -155,21 +212,14 @@ it.each([false, true])(
     login.mockResolvedValue(undefined);
     await configureProvider(test);
     expect(
-      JSON.parse(await readFile(join(test.root, ".env/model.json"), "utf8"))
-        .model
+      parseEnv(await readFile(join(test.root, ".env"), "utf8")).MODEL
     ).toBe("fixture-model");
-    await expect(
-      readFile(join(test.root, "config/model.json"))
-    ).rejects.toThrow();
+    expect(await readFile(join(test.root, "config/model.json"), "utf8")).toBe(
+      '{"provider":"old","model":"old"}'
+    );
     if (otherFile)
       expect(await readFile(join(test.root, "config/keep.json"), "utf8")).toBe(
         "{}"
       );
-    else
-      await expect(
-        import("node:fs/promises").then((fs) =>
-          fs.stat(join(test.root, "config"))
-        )
-      ).rejects.toThrow();
   }
 );
