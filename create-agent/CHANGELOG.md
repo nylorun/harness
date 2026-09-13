@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0-beta
+
+### Minor Changes
+
+- fa1860a: Use standard MODEL_PROVIDER, MODEL, MODEL_PROVIDER_API_KEY, and MODEL_PROVIDER_BASE_URL environment configuration. Export starter Hono apps and provide CLI development and production Node launchers. Existing starters require manual migration. Release preparation must update the creator Runtime compatibility pin with this release.
+
+### Patch Changes
+
+- Update the tested Harness, Runtime, and Studio compatibility combination.
+
 ## 0.4.0-beta
 
 ### Minor Changes
