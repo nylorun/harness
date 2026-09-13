@@ -14,9 +14,9 @@ npm run dev
 
 Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 3000. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup.
 
-Model selection lives in `.env/model.json`, credentials in `.env/auth.json`. If upgrading a checkout with a flat `.env` file, move it aside, create the `.env/` directory, and relocate the original file to `.env/integrations.env` without replacing its contents. Run `npm run configure` to select a pi-ai provider or custom OpenAI-compatible endpoint. Legacy `NYLO_*` chat settings are not the new provider configuration.
+Model selection and API keys use `.env`: set `MODEL_PROVIDER`, `MODEL`, `MODEL_PROVIDER_API_KEY`, and (for custom endpoints) `MODEL_PROVIDER_BASE_URL`, or run `npm run configure`. Existing `.env/` directories require [manual migration](../runtime/README.md#upgrading-an-existing-starter); local state is never moved automatically.
 
-Optional integration variables are loaded from `.env/integrations.env`. Interior Design uses `OPENAI_API_KEY` and optional `OPENAI_IMAGE_MODEL` independently of the chat provider. Its selected chat model must support images. Codex continues using its own authentication. Never commit credentials.
+Optional integration variables are loaded from `.env`. Interior Design uses `OPENAI_API_KEY` and optional `OPENAI_IMAGE_MODEL` independently of the chat provider. Its selected chat model must support images. Codex continues using its own authentication. Never commit credentials.
 
 ## Generated shell and authored examples
 

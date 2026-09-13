@@ -70,8 +70,13 @@ async function port() {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return address.port;
 }
-function run(root: string, args: string[], env: NodeJS.ProcessEnv = {}) {
-  const child = spawn(process.execPath, [cli, "dev", ...args], {
+function run(
+  root: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = {},
+  command = "dev"
+) {
+  const child = spawn(process.execPath, [cli, command, ...args], {
     cwd: root,
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
@@ -111,7 +116,11 @@ it("runs local tsx with development enabled, waits for readiness, and closes bot
       open: false,
     });
     expect(JSON.parse(await readFile(join(root, "app.json"), "utf8"))).toEqual({
-      args: ["watch", "src/index.ts"],
+      args: [
+        "watch",
+        fileURLToPath(new URL("../dist/dev-entry.js", import.meta.url)),
+        "src/index.ts",
+      ],
       dev: "1",
     });
   });
@@ -178,3 +187,44 @@ it("times out an unready application and shuts it down", async () => {
   expect(await task.closed).toBe(1);
   expect(task.output()).toContain("within 20 seconds");
 }, 25_000);
+
+it.each([undefined, "custom.js"])(
+  "starts an exported app with .env loaded before import (%s)",
+  async (entry) => {
+    const root = await fixture(false, false);
+    const appPort = await port();
+    await mkdir(join(root, "dist/src"), { recursive: true });
+    await writeFile(
+      join(root, entry ?? "dist/src/index.js"),
+      `
+const model = process.env.MODEL;
+export default { fetch() { return Response.json({ model, development: process.env.NYLORUN_DEV ?? null }); } };
+`
+    );
+    await writeFile(
+      join(root, ".env"),
+      `PORT=${appPort}\nMODEL=dotenv-model\nNYLORUN_DEV=1\n`
+    );
+    const task = run(
+      root,
+      entry ? [entry] : [],
+      { PORT: String(appPort), MODEL: "host-model" },
+      "start"
+    );
+    await wait(async () => {
+      expect(await (await fetch(`http://127.0.0.1:${appPort}`)).json()).toEqual(
+        { model: "host-model", development: null }
+      );
+    });
+    task.child.kill("SIGTERM");
+    expect(await task.closed).toBe(0);
+  }
+);
+
+it("reports an invalid application export without opening a socket", async () => {
+  const root = await fixture(false, false);
+  await writeFile(join(root, "invalid.js"), "export default {};");
+  const task = run(root, ["invalid.js"], {}, "start");
+  expect(await task.closed).toBe(1);
+  expect(task.output()).toContain("export default app");
+});

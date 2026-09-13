@@ -25,3 +25,13 @@ it("reads legacy selection only when the new file is absent", async () => {
     expect(() => modelSelection(root)).toThrow("Run nylorun configure");
   }
 });
+
+it("reads legacy config beside a regular .env file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "nylorun-settings-"));
+  roots.push(root);
+  await mkdir(join(root, "config"));
+  await writeFile(join(root, ".env"), "INTEGRATION=value\n");
+  const legacy = { provider: "old", model: "old" };
+  await writeFile(join(root, "config/model.json"), JSON.stringify(legacy));
+  expect(modelSelection(root)).toEqual(legacy);
+});

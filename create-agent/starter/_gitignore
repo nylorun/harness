@@ -1,9 +1,9 @@
 node_modules/
 dist/
 .data/
-.env/*
-!.env/.gitignore
-!.env/README.md
+.env
+.env.local
+.nylorun/
 
 # Legacy local settings remain private until migrated.
 config/model.json

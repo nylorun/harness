@@ -76,7 +76,12 @@ export async function develop(args: readonly string[]): Promise<number> {
     );
   };
   try {
-    launch([tsx, "watch", "src/index.ts"]);
+    launch([
+      tsx,
+      "watch",
+      fileURLToPath(new URL("./dev-entry.js", import.meta.url)),
+      "src/index.ts",
+    ]);
     if (!args.includes("--no-studio")) {
       const url = `http://127.0.0.1:${port}/agents/v1/agents`;
       const deadline = Date.now() + 20_000;

@@ -35,6 +35,9 @@ const files = JSON.parse(output)[0].files.map((entry) => entry.path);
 for (const path of [
   "dist/cli.js",
   "dist/dev.js",
+  "dist/launcher.js",
+  "dist/dev-entry.js",
+  "dist/environment.js",
   "dist/index.js",
   "dist/index.d.ts",
   "README.md",

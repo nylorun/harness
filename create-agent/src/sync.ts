@@ -101,6 +101,10 @@ export async function synchronize(
       !managed(path) ||
       path.startsWith("test/") ||
       (path.startsWith("scripts/") && path !== "scripts/dev.mjs") ||
+      path === ".env" ||
+      path === ".env.local" ||
+      path === ".nylorun" ||
+      path.startsWith(".nylorun/") ||
       path.startsWith(".data/") ||
       path.startsWith("node_modules/") ||
       (path.startsWith(".env/") &&

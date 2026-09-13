@@ -1,3 +1,4 @@
+import { parseEnv } from "node:util";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -9,11 +10,11 @@ const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
 });
 async function run(
-  answer: (text: string, child: ReturnType<typeof spawn>) => void,
+  answer: (text: string, child: ReturnType<typeof spawn>) => void
 ) {
   const root = await mkdtemp(join(tmpdir(), "configure-cli-"));
   roots.push(root);
@@ -22,7 +23,7 @@ async function run(
   const child = spawn(process.execPath, [cli, "configure"], {
     cwd: root,
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, NYLO_CUSTOM_API_KEY: "" },
+    env: { ...process.env, MODEL_PROVIDER_API_KEY: "" },
   });
   let text = "";
   child.stdout!.on("data", (data) => {
@@ -61,12 +62,11 @@ it("configures a custom provider using scripted stdin and no live model calls", 
   });
   expect(result.code, result.text).toBe(0);
   expect(
-    JSON.parse(await readFile(join(result.root, ".env/model.json"), "utf8"))
-      .model,
+    parseEnv(await readFile(join(result.root, ".env"), "utf8")).MODEL
   ).toBe("fixture");
   expect(
-    JSON.parse(await readFile(join(result.root, ".env/auth.json"), "utf8"))
-      .custom.key,
+    parseEnv(await readFile(join(result.root, ".env"), "utf8"))
+      .MODEL_PROVIDER_API_KEY
   ).toBe("fixture-key");
 });
 
@@ -82,8 +82,8 @@ it.each(["SIGINT", "SIGTERM", "EOF"] as const)(
       }
     });
     expect(result.code, result.text).toBe(
-      signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1,
+      signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1
     );
     expect(result.text).not.toContain("Provider configuration saved.");
-  },
+  }
 );

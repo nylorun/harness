@@ -10,7 +10,8 @@ export class ProjectCredentialStore implements CredentialStore {
   #chain = Promise.resolve();
 
   constructor(
-    private readonly file = join(process.cwd(), ".env", "auth.json"),
+    private readonly file = join(process.cwd(), ".nylorun", "auth.json"),
+    private readonly legacyFile?: string
   ) {}
 
   async read(providerId: string): Promise<Credential | undefined> {
@@ -19,13 +20,13 @@ export class ProjectCredentialStore implements CredentialStore {
 
   async list(): Promise<readonly CredentialInfo[]> {
     return Object.entries(await this.#all()).map(
-      ([providerId, credential]) => ({ providerId, type: credential.type }),
+      ([providerId, credential]) => ({ providerId, type: credential.type })
     );
   }
 
   async modify(
     providerId: string,
-    fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+    fn: (current: Credential | undefined) => Promise<Credential | undefined>
   ): Promise<Credential | undefined> {
     let result: Credential | undefined;
     await this.#serialized(async () => {
@@ -72,7 +73,15 @@ export class ProjectCredentialStore implements CredentialStore {
         Credential
       >;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+      if (
+        ["ENOENT", "ENOTDIR"].includes(
+          (error as NodeJS.ErrnoException).code ?? ""
+        )
+      ) {
+        if (this.legacyFile)
+          return new ProjectCredentialStore(this.legacyFile).#all();
+        return {};
+      }
       throw error;
     }
   }

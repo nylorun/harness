@@ -126,7 +126,7 @@ describe("OpenAI image integrations", () => {
       tools: [],
     };
     try {
-      vi.stubEnv("NYLO_CUSTOM_API_KEY", "test-provider-key");
+      vi.stubEnv("MODEL_PROVIDER_API_KEY", "test-provider-key");
       const adapter = piModel({
         root,
         media,

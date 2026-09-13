@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
-import { loadEnvFile } from "node:process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
@@ -9,10 +7,12 @@ import {
   configureProvider,
 } from "./model/configure.js";
 
+import { loadProjectEnvironment } from "./environment.js";
 import { develop } from "./dev.js";
 
-const usage = `nylorun <configure|dev|studio>
+const usage = `nylorun <configure|dev|start|studio>
   dev [--no-studio] [--no-open]
+  start [entry]
   configure
   studio --agent-url <http(s)-url> [--port <n>] [--no-open]`;
 
@@ -49,6 +49,12 @@ async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === "--help" || command === "-h")
     return void console.log(usage);
+  if (["configure", "dev", "start"].includes(command)) loadProjectEnvironment();
+  if (command === "start") {
+    if (args.length > 1 || args[0]?.startsWith("--")) throw new Error(usage);
+    await (await import("./launcher.js")).start(args[0]);
+    return;
+  }
   if (command === "dev") {
     process.exitCode = await develop(args);
     return;
@@ -60,8 +66,6 @@ async function main() {
       controller.abort(new ConfigurationCancelled(signal));
     process.once("SIGINT", () => cancel("SIGINT"));
     process.once("SIGTERM", () => cancel("SIGTERM"));
-    const integrations = join(process.cwd(), ".env", "integrations.env");
-    if (existsSync(integrations)) loadEnvFile(integrations);
     await configureProvider({ signal: controller.signal });
     return;
   }

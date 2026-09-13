@@ -21,14 +21,15 @@ Build before omitting development dependencies. Keep these in the deployment:
 |---|---|
 | `dist/` | Built Hono app, agent graph, and application assets |
 | `package.json`, `package-lock.json` | Reproducible production dependencies |
-| `.env/model.json` | Selected provider/model |
-| Private `.env/` configuration | Provider credentials and integration settings |
+| Provider environment variables | Model selection, API keys, and integration settings |
 | Persistent `.data/` volume, when configured | Session history and media |
 
 Provision credentials through the hosting environment's secret facilities;
-never bake them into source control or a public image. Current Runtime reads
-provider credentials from `.env/auth.json` and optional integration variables
-from `.env/integrations.env`, relative to the application working directory.
+never bake them into source control or a public image. Set `MODEL_PROVIDER`,
+`MODEL`, and `MODEL_PROVIDER_API_KEY`; custom OpenAI-compatible providers also
+require `MODEL_PROVIDER_BASE_URL`. Provider-native API-key variables remain
+supported. `nylorun start` optionally loads a local `.env` file without overriding
+process variables. OAuth state, when used, lives in `.nylorun/auth.json`.
 
 Studio is a development dependency and is attached separately with `npm run studio`.
 External integrations may require additional runtimes, executables, or network
@@ -37,7 +38,7 @@ resolve from the built application.
 
 ## Hosting requirements and current limits
 
-- The generated Node entrypoint listens on **all interfaces, port 3000** by
+- The CLI Node launcher listens on **all interfaces, port 3000** by
   default. Your Hono application owns public binds, CORS, trusted-host handling,
   reverse-proxy policy, authentication, and authorization; set `PORT`
   deliberately for deployments. The template does not set `HOST`.
@@ -56,3 +57,5 @@ resolve from the built application.
 
 Choose the hosting target before adding deployment automation, public binding,
 health/readiness integration, or replica coordination.
+
+The starter exports its Hono app without opening a socket on import. This convention does not imply verified serverless session persistence or Workers compatibility; provider validation is separate work.

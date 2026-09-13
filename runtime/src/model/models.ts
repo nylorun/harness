@@ -1,5 +1,7 @@
 import {
   createProvider,
+  defaultProviderAuthContext,
+  type CredentialStore,
   envApiKeyAuth,
   type Model,
 } from "@earendil-works/pi-ai";
@@ -8,7 +10,6 @@ import {
   streamSimple,
 } from "@earendil-works/pi-ai/api/openai-completions";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import type { ProjectCredentialStore } from "./auth-store.js";
 
 export type Selection = Readonly<{
   provider: string;
@@ -16,11 +17,30 @@ export type Selection = Readonly<{
   custom?: Readonly<{ baseUrl: string }>;
 }>;
 
-export function modelsFor(
-  selection: Selection,
-  credentials: ProjectCredentialStore,
-) {
-  const models = builtinModels({ credentials });
+export function modelsFor(selection: Selection, credentials: CredentialStore) {
+  const environmentFirst: CredentialStore = {
+    async read(providerId, options) {
+      const explicit = process.env.MODEL_PROVIDER_API_KEY;
+      if (
+        explicit &&
+        (!selection.provider || selection.provider === providerId)
+      )
+        return { type: "api_key", key: explicit };
+      const provider = models
+        .getProviders()
+        .find((item) => item.id === providerId);
+      const ambient = await provider?.auth.apiKey?.resolve({
+        ctx: defaultProviderAuthContext(),
+        signal: options?.signal ?? new AbortController().signal,
+      });
+      if (ambient) return undefined;
+      return credentials.read(providerId, options);
+    },
+    list: (options) => credentials.list(options),
+    modify: (id, fn, options) => credentials.modify(id, fn, options),
+    delete: (id, options) => credentials.delete(id, options),
+  };
+  const models = builtinModels({ credentials: environmentFirst });
   if (!selection.custom) return models;
   const model: Model<"openai-completions"> = {
     id: selection.model,
@@ -40,11 +60,11 @@ export function modelsFor(
       name: "Custom OpenAI-compatible",
       baseUrl: selection.custom.baseUrl,
       auth: {
-        apiKey: envApiKeyAuth("Custom API key", ["NYLO_CUSTOM_API_KEY"]),
+        apiKey: envApiKeyAuth("Custom API key", ["MODEL_PROVIDER_API_KEY"]),
       },
       models: [model],
       api: { stream, streamSimple },
-    }),
+    })
   );
   return models;
 }
