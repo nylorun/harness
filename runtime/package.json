@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/runtime",
-  "version": "0.4.0-beta",
+  "version": "0.5.0-beta",
   "description": "Portable agent runtime, Hono protocol router, model providers, and the Nylorun CLI.",
   "type": "module",
   "license": "Apache-2.0",
@@ -46,7 +46,7 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.85.1",
     "@hono/node-server": "^2.1.1",
-    "@nylorun/harness": "0.12.0-beta"
+    "@nylorun/harness": "0.13.0-beta"
   },
   "peerDependencies": {
     "hono": "^4.13.7"

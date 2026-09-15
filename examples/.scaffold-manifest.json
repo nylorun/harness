@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "creatorVersion": "0.5.0-beta",
+  "creatorVersion": "0.6.0-beta",
   "compatibility": {
-    "harness": "0.12.0-beta",
-    "studio": "0.4.2-beta",
-    "runtime": "0.4.0-beta"
+    "harness": "0.13.0-beta",
+    "studio": "0.5.0-beta",
+    "runtime": "0.5.0-beta"
   },
   "templateHash": "0d3723fb0827d848b32e7238ba22dd18656966ad20d3481439f7b3a4de98f895",
   "files": {
