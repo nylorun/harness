@@ -294,3 +294,33 @@ it("rejects obsolete or malformed run controls before effects", async () => {
   }
   expect(onModelCall).not.toHaveBeenCalled();
 });
+
+it("cancels a saved pause without accepting or dispatching its pending actions", async () => {
+  const execute = vi.fn(async () => ({ kind: "completed" as const, output: "effect" }));
+  const agent = Agent({ id: "a", name: "A" })
+    .use({
+      id: "c",
+      tools: [{ name: "t", inputSchema: z.object({}), execute }],
+      middleware: async (_, next) => {
+        const response = await next();
+        for (const call of response.toolCalls())
+          response.requireInteraction(call.id, { kind: "approval", prompt: "Proceed?" });
+        return response;
+      },
+    })
+    .build();
+  const first = await agent.run({ input: "go", onModelCall: async () => candidate("t") });
+  expect(first.status).toBe("paused");
+  const model = vi.fn(async () => "unexpected");
+  const result = await agent.run({
+    state: roundtrip(first.state),
+    input: { kind: "continue" },
+    signal: AbortSignal.abort(),
+    onModelCall: model,
+  });
+  expect(result.status).toBe("cancelled");
+  expect(result.state.plan).toBeUndefined();
+  expect(JSON.stringify(result.state)).toContain("tool.cancelled");
+  expect(execute).not.toHaveBeenCalled();
+  expect(model).not.toHaveBeenCalled();
+});

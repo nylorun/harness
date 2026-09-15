@@ -234,7 +234,10 @@ it.each(["cancel", "close"] as const)(
       action === "cancel" ? "cancelled" : "closed",
     );
     await started;
-    const stopped = action === "cancel" ? host.cancel("a", "s") : host.close();
+    const stopped =
+      action === "cancel"
+        ? host.cancel(Agent({ id: "a", name: "A" }).build(), "s")
+        : host.close();
     release();
     await Promise.all([rejected, stopped]);
     expect(put).not.toHaveBeenCalled();
@@ -280,4 +283,106 @@ it("rejects another process and stops after local ownership changes", async () =
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+it("interrupts a saved pause through a fresh host before accepting a replacement", async () => {
+  const { z } = await import("zod");
+  const execute = vi.fn(async () => ({
+    kind: "deferred" as const,
+    token: "original job",
+  }));
+  const agent = Agent({ id: "a", name: "A" })
+    .use({
+      id: "tools",
+      tools: [{ name: "job", inputSchema: z.object({}), execute }],
+    })
+    .build();
+  const store = memorySessions();
+  const first = await new SessionHost(store).submit(agent, "s", "start job", {
+    onModelCall: async () => ({
+      output: [{ type: "tool-call", id: "job", name: "job", args: {} }],
+    }),
+  });
+  expect(first.status).toBe("paused");
+  const host = new SessionHost(store);
+  const observed: string[] = [];
+  host.subscribe("a", "s", (event) => {
+    observed.push(event.type);
+  });
+  const replacement = await host.interrupt(agent, "s", "new question", {
+    onModelCall: async (call) => {
+      expect(JSON.stringify(call)).not.toContain("original job");
+      return "replacement";
+    },
+  });
+  expect(replacement).toMatchObject({
+    status: "completed",
+    output: "replacement",
+  });
+  expect(replacement.state.turnCount).toBe(2);
+  expect(JSON.stringify(replacement.state)).toContain("original job");
+  expect(execute).toHaveBeenCalledOnce();
+  expect(observed.indexOf("cancelled")).toBeLessThan(
+    observed.indexOf("session.run.started"),
+  );
+  expect((await store.get("a", "s"))?.status).toBe("completed");
+  await host.close();
+});
+
+it("preserves a pause and monotonic event history after a rejected continuation", async () => {
+  const { z } = await import("zod");
+  const agent = Agent({ id: "a", name: "A" })
+    .use({
+      id: "tools",
+      tools: [
+        {
+          name: "job",
+          inputSchema: z.object({}),
+          execute: async () => ({ kind: "deferred", token: "job" }),
+        },
+      ],
+    })
+    .build();
+  const store = memorySessions();
+  const host = new SessionHost(store);
+  const observed: number[] = [];
+  host.subscribe("a", "s", (event) => {
+    observed.push(event.seq);
+  });
+  const first = await host.submit(agent, "s", "go", {
+    onModelCall: async () => ({
+      output: [{ type: "tool-call", id: "c", name: "job", args: {} }],
+    }),
+  });
+  if (first.status !== "paused") throw new Error("Expected pause");
+  const model = vi.fn(async () => "done");
+  await expect(
+    host.submit(
+      agent,
+      "s",
+      {
+        kind: "settle",
+        invocationId: "wrong",
+        outcome: { kind: "completed", output: "bad" },
+      },
+      { onModelCall: model },
+    ),
+  ).rejects.toThrow();
+  expect((await store.get("a", "s"))?.state).toEqual(first.state);
+  expect(model).not.toHaveBeenCalled();
+  await host.submit(
+    agent,
+    "s",
+    {
+      kind: "settle",
+      invocationId: first.pending[0]!.invocationId,
+      outcome: { kind: "completed", output: "valid" },
+    },
+    { onModelCall: model },
+  );
+  expect(observed).toEqual([...new Set(observed)].sort((a, b) => a - b));
+  expect((await store.get("a", "s"))?.events.map((event) => event.seq)).toEqual(
+    observed,
+  );
+  await host.close();
 });

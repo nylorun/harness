@@ -92,6 +92,7 @@ const schema = z
     turnCount: z.number().int().nonnegative(),
     transcript: z.array(json),
     status: z.enum(["ready", "active", "completed", "paused", "cancelled", "failed"]),
+    cancelledCalls: z.array(call).optional(),
     plan: z
       .object({
         turnId: id,

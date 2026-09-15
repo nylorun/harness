@@ -250,7 +250,7 @@ export class Runtime {
       const interaction = payload.interaction;
       let input: ExecutionInput;
       if (payload.action === "cancel") {
-        await this.host.cancel(agent.id, sessionId);
+        await this.host.cancel(agent, sessionId);
         return context.json({ session_id: sessionId, state: "cancelled" });
       }
       if (payload.action === "interrupt") {

@@ -64,6 +64,8 @@ export interface ExecutionState {
   readonly transcript: readonly TranscriptEntry[];
   readonly status: "ready" | "active" | "completed" | "paused" | "cancelled" | "failed";
   readonly plan?: ExecutionPlan;
+  /** Abandoned actions retained for reconciliation, never automatically dispatched. */
+  readonly cancelledCalls?: readonly SavedToolCall[];
 }
 
 export type ExecutionEvent = (

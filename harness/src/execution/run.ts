@@ -80,7 +80,7 @@ export async function execute(
       );
     definitions.set(call.invocationId, definition);
   }
-  if (state.status === "paused") {
+  if (state.status === "paused" && !(input.kind === "continue" && options.signal?.aborted)) {
     state = applyResume(state, input, definitions);
     if (input.kind === "approve" || input.kind === "respond")
       state = {
@@ -176,6 +176,10 @@ export async function execute(
       const { plan: _, ...rest } = state;
       state = {
         ...rest,
+        cancelledCalls: [
+          ...(rest.cancelledCalls ?? []),
+          ...plan.calls.filter((call) => !call.result),
+        ],
         transcript: [
           ...state.transcript,
           {

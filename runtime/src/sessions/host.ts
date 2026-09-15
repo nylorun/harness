@@ -251,16 +251,23 @@ export class SessionHost {
               "execution.incompatible",
             ].includes(error.code)
           ) {
-            // Harness rejects validation failures before execution effects; preserve the prior pause.
-            if (stored) await this.store.put(agent.id, sessionId, stored);
-            else {
-              const { active: _, ...rest } = document;
-              await this.store.put(agent.id, sessionId, {
-                ...rest,
-                status: "failed",
-                events: [...events],
-              });
-            }
+            // Keep the prior continuation, but commit the rejected attempt so event
+            // sequence numbers already observed by subscribers are never reused.
+            const rejected = add(
+              "error",
+              {
+                message: error instanceof Error ? error.message : String(error),
+              },
+              false,
+            );
+            const { active: _, ...rest } = document;
+            await this.store.put(agent.id, sessionId, {
+              ...(stored ?? { ...rest, status: "failed" as const }),
+              updatedAt: Date.now(),
+              events: [...events],
+            });
+            publishEvent(rejected);
+            throw error;
           }
           // A failed commit must leave the durable active marker intact. Never replay it.
           add("error", {
@@ -281,11 +288,56 @@ export class SessionHost {
     return work;
   }
 
-  async cancel(agentId: string, sessionId: string): Promise<void> {
-    const key = this.key(agentId, sessionId);
+  async cancel(agent: BuiltAgent<any, any>, sessionId: string): Promise<void> {
+    const key = this.key(agent.id, sessionId);
     this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
     this.active.get(key)?.abort(new Error("Run cancelled"));
-    await this.queues.get(key)?.catch(() => {});
+    const prior = this.queues.get(key) ?? Promise.resolve();
+    const work = prior
+      .catch(() => {})
+      .then(async () => {
+        const stored = await this.store.get(agent.id, sessionId);
+        if (stored?.active || stored?.status === "interrupted")
+          throw new Error(
+            "This session was interrupted; reconcile its external effects before cancellation.",
+          );
+        if (stored?.state?.status !== "paused") return;
+        const result = await agent.run({
+          state: stored.state,
+          input: { kind: "continue" },
+          signal: AbortSignal.abort(new Error("Paused execution cancelled")),
+          onModelCall: async () => {
+            throw new Error("Cancelled execution cannot call a model");
+          },
+        });
+        const event: CanonicalEvent = {
+          session: sessionId,
+          seq: (stored.events.at(-1)?.seq ?? 0) + 1,
+          ts: new Date().toISOString(),
+          type: "cancelled",
+          payload: { executionId: result.state.executionId },
+        };
+        await this.store.put(agent.id, sessionId, {
+          ...stored,
+          state: result.state,
+          status: "cancelled",
+          updatedAt: Date.now(),
+          events: [...stored.events, event],
+        });
+        for (const listener of this.listeners.get(key) ?? []) {
+          try {
+            listener(event);
+          } catch {
+            /* Observation cannot change committed cancellation. */
+          }
+        }
+      });
+    this.queues.set(key, work);
+    try {
+      await work;
+    } finally {
+      if (this.queues.get(key) === work) this.queues.delete(key);
+    }
   }
 
   async interrupt(
@@ -294,7 +346,7 @@ export class SessionHost {
     input: ExecutionInput,
     options: SubmitOptions,
   ): Promise<RunResult<any>> {
-    await this.cancel(agent.id, sessionId);
+    await this.cancel(agent, sessionId);
     return this.submit(agent, sessionId, input, options);
   }
 
