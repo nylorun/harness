@@ -62,7 +62,11 @@ export type AgentManifest = Readonly<{
   protocolVersion: 1 | 2;
   id: string;
   name: string;
-  manifest?: { id: string; name: string; middleware?: readonly MiddlewareManifest[] };
+  manifest?: {
+    id: string;
+    name: string;
+    middleware?: readonly MiddlewareManifest[];
+  };
   harness?: {
     manifest: {
       id: string;
@@ -236,7 +240,10 @@ function useConnection(): Connection {
           setConnection((previous) => ({
             status: "Running",
             url: config.agentServerUrl,
-            setup: discovery.setup?.state === "required" ? discovery.setup : undefined,
+            setup:
+              discovery.setup?.state === "required"
+                ? discovery.setup
+                : undefined,
             agents,
             sessionsByAgent: previous.sessionsByAgent,
           }));
@@ -394,7 +401,12 @@ function CompactModel({
 function Chat({
   agent,
   sessionId,
-}: Readonly<{ agent: AgentManifest; sessionId: string }>) {
+  onEvent,
+}: Readonly<{
+  agent: AgentManifest;
+  sessionId: string;
+  onEvent: (event: CanonicalEvent) => void;
+}>) {
   const [messages, setMessages] = useState<readonly ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [attachment, setAttachment] = useState<ImageAttachment | undefined>();
@@ -402,6 +414,11 @@ function Chat({
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const runnerRef = useRef<HttpAgent | undefined>(undefined);
+  const [preview, setPreview] = useState<
+    { invocationId: string; text: string; incomplete: boolean } | undefined
+  >();
+  useEffect(() => () => runnerRef.current?.abortRun(), [sessionId]);
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let cancelled = false;
@@ -412,10 +429,10 @@ function Chat({
           encodeURIComponent(sessionId),
         { cache: "no-store" },
       );
-      if (history.ok && !cancelled)
-        setMessages(
-          ((await history.json()) as { messages: ChatMessage[] }).messages,
-        );
+      if (history.ok) {
+        const data = (await history.json()) as { messages: ChatMessage[] };
+        if (!cancelled && !runnerRef.current) setMessages(data.messages);
+      }
       const summary = await fetch(
         agent.endpoints.sessions.replace(/\/$/u, "") +
           "/" +
@@ -464,6 +481,7 @@ function Chat({
     setInput("");
     setAttachment(undefined);
     setSending(true);
+    setPreview(undefined);
     setError(undefined);
     setMessages((current) => [
       ...current,
@@ -489,6 +507,7 @@ function Chat({
         url: agent.endpoints.agUi,
         threadId: sessionId,
       });
+      runnerRef.current = runner;
       runner.addMessage({
         id: crypto.randomUUID(),
         role: "user",
@@ -497,29 +516,62 @@ function Chat({
       await runner.runAgent(
         { runId: crypto.randomUUID() },
         {
+          onCustomEvent: ({ event }) => {
+            const value = event.value as
+              { invocationId?: string; text?: string } | undefined;
+            if (
+              event.name === "nylorun.execution" &&
+              event.value?.session === sessionId &&
+              typeof event.value?.seq === "number"
+            )
+              onEvent(event.value);
+            if (
+              event.name === "nylorun.preview" &&
+              typeof value?.invocationId === "string" &&
+              typeof value.text === "string"
+            ) {
+              const { invocationId, text } = value;
+              setPreview((current) => ({
+                invocationId,
+                text:
+                  current?.invocationId === invocationId
+                    ? current.text + text
+                    : text,
+                incomplete: false,
+              }));
+            } else if (event.name === "nylorun.preview.incomplete") {
+              setPreview((current) =>
+                current ? { ...current, incomplete: true } : undefined,
+              );
+            } else if (event.name === "nylorun.preview.settled")
+              setPreview(undefined);
+          },
           onRunErrorEvent: ({ event }) => {
+            setPreview(undefined);
             setError(event.message);
           },
-          onNewMessage: ({ message }) => {
-            const value = message as unknown as {
-              id?: string;
-              role?: string;
-              content?: unknown;
-            };
-            setMessages((current) => [
-              ...current,
-              {
-                id: value.id ?? crypto.randomUUID(),
-                role: value.role ?? "assistant",
-                content: chatText(value.content),
-              },
-            ]);
+          onTextMessageContentEvent: ({ event, textMessageBuffer }) => {
+            setPreview(undefined);
+            setMessages((current) => {
+              const message = {
+                id: event.messageId,
+                role: "assistant",
+                content: chatText(textMessageBuffer),
+              };
+              return current.some((item) => item.id === event.messageId)
+                ? current.map((item) =>
+                    item.id === event.messageId ? message : item,
+                  )
+                : [...current, message];
+            });
           },
         },
       );
     } catch (cause) {
       setError(requestError(cause, "Agent request failed."));
     } finally {
+      runnerRef.current = undefined;
+      setPreview(undefined);
       setSending(false);
     }
   };
@@ -600,6 +652,26 @@ function Chat({
                 )}
               </article>
             ))
+          )}
+          {preview !== undefined && (
+            <article
+              className="rounded-lg border border-dashed p-4 text-sm"
+              aria-label="Provisional response"
+            >
+              <p className="mb-1 text-xs text-muted-foreground">
+                Draft response{preview.incomplete ? " · preview paused" : ""}
+              </p>
+              <p className="whitespace-pre-wrap">{preview.text}</p>
+            </article>
+          )}
+          {sending && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => runnerRef.current?.abortRun()}
+            >
+              Stop
+            </Button>
           )}
           {pending !== undefined && (
             <section className="rounded-lg border border-amber-400/50 bg-amber-50 p-4 text-sm">
@@ -833,13 +905,14 @@ function EventTable({
               <TableHead className="w-20">Time</TableHead>
               <TableHead className="w-40">Type</TableHead>
               <TableHead>Summary</TableHead>
+              <TableHead className="w-24">Delivery</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {visibleEvents.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={4}
+                  colSpan={5}
                   className="h-28 text-center text-muted-foreground"
                 >
                   {events.length === 0
@@ -868,6 +941,9 @@ function EventTable({
                   </TableCell>
                   <TableCell className="max-w-0 truncate text-xs text-muted-foreground">
                     {eventSummary(event)}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {event.committed ? "Committed" : "Observed"}
                   </TableCell>
                 </TableRow>
               ))
@@ -945,6 +1021,21 @@ function Digest({ label, value }: Readonly<{ label: string; value: string }>) {
   );
 }
 
+function mergeEvents(
+  current: readonly CanonicalEvent[],
+  incoming: readonly CanonicalEvent[],
+): readonly CanonicalEvent[] {
+  const bySequence = new Map(current.map((event) => [event.seq, event]));
+  for (const event of incoming) {
+    const prior = bySequence.get(event.seq);
+    bySequence.set(event.seq, {
+      ...event,
+      committed: event.committed || prior?.committed,
+    });
+  }
+  return [...bySequence.values()].sort((a, b) => b.seq - a.seq);
+}
+
 function SessionWorkspace({
   agent,
   sessionId,
@@ -966,9 +1057,13 @@ function SessionWorkspace({
       const response = await fetch(url, { cache: "no-store" });
       if (response.ok && !cancelled) {
         const payload = (await response.json()) as { events: CanonicalEvent[] };
-        setEvents(
-          [...payload.events].sort((left, right) => right.seq - left.seq),
-        );
+        if (!cancelled)
+          setEvents((current) =>
+            mergeEvents(
+              current,
+              payload.events.map((event) => ({ ...event, committed: true })),
+            ),
+          );
       }
     };
     void load();
@@ -996,12 +1091,19 @@ function SessionWorkspace({
     activeTab === "events" && detailsOpen && selectedEvent !== undefined;
   return (
     <ResizablePanelGroup
-      key={showDetails ? "details" : "workspace"}
       orientation="horizontal"
       className="h-full min-h-0 overflow-hidden"
     >
       <ResizablePanel defaultSize={showDetails ? 24 : 32} minSize={20}>
-        <Chat agent={agent} sessionId={sessionId} />
+        <Chat
+          agent={agent}
+          sessionId={sessionId}
+          onEvent={(event) =>
+            setEvents((current) =>
+              mergeEvents(current, [{ ...event, committed: false }]),
+            )
+          }
+        />
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel defaultSize={showDetails ? 40 : 68} minSize={28}>

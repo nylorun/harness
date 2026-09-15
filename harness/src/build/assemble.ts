@@ -12,7 +12,12 @@ const diagnostic = (
 
 export function assembleAgent(
   middleware: readonly BoundMiddleware[],
-  identity: Readonly<{ id: string; name: string }>,
+  identity: Readonly<{
+    id: string;
+    name: string;
+    executionVersion?: string;
+    outputSchema?: import("../types/tool.js").ToolSchemaSource;
+  }>,
 ): BuildResult<BuiltAgent> {
   const diagnostics: BuildDiagnostic[] = [];
 
@@ -42,7 +47,8 @@ export function assembleAgent(
         Object.freeze({
           id: item.id,
           handle: item.handle,
-          ...(item.state === undefined ? {} : { state: item.state }),
+          ...(item.tools === undefined ? {} : { tools: item.tools }),
+          ...(item.toolFamilies === undefined ? {} : { toolFamilies: item.toolFamilies }),
           ...(item.contributions === undefined ? {} : { contributions: item.contributions }),
         }),
       );
@@ -57,6 +63,6 @@ export function assembleAgent(
     name: identity.name,
     middleware: frozenMiddleware,
   });
-  const agent = bindAgent(frozenMiddleware, manifest);
+  const agent = bindAgent(frozenMiddleware, manifest, identity);
   return Object.freeze({ ok: true, agent, manifest });
 }

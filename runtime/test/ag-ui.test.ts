@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { agUiEvents } from "../src/server/ag-ui.js";
-import type { CanonicalEvent } from "../src/adapters/journal.js";
+import type { CanonicalEvent } from "../src/sessions/store.js";
 
 it.each([
   {

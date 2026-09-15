@@ -158,3 +158,11 @@ test("invalid inputs and empty release intent fail before applying a plan", () =
   );
   assert.throws(() => planVersions(stable, pins, [], "latest"), /No pending/);
 });
+
+test("a Harness release also advances Runtime and pins the canonical contracts together", () => {
+  const { plan, changesets } = planVersions(versions, pins, [intent("harness", "minor")], "beta");
+  assert.equal(plan.packages.harness, "0.11.0-beta");
+  assert.equal(plan.packages.runtime, "0.1.1-beta");
+  assert.equal(plan.compatibility.harness, plan.packages.harness);
+  assert.ok(changesets.some(item => item.id === "release-runtime-harness"));
+});

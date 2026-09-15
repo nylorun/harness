@@ -1,62 +1,47 @@
 import type { AgentManifest } from "../types/manifest.js";
 import type { BoundMiddleware } from "../types/middleware.js";
 import type { ModelAdapter } from "../types/model.js";
-import type { Session, SessionRunOptions } from "../types/session.js";
-import { LiveSession } from "../session/session.js";
-import { createId } from "../utils/ids.js";
-import { HarnessError } from "../errors.js";
+import type { RunOptions, RunResult } from "../types/execution.js";
+import type { ToolSchemaSource } from "../types/tool.js";
+import { bindOutputContract, type TurnOutputContract } from "../execution/output-contract.js";
+import { ToolRegistry } from "./registry.js";
+import { execute } from "../execution/run.js";
 
 export interface LoopAgent {
   readonly middleware: readonly BoundMiddleware[];
   readonly invoke: ModelAdapter;
+  readonly registry: ToolRegistry;
 }
 
-let createBoundAgent: (
-  middleware: readonly BoundMiddleware[],
-  manifest: AgentManifest,
-) => BuiltAgent;
-
-export class BuiltAgent {
+export class BuiltAgent<Scope = unknown, Output = string> {
   readonly id: string;
   readonly name: string;
+  readonly executionVersion: string;
+  readonly registry: ToolRegistry;
+  readonly output?: TurnOutputContract;
 
-  private constructor(
+  constructor(
     readonly middleware: readonly BoundMiddleware[],
     readonly manifest: AgentManifest,
+    options: { executionVersion?: string; outputSchema?: ToolSchemaSource } = {},
   ) {
     this.id = manifest.id;
     this.name = manifest.name;
+    this.executionVersion = options.executionVersion ?? "1";
+    this.registry = new ToolRegistry(middleware);
+    this.output =
+      options.outputSchema === undefined ? undefined : bindOutputContract(options.outputSchema);
   }
 
-  static {
-    createBoundAgent = (middleware, manifest) => new BuiltAgent(middleware, manifest);
-  }
-
-  run(options: SessionRunOptions): Session {
-    const seeded = "seed" in options && options.seed !== undefined;
-    if (
-      seeded &&
-      (("id" in options && options.id !== undefined) ||
-        ("userId" in options && options.userId !== undefined) ||
-        ("context" in options && options.context !== undefined))
-    )
-      throw new HarnessError(
-        "session.invalid-seed",
-        "Seeded run options cannot include id, userId, or context outside the seed",
-      );
-    const id =
-      (seeded ? options.seed.id : "id" in options ? options.id : undefined) ?? createId("session");
-    return new LiveSession(
-      id,
-      Object.freeze({ middleware: this.middleware, invoke: options.onModelCall }),
-      options,
-    );
+  run(options: RunOptions<Scope>): Promise<RunResult<Output>> {
+    return execute(this, options) as Promise<RunResult<Output>>;
   }
 }
 
 export function bindAgent(
   middleware: readonly BoundMiddleware[],
   manifest: AgentManifest,
+  options: { executionVersion?: string; outputSchema?: ToolSchemaSource } = {},
 ): BuiltAgent {
-  return createBoundAgent(middleware, manifest);
+  return new BuiltAgent(middleware, manifest, options);
 }

@@ -1,5 +1,5 @@
-import type { ContextItem, DeferredOutcome, JsonObject, JsonValue } from "./shared.js";
-import type { InputEvent, TranscriptEntry } from "./session.js";
+import type { ContextItem, JsonObject, JsonValue } from "./shared.js";
+import type { InputEvent, TranscriptEntry } from "./transcript.js";
 import type { BoundToolDefinition, ToolResult } from "./tool.js";
 
 export interface ModelToolCall {
@@ -113,7 +113,7 @@ export interface ContextSnapshot {
 }
 
 export interface ModelRequest {
-  readonly sessionId: string;
+  readonly executionId: string;
   readonly turnId: string;
   readonly stepId: string;
   readonly model?: ModelDirective;
@@ -178,7 +178,7 @@ export interface ModelCall {
   readonly tools: readonly ModelCallTool[];
   /** Optional portable contract for this turn's terminal JSON result. */
   readonly outputSchema?: JsonObject;
-  readonly sessionId: string;
+  readonly executionId: string;
 }
 
 export interface ModelAdapterContext {
@@ -197,4 +197,4 @@ export interface ModelPreparedCall {
 export type ModelAdapter = (
   call: ModelCall,
   context: ModelAdapterContext,
-) => Promise<ModelCandidate | string | DeferredOutcome>;
+) => Promise<ModelCandidate | string>;

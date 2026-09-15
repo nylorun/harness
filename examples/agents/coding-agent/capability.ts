@@ -41,7 +41,7 @@ export function codexTools(workspaces: Map<string, CodexWorkspace>) {
           try {
             return {
               kind: "completed" as const,
-              output: await workspace(context.sessionId).exec(
+              output: await workspace(((context.scope as { sessionId?: string } | undefined)?.sessionId ?? context.executionId)).exec(
                 task,
                 context.signal,
               ),

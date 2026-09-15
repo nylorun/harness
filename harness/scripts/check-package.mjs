@@ -91,8 +91,13 @@ try {
     if (!files.includes(required)) throw new Error(`Missing tarball file: ${required}`);
   }
   const entry = await import(new URL("../dist/index.js", import.meta.url));
+  for (const removed of ["Session", "SessionRecorder", "SessionRecord", "InputHandle"])
+    if (removed in entry) throw new Error(`Obsolete Harness session export: ${removed}`);
   const adapters = await import(new URL("../dist/model/adapters.js", import.meta.url));
   for (const name of [
+    "defineToolFamily",
+    "createExecutionState",
+    "validateExecutionState",
     "AgentBuilder",
     "AgentBuildError",
     "AgentLifecycleError",

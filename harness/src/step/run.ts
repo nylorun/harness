@@ -5,7 +5,7 @@ import type {
   ObserveModelConfigurationSnapshot,
   ObserveToolSnapshot,
 } from "../types/shared.js";
-import type { ActiveModelExecutionRecord, InputEvent, SessionSnapshot } from "../types/session.js";
+import type { InputEvent, ExecutionSnapshot } from "../types/transcript.js";
 import type { BoundToolDefinition } from "../types/tool.js";
 import type { LoopAgent } from "../build/agent.js";
 import { normalizeCandidate } from "../model/normalize.js";
@@ -20,21 +20,21 @@ import { resolveModelRequest } from "./resolve.js";
 import { sealStep, type SealedStepOutput } from "./seal.js";
 import { ModelConfigurationDraft } from "./model-configuration.js";
 import { createId } from "../utils/ids.js";
-import type { CapabilityStateRegistry } from "../session/capability-state.js";
 
 export interface StepRunResult {
   readonly stepId: string;
-  readonly state: SessionSnapshot;
+  readonly state: ExecutionSnapshot;
   readonly candidate?: ModelCandidate;
   readonly output: SealedStepOutput;
   readonly requestedModelId?: string;
+  readonly modelInvocationId?: string;
 }
 
 export async function runStep(input: {
   agent: LoopAgent;
   observe: ObserveEmit;
-  state: SessionSnapshot;
-  sessionId: string;
+  state: ExecutionSnapshot;
+  executionId: string;
   turnId: string;
   stepId: string;
   turnNumber: number;
@@ -42,39 +42,26 @@ export async function runStep(input: {
   arrivals: readonly InputEvent[];
   toolResults: readonly import("../types/tool.js").ToolResult[];
   signal: AbortSignal;
-  session: Readonly<{
-    readonly userId?: string;
-    readonly context?: import("../types/shared.js").JsonObject;
-  }>;
-  states: CapabilityStateRegistry;
-  output?: import("../session/output-contract.js").TurnOutputContract;
-  recordModelRequested(
-    state: SessionSnapshot,
-    active: ActiveModelExecutionRecord,
-  ): Promise<SessionSnapshot>;
+  scope?: unknown;
+  output?: import("../execution/output-contract.js").TurnOutputContract;
 }): Promise<StepRunResult> {
   let state = input.state;
   let requestedModelId: string | undefined;
+  let modelInvocationId: string | undefined;
   const stepInput = Object.freeze({
-    sessionId: input.sessionId,
+    executionId: input.executionId,
     turnId: input.turnId,
     stepId: input.stepId,
     turnNumber: input.turnNumber,
     stepNumber: input.stepNumber,
-    session: input.session,
+    scope: input.scope,
     arrivals: Object.freeze([...input.arrivals]),
     toolResults: Object.freeze([...input.toolResults]),
     transcript: Object.freeze([...input.state.transcript]),
   });
   const configuration = new ModelConfigurationDraft();
-  const runtimeContext = new ContextDraft(input.session.context);
-  const context = new StepContext(
-    stepInput,
-    input.observe,
-    configuration,
-    runtimeContext,
-    input.states,
-  );
+  const runtimeContext = new ContextDraft();
+  const context = new StepContext(stepInput, input.observe, configuration, runtimeContext);
   input.observe(() => ({
     type: "step.started",
     turnId: input.turnId,
@@ -87,9 +74,12 @@ export async function runStep(input: {
     input.agent.middleware,
     context,
     async () => {
+      input.signal.throwIfAborted();
       if (context.currentTripwire) return context.tripwire(context.currentTripwire);
       try {
-        context.sealConfiguration(configuration.snapshot());
+        const selected = configuration.snapshot();
+        for (const tool of selected.tools) input.agent.registry.reference(tool);
+        context.sealConfiguration(selected);
         context.sealContext(runtimeContext.snapshot());
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -107,16 +97,10 @@ export async function runStep(input: {
       requestedModelId = request.model?.id;
       const call = projectModelCall(request);
       const invocationId = createId("invocation");
-      const active: ActiveModelExecutionRecord = Object.freeze({
-        kind: "model",
-        turnId: input.turnId,
-        stepId: input.stepId,
-        invocationId,
-        call,
-      });
-      state = await input.recordModelRequested(state, active);
+      modelInvocationId = invocationId;
       input.observe(() => ({
         type: "model.requested",
+        invocationId,
         turnId: input.turnId,
         stepId: input.stepId,
         ...(request.model?.id === undefined ? {} : { requestedModelId: request.model.id }),
@@ -147,6 +131,7 @@ export async function runStep(input: {
             const reported = Object.freeze({ adapter: value.adapter, call: copyJson(value.call) });
             input.observe(() => ({
               type: "model.prepared",
+              invocationId,
               turnId: input.turnId,
               stepId: input.stepId,
               ...(request.model?.id === undefined ? {} : { requestedModelId: request.model.id }),
@@ -155,13 +140,6 @@ export async function runStep(input: {
           },
         });
         if (input.signal.aborted) throw input.signal.reason;
-        if (isDeferred(outcome))
-          return context.deferModel(
-            Object.freeze({
-              ...active,
-              ...(outcome.token === undefined ? {} : { token: copyJson(outcome.token) }),
-            }),
-          );
         const minted = context.mintFromModel(normalizeCandidate(outcome));
         const candidate = context.currentCandidate;
         if (!candidate)
@@ -185,26 +163,14 @@ export async function runStep(input: {
     ...(candidate ? { candidate } : {}),
     ...(requestedModelId === undefined ? {} : { requestedModelId }),
     output,
+    ...(modelInvocationId ? { modelInvocationId } : {}),
   });
-}
-
-function isDeferred(
-  value: string | ModelCandidate | import("../types/shared.js").DeferredOutcome,
-): value is import("../types/shared.js").DeferredOutcome {
-  return (
-    typeof value === "object" && value !== null && "kind" in value && value.kind === "deferred"
-  );
 }
 
 function snapshotStepStart(
   input: StepInput,
 ): Extract<ObserveEvent, { type: "step.started" }>["attributes"] {
-  const session = Object.freeze({
-    ...(input.session.userId === undefined ? {} : { userId: input.session.userId }),
-    ...(input.session.context === undefined ? {} : { context: copyJson(input.session.context) }),
-  });
   return Object.freeze({
-    ...(Object.keys(session).length === 0 ? {} : { session }),
     arrivals: copyJson(input.arrivals),
     toolResults: copyJson(input.toolResults),
     transcript: input.transcript,

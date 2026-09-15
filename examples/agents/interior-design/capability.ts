@@ -1,6 +1,6 @@
 import { tool } from "@nylorun/harness";
 import { z } from "zod";
-import type { MediaStore } from "@nylorun/runtime";
+import type { MediaStore } from "@nylorun/runtime/node";
 import type { ImageEditor } from "./image-editor.js";
 
 export function interiorDesign(
@@ -30,7 +30,7 @@ export function interiorDesign(
             };
           const source = await store.latestInput(
             "interior-design",
-            context.sessionId,
+            ((context.scope as { sessionId?: string } | undefined)?.sessionId ?? context.executionId),
           );
           if (!source)
             return {
@@ -40,7 +40,7 @@ export function interiorDesign(
             };
           const input = await store.read(
             "interior-design",
-            context.sessionId,
+            ((context.scope as { sessionId?: string } | undefined)?.sessionId ?? context.executionId),
             source.id,
           );
           if (!input)
@@ -58,7 +58,7 @@ export function interiorDesign(
             });
             const image = await store.saveGenerated(
               "interior-design",
-              context.sessionId,
+              ((context.scope as { sessionId?: string } | undefined)?.sessionId ?? context.executionId),
               result.mediaType,
               result.bytes,
             );

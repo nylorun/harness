@@ -1,4 +1,4 @@
-import type { CanonicalEvent } from "../adapters/journal.js";
+import type { CanonicalEvent } from "../sessions/store.js";
 
 /** Minimal truthful AG-UI projection from the same canonical events Studio displays. */
 export function agUiEvents(

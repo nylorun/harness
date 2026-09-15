@@ -21,8 +21,15 @@ const group = new ProcessGroup();
 try {
   const artifacts = join(temporary, "artifacts");
   await mkdir(artifacts);
-  const tarballs = {};
+  const tarballs = process.env.NYLORUN_STACK_TARBALLS
+    ? JSON.parse(await readFile(process.env.NYLORUN_STACK_TARBALLS, "utf8"))
+    : {};
   for (const name of ["harness", "runtime", "studio", "create-agent"]) {
+    if (process.env.NYLORUN_STACK_TARBALLS) {
+      assert.equal(typeof tarballs[name], "string", `Missing ${name} release tarball`);
+      await access(tarballs[name]);
+      continue;
+    }
     const packed = JSON.parse(
       await run(
         process.execPath,

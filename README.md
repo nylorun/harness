@@ -1,6 +1,6 @@
 # Nylorun Harness
 
-Provider-neutral TypeScript agent runtime with direct capability composition.
+Observable, portable, composable TypeScript agent execution. Harness is state-in/state-out; optional Runtime owns sessions and hosting.
 
 This repository is a monorepo of independently versioned packages—Harness, Runtime, Studio, and the project creator—plus runnable examples.
 
@@ -54,6 +54,7 @@ npm run dev
 |---|---|
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Contributors — setup, checks, workflow |
 | [RELEASING.md](./RELEASING.md) | Maintainers — version, publish, dist-tags |
+| [MIGRATION.md](./MIGRATION.md) | Breaking beta migration |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Application hosting |
 | [SECURITY.md](./SECURITY.md) | Vulnerability reports |
 | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Community standards |

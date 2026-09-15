@@ -1,100 +1,148 @@
 import { z } from "zod";
 import {
+  createExecutionState,
   Agent,
   AgentBuildError,
   model as typedModel,
   tool as typedTool,
-  type AgentOptions,
-  type AgentBuilder,
   type BuiltAgent,
-  type InputOptions,
   type JsonObject,
   type ModelCandidate,
   type ModelAdapter,
-  type SessionOptions,
-  type SessionInput,
-  type Observer,
   type StepRequest,
   type StepResponse,
   type ToolDefinition,
   type ToolExecutionContext,
   type ToolOutcome,
 } from "../src/index.js";
-
-/**
- * Test-only bridge for suites written before model invocation became a
- * per-session concern. Production builders deliberately do not expose this
- * method; the bridge injects the fixture adapter at run time.
- */
-type FixtureAgent = BuiltAgent & {
-  run(options?: Omit<SessionOptions, "onModelCall">): FixtureSession;
-};
-
-type FixtureSession = ReturnType<BuiltAgent["run"]> & {
-  observe(listener: Observer): () => void;
-};
-
-type FixtureBuilder = AgentBuilder & {
-  with(adapter: ModelAdapter): FixtureBuilder;
-  build(): FixtureAgent;
-};
-
 export const objectSchema = z.object({}).passthrough();
 
-export function testAgent(options: Partial<AgentOptions> = {}) {
+/** Test-only convenience for existing pipeline assertions. All execution uses Promise run(). */
+export function testAgent(options: any = {}): any {
   const builder = Agent({
     id: options.id ?? "test",
     name: options.name ?? "Test",
     ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
-  }) as FixtureBuilder;
-  const build = builder.build.bind(builder);
-  let adapter: ModelAdapter | undefined;
-  let fixtureAgent: FixtureAgent | undefined;
-  builder.with = (value) => {
+    ...(options.outputSchema === undefined ? {} : { outputSchema: options.outputSchema }),
+  });
+  const use = builder.use.bind(builder),
+    build = builder.build.bind(builder);
+  let adapter: ModelAdapter;
+  let built: any;
+  const fixture: any = builder;
+  fixture.with = (value: ModelAdapter) => {
     adapter = value;
-    return builder;
+    return fixture;
   };
-  builder.build = () => {
-    if (fixtureAgent) return fixtureAgent;
-    const agent = build();
-    fixtureAgent = Object.create(agent) as FixtureAgent;
-    fixtureAgent.run = (options = {}) => {
-      if (!adapter) throw new Error("Test agent requires a model adapter via with().");
-      const observers = new Set<Observer>();
-      const bootstrapEvents: Parameters<Observer>[0][] = [];
-      let subscribed = false;
-      const session = agent.run({
-        ...options,
-        onModelCall: adapter,
-        observer: (event) => {
-          options.observer?.(event);
-          if (!subscribed) bootstrapEvents.push(event);
-          for (const observer of [...observers]) {
-            try {
-              const result = observer(event);
-              if (result && typeof (result as PromiseLike<void>).then === "function")
-                void Promise.resolve(result).catch(() => undefined);
-            } catch {
-              // Fixture observers retain the public API's fail-open contract.
-            }
-          }
+  fixture.use = (id: any, handler?: any) => {
+    const handle = handler ?? id;
+    if (handle?.fixtureTools)
+      use({
+        id: typeof id === "string" ? id : "fixture",
+        tools: { slot: "fixture-registration", items: handle.fixtureTools },
+        middleware: async (request, next) => {
+          request.configuration.tools.set("fixture-registration", []);
+          return handle(request, next);
         },
       });
-      const fixtureSession = Object.create(session) as FixtureSession;
-      fixtureSession.observe = (observer) => {
-        if (!subscribed) {
-          subscribed = true;
-          for (const event of bootstrapEvents) observer(event);
-          bootstrapEvents.length = 0;
-        }
-        observers.add(observer);
-        return () => observers.delete(observer);
-      };
-      return fixtureSession;
-    };
-    return fixtureAgent;
+    else if (handler) use(id, handler);
+    else use(id);
+    return fixture;
   };
-  return builder;
+  fixture.build = () => {
+    if (built) return built;
+    const agent = build();
+    return (built = {
+      ...agent,
+      run: (options: any = {}) => fixtureSession(agent, adapter, options),
+    });
+  };
+  return fixture;
+}
+function fixtureSession(agent: BuiltAgent, adapter: ModelAdapter, options: any): any {
+  let state: any = options.state ?? {
+    ...createExecutionState(agent),
+    ...(options.id === undefined ? {} : { executionId: options.id }),
+  };
+  const observers = new Set<any>();
+  const controller = new AbortController();
+  let last: Promise<any> = Promise.resolve();
+  const session: any = {
+    id: options.id ?? crypto.randomUUID(),
+    get state() {
+      return state
+        ? {
+            ...state,
+            status: ["ready", "completed"].includes(state.status)
+              ? "idle"
+              : state.status === "paused"
+                ? "waiting"
+                : state.status === "failed"
+                  ? "stopped"
+                  : state.status,
+            pendingInteraction: state.plan?.calls.find((call: any) => call.status === "interaction")
+              ?.interaction,
+          }
+        : { transcript: [], status: "idle", turnCount: 0 };
+    },
+    observe(listener: any) {
+      observers.add(listener);
+      return () => observers.delete(listener);
+    },
+    input(input: any, controls: any = {}) {
+      const before = state?.transcript.length ?? 0;
+      const completed = agent
+        .run({
+          state,
+          input,
+          scope: options.scope ?? {
+            userId: options.userId,
+            ...(options.context === undefined ? {} : { context: options.context }),
+          },
+          signal: controls.signal ?? controller.signal,
+          onModelCall: options.onModelCall ?? adapter,
+          onEvent: (event) => {
+            options.observer?.(event);
+            for (const listener of observers) listener(event);
+          },
+        })
+        .then((result) => {
+          state = result.state;
+          const events: any[] = result.state.transcript.slice(before).flatMap((entry: any) =>
+            entry.kind === "input"
+              ? [{ type: "input", event: entry.event, turnId: entry.turnId }]
+              : entry.kind === "candidate"
+                ? [
+                    {
+                      type: "candidate",
+                      candidate: entry.candidate,
+                      turnId: entry.turnId,
+                      stepId: entry.stepId,
+                    },
+                  ]
+                : entry.kind === "final"
+                  ? [{ type: "final", output: entry.output, turnId: entry.turnId }]
+                  : [],
+          );
+          if (result.status === "failed") events.push({ type: "tripwire", tripwire: result.error });
+          if (result.status === "paused")
+            for (const call of result.pending)
+              if (call.interaction)
+                events.push({ type: "interaction.required", interaction: call.interaction });
+          return { status: result.status === "paused" ? "waiting" : result.status, events };
+        });
+      last = completed;
+      return { completed };
+    },
+    continue() {
+      return session.input({ kind: "continue" });
+    },
+    async stop() {
+      controller.abort();
+      await last.catch(() => {});
+    },
+  };
+  return session;
 }
 
 export function tool(
@@ -105,10 +153,13 @@ export function tool(
 }
 
 export function offer(...tools: ReturnType<typeof tool>[]) {
-  return async (request: StepRequest, next: () => Promise<StepResponse>) => {
-    request.configuration.tools.set("fixture-tools", tools);
-    return next();
-  };
+  return Object.assign(
+    async (request: StepRequest, next: () => Promise<StepResponse>) => {
+      request.configuration.tools.set("fixture-tools", tools);
+      return next();
+    },
+    { fixtureTools: tools },
+  );
 }
 
 export function execution(
@@ -150,19 +201,15 @@ export function expectBuildError(build: () => unknown): AgentBuildError {
   throw new Error("expected AgentBuildError");
 }
 
-export function turn(
-  agent: BuiltAgent,
-  input: SessionInput = "go",
-  options: SessionOptions & InputOptions = {},
-) {
-  const session = agent.run({
-    ...(options.id === undefined ? {} : { id: options.id }),
-    ...(options.userId === undefined ? {} : { userId: options.userId }),
-    ...(options.context === undefined ? {} : { context: options.context }),
-  });
-  const handle = session.input(
-    input,
-    options.signal === undefined ? {} : { signal: options.signal },
-  );
-  return { session, handle };
+export function turn(agent: any, input: any = "go", options: any = {}) {
+  const session = agent.run(options);
+  return { session, handle: session.input(input, { signal: options.signal }) };
+}
+
+/** Registers definitions once while keeping each test's exposure/policy assertions unchanged. */
+export function registered(
+  definitions: readonly any[][],
+  make: (definitions: readonly any[][]) => any,
+): any {
+  return Object.assign(make(definitions), { fixtureTools: definitions.flat() });
 }

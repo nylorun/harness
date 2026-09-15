@@ -34,7 +34,7 @@ function items<T>(value: CapabilityItems<T> | undefined): readonly T[] {
 
 function context() {
   return {
-    sessionId: "session",
+    executionId: "session",
     turnId: "turn",
     stepId: "step",
     callId: "call",

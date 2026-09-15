@@ -15,9 +15,11 @@ import { HarnessError, isHarnessError } from "../errors.js";
 import { assertJson, copyJson } from "../utils/immutable.js";
 import type { CanonicalCall } from "./canonicalize.js";
 import type { StepContext } from "./step-context.js";
-import type { TurnOutputContract } from "../session/output-contract.js";
+import type { TurnOutputContract } from "../execution/output-contract.js";
 
 export interface ExecutablePlanEntry {
+  readonly definition: BoundToolDefinition;
+  readonly rawArgs: import("../types/shared.js").JsonValue;
   readonly call: SealedToolCall;
   readonly invocationId: string;
   readonly owner: ToolOwner;
@@ -36,10 +38,6 @@ export interface InternalToolPlan {
 export type SealedStepOutput =
   | { readonly kind: "tripwire"; readonly tripwire: Tripwire }
   | { readonly kind: "final"; readonly output: import("../types/shared.js").JsonValue }
-  | {
-      readonly kind: "deferred-model";
-      readonly active: import("../types/session.js").ActiveModelExecutionRecord;
-    }
   | { readonly kind: "tools"; readonly plan: InternalToolPlan };
 
 interface SealedCall {
@@ -72,8 +70,6 @@ export function sealStep(
 ): SealedStepOutput {
   if (context.currentTripwire)
     return Object.freeze({ kind: "tripwire", tripwire: context.currentTripwire });
-  if (context.currentModelDeferred)
-    return Object.freeze({ kind: "deferred-model", active: context.currentModelDeferred });
   const calls = context.canonicalCalls();
   if (!calls.length) {
     if (outputContract) return sealStructuredOutput(context, outputContract);
@@ -214,6 +210,8 @@ function sealCall(
     order,
     canonical,
     executable: Object.freeze({
+      definition: tool,
+      rawArgs: copyJson(candidate.args) as import("../types/shared.js").JsonValue,
       call: Object.freeze({
         callId: candidate.id,
         toolName: candidate.name,

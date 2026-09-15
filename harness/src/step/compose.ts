@@ -71,7 +71,7 @@ export async function runMiddleware(
           return context.tripwire({
             code: "middleware.next-called-twice",
             message: message(handlerError),
-            scope: "session",
+            scope: "execution",
           });
         }
         return context.tripwire({
@@ -87,8 +87,8 @@ export async function runMiddleware(
             message: `Middleware '${item.id}' must return the StepResponse from next()`,
             // Calling next() completed the step successfully; forgetting to
             // return that response is isolated to this step. A non-response
-            // replacement remains a session-level middleware-contract breach.
-            scope: result === undefined ? "step" : "session",
+            // replacement remains a execution-level middleware-contract breach.
+            scope: result === undefined ? "step" : "execution",
           });
         }
         return inner;
@@ -98,7 +98,7 @@ export async function runMiddleware(
         return context.tripwire({
           code: "middleware.invalid-response",
           message: `Middleware '${item.id}' must return a branded StepResponse`,
-          scope: "session",
+          scope: "execution",
         });
       }
       return result;

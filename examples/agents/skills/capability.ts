@@ -1,4 +1,4 @@
-import { projectAsset } from "@nylorun/runtime";
+import { projectAsset } from "@nylorun/runtime/node";
 import { join } from "node:path";
 import { tool, type CapabilityDeclaration } from "@nylorun/harness";
 import { z } from "zod";

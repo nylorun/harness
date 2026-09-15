@@ -40,7 +40,7 @@ describe("observer emission", () => {
         () => {
           throw new Error("observer failed");
         },
-        { type: "session.stopped", sessionId: "session" },
+        { type: "session.stopped", executionId: "session" },
       ),
     ).not.toThrow();
   });

@@ -35,7 +35,8 @@ try {
       ]),
     ),
   );
-  await node("create-agent/scripts/check-stack.mjs", [], {
+  await node("create-agent/scripts/check-stack.mjs");
+  await node("create-agent/scripts/smoke-starter.mjs", [], {
     env: { ...process.env, NYLORUN_STACK_TARBALLS: input },
   });
   await node("create-agent/scripts/check-example-assets.mjs");

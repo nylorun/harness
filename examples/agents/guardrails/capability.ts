@@ -93,7 +93,7 @@ export const inputGuardrail = middleware(async (request, next) => {
       return request.tripwire({
         code: "input.blocked",
         message: "User input requested a policy override.",
-        scope: "session",
+        scope: "execution",
       });
     }
   }
@@ -107,7 +107,7 @@ export const outputGuardrail = middleware(async (_request, next) => {
     return response.tripwire({
       code: "output.blocked",
       message: "Assistant output looks like a secret and was blocked.",
-      scope: "session",
+      scope: "execution",
     });
   }
   return response;
@@ -123,7 +123,7 @@ export const toolInputGuardrail = middleware(async (_request, next) => {
       return response.tripwire({
         code: "policy.blocked",
         message: "Publish text requested a policy override.",
-        scope: "session",
+        scope: "execution",
       });
     }
     if (looksSecret(text)) {
@@ -143,7 +143,7 @@ export const toolOutputGuardrail = middleware(async (request, next) => {
       return request.tripwire({
         code: "tool-output.blocked",
         message: "Tool output looks like a secret and was blocked.",
-        scope: "session",
+        scope: "execution",
       });
     }
   }

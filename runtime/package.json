@@ -19,6 +19,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js"
     }
   },
   "files": [
@@ -32,15 +36,17 @@
     "provenance": true
   },
   "scripts": {
-    "build": "node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json",
+    "build": "npm run clean && node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json",
     "check": "npm run build && npm test && node scripts/check-package.mjs",
     "typecheck": "node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\""
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.85.1",
-    "@hono/node-server": "^2.1.1"
+    "@hono/node-server": "^2.1.1",
+    "@nylorun/harness": "0.12.0-beta"
   },
   "peerDependencies": {
     "hono": "^4.13.7"

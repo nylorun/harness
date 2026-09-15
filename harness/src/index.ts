@@ -13,7 +13,6 @@ export type {
   BoundMiddleware,
   CapabilityDeclaration,
   CapabilityItems,
-  CapabilityState,
   MiddlewareContributions,
   StepInput,
   StepMiddleware,
@@ -62,32 +61,26 @@ export type {
   Tripwire,
 } from "./types/shared.js";
 export type {
-  ActiveExecutionRecord,
-  ActiveInteractionExecutionRecord,
-  ActiveModelExecutionRecord,
-  ActiveToolCallRecord,
-  ActiveToolsExecutionRecord,
-  InteractionReply,
-  InputCompletion,
   InputEvent,
-  InputHandle,
-  InputOptions,
-  OutputInputOptions,
   MessageInput,
-  Session,
-  SessionInput,
-  SessionIdentity,
-  SessionEvent,
-  SessionOptions,
-  SessionRecord,
-  SessionRecorder,
-  SessionRunOptions,
-  SessionSeed,
-  SeededSessionOptions,
-  SessionSnapshot,
+  InteractionReply,
   TranscriptEntry,
   UserContentPart,
-} from "./types/session.js";
+} from "./types/transcript.js";
+export type {
+  ExecutionInput,
+  ExecutionState,
+  ExecutionEvent,
+  RunOptions,
+  RunResult,
+  SavedToolCall,
+  ExecutionPlan,
+  ToolReference,
+} from "./types/execution.js";
+export { createExecutionState, validateExecutionState } from "./execution/state.js";
+export { defineToolFamily } from "./build/tool-family.js";
+export type { ToolFamily } from "./build/tool-family.js";
+
 export type {
   BoundToolSchema,
   BoundToolDefinition,

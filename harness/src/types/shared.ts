@@ -5,7 +5,7 @@ import type {
   ModelCall,
   ModelConfigurationSnapshot,
 } from "./model.js";
-import type { InputEvent, TranscriptEntry } from "./session.js";
+import type { InputEvent, TranscriptEntry } from "./transcript.js";
 import type { RequiredInteraction, ToolResult } from "./tool.js";
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -33,7 +33,7 @@ export interface ContextItem {
 export interface Tripwire {
   readonly code: string;
   readonly message: string;
-  readonly scope?: "step" | "session";
+  readonly scope?: "step" | "execution";
 }
 
 export interface ObserveToolSnapshot {
@@ -71,29 +71,9 @@ export interface ObserveModelRequested {
 }
 
 export type ObserveEvent =
-  | { readonly type: "session.stopped"; readonly reason: string }
-  | {
-      readonly type: "capability.state.dispose.failed";
-      readonly capabilityId: string;
-      readonly attributes: { readonly message: string };
-    }
-  | {
-      readonly type: "session.seeded";
-      readonly revision: number;
-      readonly transcriptEntries: number;
-    }
-  | { readonly type: "session.continued"; readonly inputId?: string }
-  | {
-      readonly type: "session.record.failed";
-      readonly code: string;
-      readonly attributes: { readonly message: string };
-    }
-  | { readonly type: "input.received"; readonly inputId: string; readonly kind: string }
-  | { readonly type: "input.queued"; readonly inputId: string }
-  | { readonly type: "input.rejected"; readonly inputId: string; readonly reason: string }
-  | { readonly type: "input.cancelled"; readonly inputId: string; readonly reason: string }
   | {
       readonly type: "model.requested";
+      readonly invocationId: string;
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;
@@ -102,6 +82,7 @@ export type ObserveEvent =
     }
   | {
       readonly type: "model.prepared";
+      readonly invocationId: string;
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;
@@ -110,19 +91,12 @@ export type ObserveEvent =
     }
   | {
       readonly type: "model.completed";
+      readonly invocationId?: string;
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;
       readonly requestedModelId?: string;
       readonly attributes: ModelCandidate;
-    }
-  | {
-      readonly type: "model.deferred";
-      readonly turnId: string;
-      readonly stepId: string;
-      readonly inputId?: string;
-      readonly invocationId: string;
-      readonly attributes: { readonly token?: JsonValue };
     }
   | {
       readonly type: "step.started";
@@ -132,7 +106,6 @@ export type ObserveEvent =
       readonly turnNumber: number;
       readonly stepNumber: number;
       readonly attributes: {
-        readonly session?: { readonly userId?: string; readonly context?: JsonObject };
         readonly arrivals: readonly InputEvent[];
         readonly toolResults: readonly ToolResult[];
         readonly transcript: readonly TranscriptEntry[];
@@ -165,7 +138,7 @@ export type ObserveEvent =
     }
   | {
       readonly type: "tool.started";
-      readonly sessionId: string;
+      readonly executionId: string;
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;
@@ -178,7 +151,7 @@ export type ObserveEvent =
     }
   | {
       readonly type: "tool.completed";
-      readonly sessionId: string;
+      readonly executionId: string;
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;
@@ -193,7 +166,7 @@ export type ObserveEvent =
     }
   | {
       readonly type: "tool.deferred";
-      readonly sessionId: string;
+      readonly executionId: string;
       readonly turnId: string;
       readonly stepId: string;
       readonly inputId?: string;

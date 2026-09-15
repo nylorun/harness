@@ -28,11 +28,11 @@ export function planVersions(before, compatibility, pending, channel) {
     !compatibility ||
     Object.keys(compatibility).length !== 3 ||
     ["harness", "runtime", "studio"].some(
-      (name) => !semver.valid(compatibility[name])
+      (name) => !semver.valid(compatibility[name]),
     )
   )
     throw new Error(
-      "Compatibility must contain exactly three valid package pins."
+      "Compatibility must contain exactly three valid package pins.",
     );
   const changesets = [...pending];
   const bumps = new Map();
@@ -41,7 +41,7 @@ export function planVersions(before, compatibility, pending, channel) {
       const name = packages.find((name) => fullName(name) === release.name);
       if (!name || !Object.hasOwn(impact, release.type))
         throw new Error(
-          `Unsupported changeset release: ${release.name} ${release.type}`
+          `Unsupported changeset release: ${release.name} ${release.type}`,
         );
       // Before 1.0, breaking changes start the next minor series.
       const type =
@@ -75,9 +75,21 @@ export function planVersions(before, compatibility, pending, channel) {
       }
     }
   }
+  if (versions.harness && versions.harness !== before.harness) {
+    if (!versions.runtime) {
+      bumps.set("runtime", "patch");
+      versions.runtime = bump("runtime", "patch");
+    }
+    changesets.push({
+      id: "release-runtime-harness",
+      summary:
+        "Update Runtime's canonical Harness dependency to the tested release.",
+      releases: [{ name: fullName("runtime"), type: "patch" }],
+    });
+  }
   if (!Object.keys(versions).length)
     throw new Error(
-      "No pending changesets or beta versions to promote. Add release intent with npm run changeset first."
+      "No pending changesets or beta versions to promote. Add release intent with npm run changeset first.",
     );
 
   if (packages.some((name) => name !== "create-agent" && versions[name])) {
@@ -113,21 +125,21 @@ export function planVersions(before, compatibility, pending, channel) {
     .map((name) => {
       if (semver.lt(versions[name], before[name]))
         throw new Error(
-          `Version must not go backward: ${name} ${before[name]} → ${versions[name]}`
+          `Version must not go backward: ${name} ${before[name]} → ${versions[name]}`,
         );
       if (
         versions[name] === before[name] &&
         !(channel === "latest" && semver.major(before[name]) === 0)
       )
         throw new Error(
-          `Version must advance: ${name} ${before[name]} → ${versions[name]}`
+          `Version must advance: ${name} ${before[name]} → ${versions[name]}`,
         );
       if (
         versions[name] !== before[name] &&
         !semver.gt(versions[name], before[name])
       )
         throw new Error(
-          `Version must advance: ${name} ${before[name]} → ${versions[name]}`
+          `Version must advance: ${name} ${before[name]} → ${versions[name]}`,
         );
       if (name !== "create-agent") pinned[name] = versions[name];
       return {
@@ -137,7 +149,7 @@ export function planVersions(before, compatibility, pending, channel) {
         newVersion: versions[name],
         changesets: changesets
           .filter((item) =>
-            item.releases.some((release) => release.name === fullName(name))
+            item.releases.some((release) => release.name === fullName(name)),
           )
           .map((item) => item.id),
       };
@@ -149,7 +161,7 @@ export function planVersions(before, compatibility, pending, channel) {
       packages: Object.fromEntries(
         packages
           .filter((name) => versions[name])
-          .map((name) => [name, versions[name]])
+          .map((name) => [name, versions[name]]),
       ),
       compatibility: pinned,
     },

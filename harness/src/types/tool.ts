@@ -60,7 +60,7 @@ type OutputFor<Schema> = Schema extends ToolSchemaSource ? SchemaOutput<Schema> 
 
 export interface ToolDefinition<
   InputSchema extends ToolInputSchema = ToolInputSchema,
-  State = never,
+  Scope = unknown,
   OutputSchema extends ToolOutputSchema | undefined = undefined,
 > {
   readonly name: string;
@@ -69,18 +69,19 @@ export interface ToolDefinition<
   readonly outputSchema?: OutputSchema;
   execute(
     args: SchemaOutput<InputSchema>,
-    context: ToolExecutionContext<State>,
+    context: ToolExecutionContext<Scope>,
   ): Promise<ToolOutcome<OutputFor<OutputSchema>>>;
 }
 
-export interface BoundToolDefinition<State = never> extends Omit<
-  ToolDefinition<ToolInputSchema, State, ToolOutputSchema | undefined>,
+export interface BoundToolDefinition<Scope = unknown> extends Omit<
+  ToolDefinition<ToolInputSchema, Scope, ToolOutputSchema | undefined>,
   "inputSchema" | "outputSchema" | "execute"
 > {
   readonly inputSchema: BoundToolSchema<unknown>;
   readonly outputSchema?: BoundToolSchema<unknown>;
-  readonly execute: (args: unknown, context: ToolExecutionContext<State>) => Promise<ToolOutcome>;
+  readonly execute: (args: unknown, context: ToolExecutionContext<Scope>) => Promise<ToolOutcome>;
   readonly owner: ToolOwner;
+  readonly source: ToolDefinition<any, any, any>;
 }
 
 export interface ToolOwner {
@@ -114,19 +115,20 @@ export interface SealedToolCall {
 }
 
 interface ToolExecutionContextBase {
-  readonly sessionId: string;
+  readonly executionId: string;
   readonly turnId: string;
   readonly stepId: string;
   readonly callId: string;
   readonly invocationId: string;
   readonly signal: AbortSignal;
-  /** The session's model callable, for tools that explicitly run a child agent. */
+  /** The invocation's model callable, for tools that explicitly run a child agent. */
   readonly onModelCall?: ModelAdapter;
   readonly resume?: ToolExecutionResume;
 }
 
-export type ToolExecutionContext<State = never> = ToolExecutionContextBase &
-  ([State] extends [never] ? object : { readonly state: Promise<State> });
+export type ToolExecutionContext<Scope = unknown> = ToolExecutionContextBase & {
+  readonly scope?: Scope;
+};
 
 export type ToolContent = JsonValue;
 export type ToolOutcome<Output = ToolContent> =

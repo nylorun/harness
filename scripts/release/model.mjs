@@ -32,18 +32,18 @@ export async function prepareVersions(repo, channel) {
   }
   if (config.fixed.length || config.linked.length || config.ignore.length)
     throw new Error(
-      "Release policy requires independently versioned, non-ignored packages."
+      "Release policy requires independently versioned, non-ignored packages.",
     );
   const before = Object.fromEntries(
     await Promise.all(
       packages.map(async (name) => [
         name,
         (await readJson(join(repo, name, "package.json"))).version,
-      ])
-    )
+      ]),
+    ),
   );
   const compatibility = await readJson(
-    join(repo, "create-agent/compatibility.json")
+    join(repo, "create-agent/compatibility.json"),
   );
   let legacy;
   try {
@@ -58,7 +58,7 @@ export async function prepareVersions(repo, channel) {
   const pending = allChangesets.filter((item) => !consumed.has(item.id));
   const calculated = planVersions(before, compatibility, pending, channel);
   const tagOnly = calculated.releases.every(
-    (release) => release.oldVersion === release.newVersion
+    (release) => release.oldVersion === release.newVersion,
   );
   if (!tagOnly) {
     await applyReleasePlan(
@@ -70,8 +70,15 @@ export async function prepareVersions(repo, channel) {
       packagesForApplyReleasePlan(workspace),
       config,
       undefined,
-      root
+      root,
     );
+    const runtimeManifestPath = join(repo, "runtime/package.json");
+    const runtimeManifest = await readJson(runtimeManifestPath);
+    if (runtimeManifest.dependencies?.["@nylorun/harness"]) {
+      runtimeManifest.dependencies["@nylorun/harness"] =
+        calculated.plan.compatibility.harness;
+      await writeJson(runtimeManifestPath, runtimeManifest);
+    }
     // Numbered prerelease state is retired; already-applied changes must not replay.
     if (legacy) {
       for (const item of allChangesets.filter((item) => consumed.has(item.id)))
@@ -80,11 +87,11 @@ export async function prepareVersions(repo, channel) {
     }
     await writeJson(
       join(repo, "create-agent/compatibility.json"),
-      calculated.plan.compatibility
+      calculated.plan.compatibility,
     );
   } else if (legacy) {
     throw new Error(
-      "Clear legacy prerelease state before a latest dist-tag promotion."
+      "Clear legacy prerelease state before a latest dist-tag promotion.",
     );
   }
   await validatePlan(calculated.plan, repo);
@@ -115,18 +122,18 @@ export async function validatePlan(plan, repo) {
     if (plan.channel === "beta") {
       if (prerelease?.length !== 1 || prerelease[0] !== "beta")
         throw new Error(
-          `Version ${version} does not match channel ${plan.channel}.`
+          `Version ${version} does not match channel ${plan.channel}.`,
         );
     } else if (plan.channel === "latest") {
       // Pre-1.0 latest keeps *-beta product branding; post-1.0 latest is stable.
       if (semver.major(version) === 0) {
         if (prerelease?.length !== 1 || prerelease[0] !== "beta")
           throw new Error(
-            `Pre-1.0 latest versions must use the -beta product suffix: ${version}`
+            `Pre-1.0 latest versions must use the -beta product suffix: ${version}`,
           );
       } else if (prerelease) {
         throw new Error(
-          `Version ${version} does not match channel ${plan.channel}.`
+          `Version ${version} does not match channel ${plan.channel}.`,
         );
       }
     }
@@ -143,9 +150,17 @@ export async function validatePlan(plan, repo) {
     )
       throw new Error(`Invalid compatibility pin for ${name}.`);
   }
+  const runtime = await readJson(join(repo, "runtime/package.json"));
+  if (
+    runtime.dependencies?.["@nylorun/harness"] &&
+    runtime.dependencies["@nylorun/harness"] !== plan.compatibility.harness
+  )
+    throw new Error(
+      "Runtime's Harness dependency must match the creator compatibility pin.",
+    );
   if (Object.keys(plan.compatibility).length !== 3)
     throw new Error(
-      "Compatibility must contain exactly Harness, Runtime, and Studio."
+      "Compatibility must contain exactly Harness, Runtime, and Studio.",
     );
 }
 
@@ -154,7 +169,7 @@ export async function releaseNotes(repo, name, version) {
     await readFile(join(repo, name, "CHANGELOG.md"), "utf8")
   ).split("\n");
   const start = lines.findIndex(
-    (line) => line === `## ${version}` || line.startsWith(`## [${version}]`)
+    (line) => line === `## ${version}` || line.startsWith(`## [${version}]`),
   );
   if (start === -1)
     throw new Error(`Missing changelog entry for ${name}@${version}.`);
@@ -168,7 +183,7 @@ export async function publishCandidates(
   plan,
   artifacts,
   registry,
-  report = () => {}
+  report = () => {},
 ) {
   for (const name of packages.filter((name) => plan.packages[name]))
     await registry.checkTag(name, plan.packages[name], plan.channel);
@@ -187,7 +202,7 @@ export async function publishCandidates(
         for (const engine of ["harness", "runtime", "studio"]) {
           if (!(await registry.lookup(engine, plan.compatibility[engine])))
             throw new Error(
-              `Creator pin is unavailable: ${engine}@${plan.compatibility[engine]}`
+              `Creator pin is unavailable: ${engine}@${plan.compatibility[engine]}`,
             );
         }
       }
@@ -217,11 +232,11 @@ export async function verifyReleaseCommit(repo, sha) {
   const diff = await run(
     "git",
     ["diff", "--name-only", `${sha}^`, sha, "--", ".release/plan.json"],
-    { cwd: repo, capture: true }
+    { cwd: repo, capture: true },
   );
   if (!diff)
     throw new Error(
-      "The selected commit must introduce or update the release plan."
+      "The selected commit must introduce or update the release plan.",
     );
   await readFile(join(repo, ".release/plan.json"));
 }

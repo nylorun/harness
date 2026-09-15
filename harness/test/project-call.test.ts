@@ -1,3 +1,4 @@
+import { registered } from "./fixtures.js";
 import { describe, expect, it } from "vitest";
 import {
   type ContextItem,
@@ -31,7 +32,7 @@ function contextSnapshot(items: readonly ContextItem[] = []): ContextSnapshot {
 
 function request(overrides: Partial<ModelRequest> = {}): ModelRequest {
   return Object.freeze({
-    sessionId: "session",
+    executionId: "session",
     turnId: "turn",
     stepId: "step",
     configuration: configuration(),
@@ -59,10 +60,7 @@ describe("projectModelCall", () => {
     const call = projectModelCall(
       request({
         instructions: ["Be brief.", "Do not invent tools."],
-        context: contextSnapshot([
-          { type: "session", value: { user: "ada" } },
-          { value: { extra: true } },
-        ]),
+        context: contextSnapshot([{ value: { extra: true } }]),
       }),
     );
     expect(call.prompt).toEqual([
@@ -77,10 +75,7 @@ describe("projectModelCall", () => {
         content: [
           {
             type: "text",
-            text: contextEnvelope([
-              { type: "session", value: { user: "ada" } },
-              { value: { extra: true } },
-            ]),
+            text: contextEnvelope([{ value: { extra: true } }]),
           },
         ],
       },
@@ -106,7 +101,7 @@ describe("projectModelCall", () => {
   it("projects transcript inputs, candidates, and tool results and skips the rest", () => {
     const call = projectModelCall(
       request({
-        sessionId: "durable-session",
+        executionId: "durable-session",
         model: { id: "haiku" },
         transcript: [
           { kind: "input", turnId: "turn", event: { kind: "user-message", text: "Echo hello" } },
@@ -145,7 +140,7 @@ describe("projectModelCall", () => {
         arrivals: [{ kind: "user-message", text: "Echo hello" }],
       }),
     );
-    expect(call.sessionId).toBe("durable-session");
+    expect(call.executionId).toBe("durable-session");
     expect(call.model).toEqual({ id: "haiku" });
     expect(call.prompt).toEqual([
       { kind: "message", role: "user", content: [{ type: "text", text: "Echo hello" }] },
@@ -275,14 +270,14 @@ describe("projectModelCall", () => {
       .with(
         model(async (call, { request, signal }) => {
           seen = call;
-          requestSessionId = request.sessionId;
+          requestSessionId = request.executionId;
           sawSignal = signal instanceof AbortSignal;
           return "done";
         }),
       )
       .build();
     await turn(result, "Echo hello", { id: "durable-session" }).handle.completed;
-    expect(seen.sessionId).toBe("durable-session");
+    expect(seen.executionId).toBe("durable-session");
     expect(requestSessionId).toBe("durable-session");
     expect(sawSignal).toBe(true);
     expect(seen.prompt).toEqual([
@@ -314,13 +309,16 @@ describe("projectModelCall", () => {
     }));
     const result = testAgent()
       .use({ id: "model", model: { id: "haiku" } })
-      .use("echo", async (step, next) => {
-        // Declarations are deliberately repeated: each model call redraws configuration and context.
-        step.configuration.instructions.set("echo-policy", ["Echo the user text."]);
-        step.configuration.tools.set("echo-tools", [tool("echo", execute)]);
-        step.context.set("example", [{ type: "example", value: { step: step.stepNumber } }]);
-        return next();
-      })
+      .use(
+        "echo",
+        registered([[tool("echo", execute)]], (registeredTools) => async (step, next) => {
+          // Declarations are deliberately repeated: each model call redraws configuration and context.
+          step.configuration.instructions.set("echo-policy", ["Echo the user text."]);
+          step.configuration.tools.set("echo-tools", registeredTools[0]);
+          step.context.set("example", [{ type: "example", value: { step: step.stepNumber } }]);
+          return next();
+        }),
+      )
       .with(
         model(async (call, { request }) => {
           calls.push(call);
@@ -352,14 +350,8 @@ describe("projectModelCall", () => {
       [["echo"], ["echo"]],
     );
     expect(requests.map((request) => request.context.items)).toEqual([
-      [
-        { type: "session", value: { user: "ada" } },
-        { type: "example", value: { step: 1 } },
-      ],
-      [
-        { type: "session", value: { user: "ada" } },
-        { type: "example", value: { step: 2 } },
-      ],
+      [{ type: "example", value: { step: 1 } }],
+      [{ type: "example", value: { step: 2 } }],
     ]);
 
     expect(requests.map((request) => request.configuration.tools[0]?.owner)).toEqual([
@@ -428,10 +420,7 @@ describe("projectModelCall", () => {
         content: [
           {
             type: "text",
-            text: contextEnvelope([
-              { type: "session", value: { user: "ada" } },
-              { type: "example", value: { step: 2 } },
-            ]),
+            text: contextEnvelope([{ type: "example", value: { step: 2 } }]),
           },
         ],
       },

@@ -1,11 +1,10 @@
 import { join } from "node:path";
 import {
   Runtime,
-  localJsonl,
-  localMedia,
   serveAgents,
   type RuntimeModelAdapter,
 } from "@nylorun/runtime";
+import { localSessions, localMedia } from "@nylorun/runtime/node";
 import { createRegistry } from "../agents/index.js";
 import type { ImageEditor } from "../agents/interior-design/image-editor.js";
 
@@ -34,10 +33,10 @@ export async function createAgentServer(
     media,
     observer: () => {},
     ...(options.adapter === undefined ? {} : { onModelCall: options.adapter }),
-    durability: localJsonl({ root: join(root, ".data", "sessions") }),
+    sessions: localSessions({ root: join(root, ".data", "sessions") }),
   });
   return Object.freeze({
     app: serveAgents({ agents, runtime }),
-    close: () => runtime.close(),
+    close: async () => { await runtime.close(); await Promise.all(agents.map(agent => agent.close?.())); },
   });
 }

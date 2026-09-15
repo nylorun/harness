@@ -2,7 +2,7 @@
 
 Packages have independent versions. Every Harness, Runtime, or Studio release
 also releases creator with updated compatibility pins. A creator-only release
-preserves its existing pins. Nothing publishes on merge or tag push.
+preserves its existing pins. A Harness version change also releases Runtime and updates its exact Harness dependency. Nothing publishes on merge or tag push.
 
 ## Administrator setup
 

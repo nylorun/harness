@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { localMedia, type MediaStore } from "@nylorun/runtime";
+import { localMedia, type MediaStore } from "@nylorun/runtime/node";
 import { createCodeMode } from "./code-mode/agent.js";
 import { createCodingAgent } from "./coding-agent/agent.js";
 import { createGuardrails } from "./guardrails/agent.js";

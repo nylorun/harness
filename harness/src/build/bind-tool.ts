@@ -12,6 +12,7 @@ export function bindTool(
     throw new HarnessError("tool.invalid", `Tool '${item.name}' must provide execute()`);
   const schemas = normalizedSchemasFor(item);
   return Object.freeze({
+    source: item,
     name: item.name,
     ...(item.description ? { description: item.description } : {}),
     inputSchema: schemas.inputSchema,

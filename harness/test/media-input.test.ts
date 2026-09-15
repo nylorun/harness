@@ -55,47 +55,43 @@ describe("media input", () => {
     expect(Object.isFrozen(calls[0]?.prompt[0]?.content)).toBe(true);
   });
 
-  it("accepts and copies media content in a durable seed", async () => {
+  it("copies media references into serializable execution state", async () => {
+    const { Agent } = await import("../src/index.js");
     const reference = { url: "https://cdn.example.test/seed.png" };
-    const session = testAgent()
-      .with(model(async () => "continued"))
-      .build()
-      .run({
-        seed: {
-          transcript: [
-            {
-              kind: "input",
-              turnId: "old",
-              event: { kind: "user-message", content: [{ ...image, reference }] },
-            },
-          ],
-        },
-      });
-    reference.url = "https://changed.example.test/seed.png";
-
-    expect(session.state.transcript).toMatchObject([
-      {
-        event: {
-          content: [{ reference: { url: "https://cdn.example.test/seed.png" } }],
-        },
+    const agent = Agent({ id: "a", name: "A" }).build();
+    const result = await agent.run({
+      input: { content: [{ ...image, reference }] },
+      onModelCall: async () => "done",
+    });
+    reference.url = "changed";
+    expect(JSON.stringify(result.state)).toContain("https://cdn.example.test/seed.png");
+    const resumed = await agent.run({
+      state: JSON.parse(JSON.stringify(result.state)),
+      input: "next",
+      onModelCall: async (call) => {
+        expect(JSON.stringify(call)).toContain("https://cdn.example.test/seed.png");
+        return "ok";
       },
-    ]);
-    await expect(session.continue().completed).resolves.toMatchObject({ status: "completed" });
+    });
+    expect(resumed.status).toBe("completed");
   });
-
-  it("rejects malformed media content before it enters the queue", () => {
-    const session = testAgent()
-      .with(model(async () => "done"))
-      .build()
-      .run();
-    expect(() =>
-      session.input({ content: [{ type: "media", mediaType: "", reference: {} }] as never }),
-    ).toThrowError(expect.objectContaining({ code: "input.invalid-content" }));
+  it("rejects malformed media before model invocation", async () => {
+    const { Agent } = await import("../src/index.js");
+    const invoke = vi.fn(async () => "done");
+    await expect(
+      Agent({ id: "a", name: "A" })
+        .build()
+        .run({
+          input: { content: [{ type: "media", mediaType: "", reference: {} }] },
+          onModelCall: invoke,
+        }),
+    ).rejects.toMatchObject({ code: "execution.invalid-input" });
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("maps direct URL images in bundled adapters and rejects unsupported content before send", async () => {
     const mediaCall: ModelCall = {
-      sessionId: "session",
+      executionId: "session",
       prompt: [
         {
           kind: "message",

@@ -1,39 +1,32 @@
-import { describe, expect, it } from "vitest";
-import { testAgent, model, turn } from "./fixtures.js";
+import { expect, it } from "vitest";
+import { Agent } from "../src/index.js";
 
-describe("Session isolation", () => {
-  it("keeps parallel transcripts, queues, IDs, and outputs isolated", async () => {
-    const result = testAgent()
-      .with(
-        model(async (_call, { request }) => {
+it("isolates state, scope, and execution identities in concurrent calls", async () => {
+  const scopes: unknown[] = [];
+  const agent = Agent<{ name: string }>({ id: "a", name: "A" })
+    .use("scope", async (request, next) => {
+      scopes.push(request.scope);
+      request.context.set("name", [{ value: request.scope!.name }]);
+      return next();
+    })
+    .build();
+  const results = await Promise.all(
+    ["a", "b", "c"].map((name) =>
+      agent.run({
+        input: name,
+        scope: { name },
+        onModelCall: async (_, { request }) => {
           await Promise.resolve();
-          return `${request.sessionId}:${request.arrivals[0]?.kind === "user-message" ? request.arrivals[0].text : ""}`;
-        }),
-      )
-      .build();
-    const started = Array.from({ length: 40 }, (_, index) =>
-      turn(result, `message-${index}`, { id: `session-${index}` }),
-    );
-    const sessions = started.map((item) => item.session);
-    const completions = await Promise.all(started.map((item) => item.handle.completed));
-    completions.forEach((completion, index) =>
-      expect(completion.events.at(-1)).toMatchObject({
-        type: "final",
-        output: `session-${index}:message-${index}`,
+          return String(request.context.items[0]!.value);
+        },
       }),
-    );
-    for (let index = 0; index < sessions.length; index += 1) {
-      const serialized = JSON.stringify(sessions[index]!.state.transcript);
-      expect(serialized).toContain(`message-${index}`);
-      expect(serialized).not.toContain(`message-${(index + 1) % sessions.length}`);
-    }
-    expect(
-      new Set(
-        sessions.map(
-          (session) => session.state.transcript.find((entry) => entry.kind === "candidate")?.stepId,
-        ),
-      ).size,
-    ).toBe(40);
-    await Promise.all(sessions.map((session) => session.stop()));
-  });
+    ),
+  );
+  expect(results.map((result) => result.status === "completed" && result.output)).toEqual([
+    "a",
+    "b",
+    "c",
+  ]);
+  expect(new Set(results.map((result) => result.state.executionId)).size).toBe(3);
+  expect(scopes).toEqual([{ name: "a" }, { name: "b" }, { name: "c" }]);
 });

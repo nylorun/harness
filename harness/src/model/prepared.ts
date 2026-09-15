@@ -4,7 +4,7 @@ import type {
   ModelCandidate,
   ModelCall,
 } from "../types/model.js";
-import type { DeferredOutcome, JsonValue } from "../types/shared.js";
+import type { JsonValue } from "../types/shared.js";
 
 export interface PreparedModelOptions<Wire> {
   readonly adapter: string;
@@ -13,7 +13,7 @@ export interface PreparedModelOptions<Wire> {
     context: ModelAdapterContext,
   ): Promise<{ readonly request: Wire; readonly observed: JsonValue }>;
   send(request: Wire, call: ModelCall, context: ModelAdapterContext): Promise<unknown>;
-  decode(response: unknown, call: ModelCall): ModelCandidate | string | DeferredOutcome;
+  decode(response: unknown, call: ModelCall): ModelCandidate | string;
 }
 
 /**

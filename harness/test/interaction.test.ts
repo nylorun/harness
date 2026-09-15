@@ -56,60 +56,45 @@ describe("interaction resume", () => {
   it("rejects stale correlation without exposing it to the Model", async () => {
     const invoke = vi.fn(async () => "done");
     const result = testAgent().with(model(invoke)).build();
-    const completion = await turn(result, {
-      kind: "approve",
-      interactionId: "stale",
-      approved: true,
-    }).handle.completed;
-    expect(completion.status).toBe("rejected");
+    await expect(
+      turn(result, { kind: "approve", interactionId: "stale", approved: true }).handle.completed,
+    ).rejects.toMatchObject({ code: "execution.invalid-input" });
     expect(invoke).not.toHaveBeenCalled();
   });
 
   it("pairs every unresolved call when cancelling an interaction wait, then preserves FIFO", async () => {
-    let modelStep = 0;
-    const result = testAgent()
-      .use("approval", async (_request, next) => {
+    const execute = vi.fn(async () => ({ kind: "completed", output: "effect" }));
+    let calls = 0;
+    const agent = testAgent()
+      .use("approval", async (_, next) => {
         const response = await next();
-        response.requireInteraction("first-call", { kind: "approval", prompt: "approve" });
+        for (const call of response.toolCalls())
+          response.requireInteraction(call.id, { kind: "approval", prompt: "Approve?" });
         return response;
       })
-      .use("test", offer(tool("first"), tool("second")))
+      .use("tools", offer(tool("first", execute), tool("second", execute)))
       .with(
         model(async () =>
-          ++modelStep === 1
-            ? toolCalls(
-                { id: "first-call", name: "first", args: {} },
-                { id: "second-call", name: "second", args: {} },
-              )
-            : "after-cancel",
+          calls++ ? "done" : toolCalls({ id: "a", name: "first" }, { id: "b", name: "second" }),
         ),
       )
       .build();
-    const firstController = new AbortController();
-    const firstRemove = vi.spyOn(firstController.signal, "removeEventListener");
-    const { session, handle: streamed } = turn(result, "wait", {
-      signal: firstController.signal,
-    });
-    const first = await streamed.completed;
-    expect(first.status).toBe("waiting");
-    expect(firstRemove).toHaveBeenCalledWith("abort", expect.any(Function));
-
-    const cancelledController = new AbortController();
-    const cancelledRemove = vi.spyOn(cancelledController.signal, "removeEventListener");
-    const cancelledQueued = session.input("remove-me", { signal: cancelledController.signal });
-    cancelledController.abort(new Error("not needed"));
-    await expect(cancelledQueued.completed).resolves.toMatchObject({ status: "cancelled" });
-    expect(cancelledRemove).toHaveBeenCalledWith("abort", expect.any(Function));
-
-    await session.stop("cancel pending plan");
-    expect(session.state.status).toBe("stopped");
-    const resultsEntry = session.state.transcript.find((entry) => entry.kind === "tool-results");
-    expect(resultsEntry?.kind).toBe("tool-results");
-    if (resultsEntry?.kind === "tool-results")
-      expect(resultsEntry.results).toEqual([
-        expect.objectContaining({ callId: "first-call", kind: "failed", code: "tool.cancelled" }),
-        expect.objectContaining({ callId: "second-call", kind: "failed", code: "tool.cancelled" }),
-      ]);
+    const session = agent.run();
+    const first = await session.input("go").completed;
+    const interaction = first.events.find(
+      (event) => event.type === "interaction.required",
+    ).interaction;
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = await session.input(
+      { kind: "approve", interactionId: interaction.id, approved: true },
+      { signal: controller.signal },
+    ).completed;
+    expect(cancelled.status).toBe("cancelled");
+    expect(execute).not.toHaveBeenCalled();
+    expect(
+      session.state.transcript.find((entry) => entry.kind === "tool-results").results,
+    ).toHaveLength(2);
   });
 
   it("resumes an interaction after a delay without a harness deadline", async () => {

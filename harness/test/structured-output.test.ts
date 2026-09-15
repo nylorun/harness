@@ -1,135 +1,97 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineSchema, type ModelCall, type ObserveEvent } from "../src/index.js";
-import { testAgent, model, offer, tool, toolCalls } from "./fixtures.js";
+import { Agent, defineSchema, type ModelCandidate } from "../src/index.js";
 
-const resultSchema = z.object({ summary: z.string(), count: z.number() });
-
-describe("structured terminal output", () => {
-  it("projects one immutable schema through a tool loop and seals the validated JSON result", async () => {
-    const calls: ModelCall[] = [];
-    let step = 0;
-    const session = testAgent()
-      .use("tools", offer(tool("lookup")))
-      .with(
-        model(async (call) => {
-          calls.push(call);
-          return ++step === 1
-            ? toolCalls({ id: "lookup", name: "lookup", args: {} })
-            : { output: [{ type: "json", value: { summary: "done", count: 2 } }] };
-        }),
-      )
-      .build()
-      .run();
-
-    const completion = await session.input("go", { outputSchema: resultSchema }).completed;
-    expect(completion.events.at(-1)).toEqual({
-      type: "final",
-      turnId: expect.any(String),
-      output: { summary: "done", count: 2 },
+describe("agent output contracts", () => {
+  it("projects and validates the final schema through a tool loop", async () => {
+    const seen: unknown[] = [];
+    const schema = z.object({ count: z.coerce.number() });
+    const agent = Agent({ id: "a", name: "A", outputSchema: schema })
+      .use({
+        id: "tools",
+        tools: [
+          {
+            name: "lookup",
+            inputSchema: z.object({}),
+            execute: async () => ({ kind: "completed", output: 3 }),
+          },
+        ],
+      })
+      .build();
+    let calls = 0;
+    const result = await agent.run({
+      input: "go",
+      onModelCall: async (call) => {
+        seen.push(call.outputSchema);
+        return calls++
+          ? { output: [{ type: "json", value: { count: "3" } }] }
+          : { output: [{ type: "tool-call", id: "c", name: "lookup", args: {} }] };
+      },
     });
-    expect(calls).toHaveLength(2);
-    expect(calls.every((call) => call.outputSchema?.type === "object")).toBe(true);
-    expect(Object.isFrozen(calls[0]!.outputSchema)).toBe(true);
-    const final = session.state.transcript.at(-1);
-    expect(final).toMatchObject({ kind: "final", output: { summary: "done", count: 2 } });
+    expect(result).toMatchObject({ status: "completed", output: { count: 3 } });
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toEqual(seen[1]);
   });
-
-  it("does not parse text and trips after preserving the canonical candidate", async () => {
-    const observed: ObserveEvent[] = [];
-    const session = testAgent()
-      .with(
-        model(async () => ({ output: [{ type: "text", text: '{"summary":"done","count":2}' }] })),
-      )
-      .build()
-      .run();
-    session.observe((event) => observed.push(event));
-
-    const completion = await session.input("go", { outputSchema: resultSchema }).completed;
-    expect(completion.events).toMatchObject([
-      { type: "input" },
-      { type: "candidate", candidate: { output: [{ type: "text" }] } },
-      { type: "tripwire", tripwire: { code: "output.invalid" } },
-    ]);
-    expect(observed.map((event) => event.type)).toContain("model.completed");
-    expect(observed.map((event) => event.type)).toContain("tripwire");
-    expect(observed.map((event) => event.type).indexOf("model.completed")).toBeLessThan(
-      observed.map((event) => event.type).indexOf("tripwire"),
-    );
+  it.each<ModelCandidate>([
+    { output: [{ type: "text", text: '{"count":3}' }] },
+    { output: [{ type: "json", value: { count: "bad" } }] },
+    {
+      output: [
+        { type: "json", value: { count: 3 } },
+        { type: "json", value: { count: 4 } },
+      ],
+    },
+  ])("rejects nonconforming final output", async (candidate) => {
+    const agent = Agent({
+      id: "a",
+      name: "A",
+      outputSchema: z.object({ count: z.number() }),
+    }).build();
+    const result = await agent.run({ input: "go", onModelCall: async () => candidate });
+    expect(result).toMatchObject({ status: "failed", error: { code: "output.invalid" } });
+    expect(result.state.transcript.some((entry) => entry.kind === "candidate")).toBe(true);
   });
-
-  it("validates middleware replacements at the terminal seam", async () => {
-    const session = testAgent()
-      .use("review", async (_request, next) => {
+  it("validates the final middleware replacement", async () => {
+    const agent = Agent({ id: "a", name: "A", outputSchema: z.object({ count: z.number() }) })
+      .use("review", async (_, next) => {
         const response = await next();
-        response.replace({ output: [{ type: "json", value: { summary: "reviewed", count: 1 } }] });
+        response.replace({ output: [{ type: "json", value: { count: 9 } }] });
         return response;
       })
-      .with(
-        model(async () => ({ output: [{ type: "json", value: { summary: 1, count: "bad" } }] })),
-      )
-      .build()
-      .run();
-
-    const completion = await session.input("go", { outputSchema: resultSchema }).completed;
-    expect(completion.events.at(-1)).toMatchObject({
-      type: "final",
-      output: { summary: "reviewed", count: 1 },
-    });
+      .build();
+    expect(
+      await agent.run({
+        input: "go",
+        onModelCall: async () => ({ output: [{ type: "json", value: { count: 3 } }] }),
+      }),
+    ).toMatchObject({ status: "completed", output: { count: 9 } });
   });
-
-  it("seeds structured finals and JSON candidates immutably", () => {
-    const candidate = { output: [{ type: "json" as const, value: { count: 1 } }] };
-    const transcript = [
-      { kind: "candidate" as const, turnId: "turn", stepId: "step", candidate },
-      { kind: "final" as const, turnId: "turn", stepId: "step", output: { count: 1 } },
-    ];
-    const session = testAgent()
-      .with(model(async () => "done"))
-      .build()
-      .run({ seed: { transcript } });
-    candidate.output[0]!.value.count = 9;
-    expect(session.state.transcript).toMatchObject([
-      { kind: "candidate", candidate: { output: [{ type: "json", value: { count: 1 } }] } },
-      { kind: "final", output: { count: 1 } },
-    ]);
-  });
-
-  it("binds explicit and Standard Schema output contracts through the existing schema seam", async () => {
-    const jsonSchema = { type: "object", properties: { ok: { type: "boolean" } } } as const;
+  it("binds explicit and Standard Schema output contracts", async () => {
     const explicit = defineSchema({
-      jsonSchema,
-      validate(value) {
-        return typeof (value as { ok?: unknown })?.ok === "boolean"
-          ? { ok: true as const, value: value as { ok: boolean } }
-          : { ok: false as const, issues: [{ path: [], code: "invalid", message: "Expected ok" }] };
-      },
+      jsonSchema: { type: "number" },
+      validate: (value: unknown) =>
+        typeof value === "number"
+          ? { ok: true as const, value }
+          : {
+              ok: false as const,
+              issues: [{ path: [], code: "invalid", message: "number required" }],
+            },
     });
     const standard = {
       "~standard": {
-        validate(value: unknown) {
-          return typeof (value as { ok?: unknown })?.ok === "boolean"
-            ? { value: value as { ok: boolean } }
-            : { issues: [{ message: "Expected ok" }] };
-        },
-        jsonSchema: { input: () => jsonSchema, output: () => jsonSchema },
+        validate: (value: unknown) =>
+          typeof value === "number" ? { value } : { issues: [{ message: "number required" }] },
+        jsonSchema: { input: () => ({ type: "number" }), output: () => ({ type: "number" }) },
       },
     };
-    const agent = testAgent()
-      .with(model(async () => ({ output: [{ type: "json", value: { ok: true } }] })))
-      .build();
-
-    expect(
-      (await agent.run().input("go", { outputSchema: explicit }).completed).events.at(-1),
-    ).toMatchObject({
-      type: "final",
-      output: { ok: true },
-    });
-    expect(
-      (await agent.run().input("go", { outputSchema: standard }).completed).events.at(-1),
-    ).toMatchObject({
-      type: "final",
-      output: { ok: true },
-    });
+    for (const outputSchema of [explicit, standard])
+      expect(
+        await Agent({ id: "a", name: "A", outputSchema })
+          .build()
+          .run({
+            input: "go",
+            onModelCall: async () => ({ output: [{ type: "json", value: 7 }] }),
+          }),
+      ).toMatchObject({ status: "completed", output: 7 });
   });
 });

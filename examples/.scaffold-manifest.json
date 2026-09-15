@@ -6,12 +6,12 @@
     "studio": "0.4.2-beta",
     "runtime": "0.4.0-beta"
   },
-  "templateHash": "96b2e8ddab54a27a645429f415c20e0083c3703fdec092ea2adc682abc8a74db",
+  "templateHash": "0d3723fb0827d848b32e7238ba22dd18656966ad20d3481439f7b3a4de98f895",
   "files": {
     ".env.example": "3d16199402772a53bf26c83ece9a25d614cb666d5cec09b0dc73d9e6a8bf4539",
     ".gitignore": "cb94dc6a72307da7dfee704758317e46c3d8ba04076ec66b031c648265c36e05",
     "package.json": "f3d8224fbc17d2db3bcfb2442cfa31191adeeb9cd4d44b0dab421dfb44f97e9e",
-    "src/index.ts": "6d3b002dec18d74865c2c1d59d06365f59b06ddb55c06956c1bae1791926da9f",
+    "src/index.ts": "249c06e9d3e21456973a4f1baae1f969f1331ed8d76655a61a988683a460f884",
     "tsconfig.build.json": "0210063cd78016582d5c14a7627a703258910a20ff9c57db7951e5c2a9d62c7d",
     "tsconfig.json": "912b9cdf9eac674c7f8e47c51c78594fbf09ba6372cf3131acfa4acb390b4d6a"
   }

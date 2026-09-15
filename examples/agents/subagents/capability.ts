@@ -32,35 +32,10 @@ export function delegateTo(agents: Readonly<Record<string, BuiltAgent>>) {
               message: "The parent session did not provide a model callable.",
             };
           }
-          const session = child.run({
-            id: `sub-${context.callId}`,
-            onModelCall: context.onModelCall,
-          });
           try {
-            const completion = await session.input(task, {
-              signal: context.signal,
-            }).completed;
-            if (completion.status !== "completed") {
-              return {
-                kind: "failed" as const,
-                code: "subagent.incomplete",
-                message: `Specialist '${name}' ended with status ${completion.status}.`,
-              };
-            }
-            const final = completion.events.find(
-              (event) => event.type === "final",
-            );
-            if (final === undefined || final.type !== "final") {
-              return {
-                kind: "failed" as const,
-                code: "subagent.no-final",
-                message: `Specialist '${name}' did not return a final answer.`,
-              };
-            }
-            return {
-              kind: "completed" as const,
-              output: { specialist: name, answer: final.output },
-            };
+            const completion = await child.run({ input: task, onModelCall: context.onModelCall, signal: context.signal, scope: context.scope });
+            if (completion.status !== "completed") return { kind: "failed" as const, code: "subagent.incomplete", message: `Specialist '${name}' ended with status ${completion.status}.` };
+            return { kind: "completed" as const, output: { specialist: name, answer: completion.output } };
           } catch (error) {
             return {
               kind: "failed" as const,
@@ -68,8 +43,6 @@ export function delegateTo(agents: Readonly<Record<string, BuiltAgent>>) {
               message:
                 error instanceof Error ? error.message : "Specialist failed.",
             };
-          } finally {
-            await session.stop();
           }
         },
       }),

@@ -7,8 +7,7 @@ import type {
   ModelConfigurationSnapshot,
 } from "../types/model.js";
 import type { StepInput, StepRequest, StepResponse } from "../types/middleware.js";
-import type { ContextItem, DeferredOutcome, Tripwire } from "../types/shared.js";
-import type { ActiveModelExecutionRecord } from "../types/session.js";
+import type { ContextItem, Tripwire } from "../types/shared.js";
 import type { ObserveEmit } from "../utils/observe.js";
 import type { BoundToolDefinition, Interaction, ToolDefinition } from "../types/tool.js";
 import { HarnessError, isHarnessError } from "../errors.js";
@@ -22,7 +21,6 @@ import {
 import { normalizeCandidate } from "../model/normalize.js";
 import { ContextDraft } from "./context-draft.js";
 import { ModelConfigurationDraft } from "./model-configuration.js";
-import type { CapabilityStateRegistry } from "../session/capability-state.js";
 
 const branded = new WeakSet<object>();
 
@@ -36,14 +34,12 @@ export class StepContext {
   readonly #observe: ObserveEmit;
   readonly #context: ContextDraft;
   readonly #configuration: ModelConfigurationDraft;
-  readonly #states?: CapabilityStateRegistry;
   readonly #denials = new Map<string, string>();
   readonly #interactions = new Map<string, Interaction>();
   readonly #identities = new Map<string, string>();
   #canonical: readonly CanonicalCall[] = Object.freeze([]);
   #candidate?: ModelCandidate;
   #tripwire?: Tripwire;
-  #modelDeferred?: ActiveModelExecutionRecord;
   #response?: StepResponse;
   #sealed = false;
   #configurationSnapshot?: ModelConfigurationSnapshot;
@@ -54,13 +50,11 @@ export class StepContext {
     observe: ObserveEmit,
     configuration: ModelConfigurationDraft,
     context: ContextDraft,
-    states?: CapabilityStateRegistry,
   ) {
     this.input = input;
     this.#observe = observe;
     this.#configuration = configuration;
     this.#context = context;
-    this.#states = states;
   }
 
   get currentTripwire(): Tripwire | undefined {
@@ -68,9 +62,6 @@ export class StepContext {
   }
   get currentCandidate(): Readonly<ModelCandidate> | undefined {
     return this.#candidate;
-  }
-  get currentModelDeferred(): ActiveModelExecutionRecord | undefined {
-    return this.#modelDeferred;
   }
   get selectedDirective(): ModelDirective | undefined {
     return this.configurationSnapshot().model;
@@ -112,11 +103,6 @@ export class StepContext {
     this.#candidate = candidateFromCanonical(candidate, output);
     this.#identities.clear();
     for (const call of calls) this.#identities.set(call.id, identityKey(call.name, call.args));
-    return this.#ensureResponse();
-  }
-
-  deferModel(active: ActiveModelExecutionRecord): StepResponse {
-    this.#modelDeferred = active;
     return this.#ensureResponse();
   }
 
@@ -186,10 +172,10 @@ export class StepContext {
         }
       });
     const request: Record<string, unknown> = {
-      sessionId: this.input.sessionId,
+      executionId: this.input.executionId,
       turnId: this.input.turnId,
       stepId: this.input.stepId,
-      session: this.input.session,
+      scope: this.input.scope,
       turnNumber: this.input.turnNumber,
       stepNumber: this.input.stepNumber,
       arrivals: this.input.arrivals,
@@ -255,12 +241,7 @@ export class StepContext {
         return minted;
       },
     };
-    if (this.#states?.has(middlewareId))
-      Object.defineProperty(request, "state", {
-        enumerable: true,
-        get: () => this.#states!.get(middlewareId),
-      });
-    const value = Object.freeze(request) as StepRequest;
+    const value = Object.freeze(request) as unknown as StepRequest;
     return Object.freeze({
       value,
       revokeMutators: () => {

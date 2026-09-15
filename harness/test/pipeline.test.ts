@@ -1,3 +1,4 @@
+import { registered } from "./fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { tool as authoredTool } from "../src/index.js";
 import { testAgent, execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
@@ -27,10 +28,13 @@ describe("step pipeline", () => {
     let step = 0;
     const seen: string[][] = [];
     const result = testAgent()
-      .use("once", async (request, next) => {
-        if (request.stepNumber === 1) request.configuration.tools.set("once", [tool()]);
-        return next();
-      })
+      .use(
+        "once",
+        registered([[tool()]], (registeredTools) => async (request, next) => {
+          if (request.stepNumber === 1) request.configuration.tools.set("once", registeredTools[0]);
+          return next();
+        }),
+      )
       .with(
         model(async (_call, { request }) => {
           seen.push(request.tools.map((item) => item.name));
@@ -43,20 +47,12 @@ describe("step pipeline", () => {
   });
 
   it("tripwires duplicate dynamic tools before the Model runs", async () => {
-    const invoke = vi.fn(async () => "done");
-    const result = testAgent()
-      .use("dup", async (request, next) => {
-        request.configuration.tools.set("dup", [tool("echo"), tool("echo")]);
-        return next();
-      })
-      .with(model(invoke))
-      .build();
-    const output = (await turn(result, "go").handle.completed).events;
-    expect(output).toMatchObject([
-      { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "configuration.duplicate-tool-name" } },
-    ]);
-    expect(invoke).not.toHaveBeenCalled();
+    expect(() =>
+      testAgent()
+        .use("dup", offer(tool("echo"), tool("echo")))
+        .with(model(async () => "done"))
+        .build(),
+    ).toThrow(/Duplicate registered tool/);
   });
 
   it("keeps canonical IDs and monotonic denials across replace", async () => {
@@ -68,13 +64,19 @@ describe("step pipeline", () => {
         response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 1 } }));
         return response;
       })
-      .use("inner", async (request, next) => {
-        request.configuration.tools.set("inner", [tool("echo", execution(execute))]);
-        const response = await next();
-        expect(response.toolCalls().map((call) => call.id)).toEqual(["keep", "drop"]);
-        response.deny("keep", "blocked");
-        return response;
-      })
+      .use(
+        "inner",
+        registered(
+          [[tool("echo", execution(execute))]],
+          (registeredTools) => async (request, next) => {
+            request.configuration.tools.set("inner", registeredTools[0]);
+            const response = await next();
+            expect(response.toolCalls().map((call) => call.id)).toEqual(["keep", "drop"]);
+            response.deny("keep", "blocked");
+            return response;
+          },
+        ),
+      )
       .with(
         model(async () => {
           if (++step > 1) return "done";
@@ -100,12 +102,15 @@ describe("step pipeline", () => {
   it("tripwires replace that changes a retained call identity", async () => {
     let step = 0;
     const result = testAgent()
-      .use("rewrite", async (request, next) => {
-        request.configuration.tools.set("rewrite", [tool()]);
-        const response = await next();
-        response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 99 } }));
-        return response;
-      })
+      .use(
+        "rewrite",
+        registered([[tool()]], (registeredTools) => async (request, next) => {
+          request.configuration.tools.set("rewrite", registeredTools[0]);
+          const response = await next();
+          response.replace(toolCalls({ id: "keep", name: "echo", args: { n: 99 } }));
+          return response;
+        }),
+      )
       .with(
         model(async () =>
           ++step === 1 ? toolCalls({ id: "keep", name: "echo", args: { n: 1 } }) : "done",
@@ -124,16 +129,19 @@ describe("step pipeline", () => {
     const observed: string[] = [];
     let lateError = "";
     const result = testAgent()
-      .use("late", async (request, next) => {
-        setTimeout(() => {
-          try {
-            request.configuration.tools.set("late", [tool()]);
-          } catch (error) {
-            lateError = error instanceof Error ? error.message : String(error);
-          }
-        }, 0);
-        return next();
-      })
+      .use(
+        "late",
+        registered([[tool()]], (registeredTools) => async (request, next) => {
+          setTimeout(() => {
+            try {
+              request.configuration.tools.set("late", registeredTools[0]);
+            } catch (error) {
+              lateError = error instanceof Error ? error.message : String(error);
+            }
+          }, 0);
+          return next();
+        }),
+      )
       .with(model(async () => "done"))
       .build();
     const session = result.run();
@@ -157,11 +165,14 @@ describe("step pipeline", () => {
     });
     const schemas: unknown[] = [];
     const result = testAgent()
-      .use("snapshot", async (request, next) => {
-        request.configuration.tools.set("snapshot", [definition]);
-        (definition as { inputSchema: unknown }).inputSchema = z.object({ admin: z.string() });
-        return next();
-      })
+      .use(
+        "snapshot",
+        registered([[definition]], (registeredTools) => async (request, next) => {
+          request.configuration.tools.set("snapshot", registeredTools[0]);
+          (definition as { inputSchema: unknown }).inputSchema = z.object({ admin: z.string() });
+          return next();
+        }),
+      )
       .with(
         model(async (_call, { request }) => {
           schemas.push(request.tools[0]?.inputSchema.jsonSchema);
@@ -197,11 +208,11 @@ describe("step pipeline", () => {
   it("keeps a sibling Session running after a session-scoped tripwire", async () => {
     const agent = testAgent()
       .use("boom", async (request, next) => {
-        if (request.session.userId === "a") {
+        if ((request.scope as { userId?: string })?.userId === "a") {
           return request.tripwire({
             code: "policy.stop",
             message: "stop A",
-            scope: "session",
+            scope: "execution",
           });
         }
         return next();

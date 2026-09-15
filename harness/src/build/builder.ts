@@ -8,10 +8,13 @@ import type {
 import type { ModelDirective } from "../types/model.js";
 import type { BuildDiagnostic } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
+import type { ToolSchemaSource, SchemaOutput } from "../types/tool.js";
 import type { BuiltAgent } from "./agent.js";
 import { assembleAgent } from "./assemble.js";
 
-export interface AgentOptions {
+export interface AgentOptions<Schema extends ToolSchemaSource | undefined = undefined> {
+  readonly outputSchema?: Schema;
+  readonly executionVersion?: string;
   readonly id: string;
   readonly name: string;
   readonly instructions?: string | readonly string[];
@@ -21,8 +24,10 @@ interface BuilderState {
   readonly id: string;
   readonly name: string;
   readonly middleware: BoundMiddleware[];
+  readonly outputSchema?: ToolSchemaSource;
+  readonly executionVersion: string;
   sealed: boolean;
-  agent?: BuiltAgent;
+  agent?: BuiltAgent<any, any>;
   error?: AgentBuildError;
   middlewareSeq: number;
 }
@@ -44,34 +49,41 @@ export class AgentLifecycleError extends HarnessError {
   }
 }
 
-export function Agent(options: AgentOptions): AgentBuilder {
+export function Agent<Scope = unknown, Schema extends ToolSchemaSource | undefined = undefined>(
+  options: AgentOptions<Schema>,
+): AgentBuilder<Scope, Schema> {
   return new AgentBuilder(createState(options));
 }
 
-export class AgentBuilder {
+export class AgentBuilder<
+  Scope = unknown,
+  Schema extends ToolSchemaSource | undefined = undefined,
+> {
   constructor(private readonly state: BuilderState) {}
 
-  use(middleware: StepMiddleware): this;
-  use(id: string, middleware: StepMiddleware): this;
-  use<State>(declaration: CapabilityDeclaration<State>): this;
-  use<State>(
-    idOrMiddleware: string | StepMiddleware | CapabilityDeclaration<State>,
-    middleware?: StepMiddleware,
+  use(middleware: StepMiddleware<Scope>): this;
+  use(id: string, middleware: StepMiddleware<Scope>): this;
+  use(declaration: CapabilityDeclaration<Scope>): this;
+  use(
+    idOrMiddleware: string | StepMiddleware<Scope> | CapabilityDeclaration<Scope>,
+    middleware?: StepMiddleware<Scope>,
   ): this {
     if (typeof idOrMiddleware === "function") {
-      return this.push({ id: this.nextMiddlewareId(), handle: idOrMiddleware });
+      return this.push({ id: this.nextMiddlewareId(), handle: idOrMiddleware as StepMiddleware });
     }
     if (typeof idOrMiddleware === "object") return this.push(compileDeclaration(idOrMiddleware));
-    return this.push({ id: idOrMiddleware, handle: middleware! });
+    return this.push({ id: idOrMiddleware, handle: middleware! as StepMiddleware });
   }
 
-  build(): BuiltAgent {
+  build(): BuiltAgent<Scope, Schema extends ToolSchemaSource ? SchemaOutput<Schema> : string> {
     if (this.state.agent) return this.state.agent;
     if (this.state.error) throw this.state.error;
     this.state.sealed = true;
     const result = assembleAgent(this.state.middleware, {
       id: this.state.id,
       name: this.state.name,
+      executionVersion: this.state.executionVersion,
+      outputSchema: this.state.outputSchema,
     });
     if (!result.ok) {
       this.state.error = new AgentBuildError(result.diagnostics);
@@ -103,7 +115,14 @@ export class AgentBuilder {
   }
 }
 
-function createState(options: AgentOptions): BuilderState {
+function createState(options: AgentOptions<ToolSchemaSource | undefined>): BuilderState {
+  if (
+    options.executionVersion !== undefined &&
+    (typeof options.executionVersion !== "string" || options.executionVersion.length === 0)
+  )
+    throw new AgentBuildError([
+      { code: "agent.invalid-version", message: "executionVersion must be a non-empty string" },
+    ]);
   const middleware: BoundMiddleware[] = [];
   if (options.instructions !== undefined) {
     const instructions =
@@ -112,6 +131,8 @@ function createState(options: AgentOptions): BuilderState {
   }
   return {
     id: options.id,
+    executionVersion: options.executionVersion ?? "1",
+    outputSchema: options.outputSchema,
     name: options.name,
     middleware,
     sealed: false,
@@ -133,9 +154,8 @@ function compileDeclaration<State>(declaration: CapabilityDeclaration<State>): B
   return {
     id: declaration.id,
     handle,
-    ...(declaration.state === undefined
-      ? {}
-      : { state: declaration.state as CapabilityDeclaration["state"] }),
+    tools: tools?.items,
+    toolFamilies: declaration.toolFamilies,
     ...(contributions === undefined ? {} : { contributions }),
   };
 }

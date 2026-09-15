@@ -7,7 +7,7 @@ import type {
   ModelRequest,
 } from "../types/model.js";
 import type { ContextItem } from "../types/shared.js";
-import type { TranscriptEntry } from "../types/session.js";
+import type { TranscriptEntry } from "../types/transcript.js";
 import type { ToolResult } from "../types/tool.js";
 import { copyJson } from "../utils/immutable.js";
 
@@ -29,7 +29,7 @@ export function projectModelCall(request: ModelRequest): ModelCall {
     ),
     ...(request.model === undefined ? {} : { model: copyJson(request.model) }),
     ...(request.outputSchema === undefined ? {} : { outputSchema: copyJson(request.outputSchema) }),
-    sessionId: request.sessionId,
+    executionId: request.executionId,
   });
 }
 

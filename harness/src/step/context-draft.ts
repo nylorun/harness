@@ -3,18 +3,16 @@ import type {
   ContextMutationOptions,
   ContextSnapshot,
 } from "../types/model.js";
-import type { ContextItem, JsonObject, JsonValue } from "../types/shared.js";
+import type { ContextItem, JsonValue } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
 import { copyJson } from "../utils/immutable.js";
 import { SlotDraft, type SlotOwner } from "./slot-assembly.js";
 
 const CONTEXT_TYPE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 
-/** Per-step runtime-context draft. Host context is injected fresh for every call. */
+/** Per-step model-visible context supplied explicitly by middleware. */
 export class ContextDraft {
   #slots = new SlotDraft<readonly ContextItem[]>();
-
-  constructor(private readonly hostContext?: JsonObject) {}
 
   set(
     middlewareId: string,
@@ -41,15 +39,8 @@ export class ContextDraft {
 
   snapshot(): ContextSnapshot {
     const slots = this.#slots.values();
-    const host =
-      this.hostContext === undefined
-        ? []
-        : [Object.freeze({ type: "session" as const, value: copyJson(this.hostContext) })];
-    const items = Object.freeze([...host, ...slots.flatMap((slot) => slot.value)]);
-    const contributors = Object.freeze([
-      ...(this.hostContext === undefined ? [] : [hostContributor()]),
-      ...slots.map((slot) => contributor(slot.owner, slot.reason)),
-    ]);
+    const items = Object.freeze(slots.flatMap((slot) => slot.value));
+    const contributors = Object.freeze(slots.map((slot) => contributor(slot.owner, slot.reason)));
     return Object.freeze({ items, contributors });
   }
 }
@@ -65,14 +56,6 @@ function normalizeItem(item: ContextItem): ContextItem {
   return Object.freeze({
     ...(item.type === undefined ? {} : { type: item.type }),
     value: copyJson(item.value) as JsonValue,
-  });
-}
-
-function hostContributor(): ContextContributor {
-  return Object.freeze({
-    middlewareId: "host",
-    slot: "session",
-    order: 0,
   });
 }
 

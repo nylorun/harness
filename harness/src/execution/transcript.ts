@@ -2,52 +2,23 @@ import { HarnessError } from "../errors.js";
 import { normalizeCandidate } from "../model/normalize.js";
 import type {
   InputEvent,
-  SessionSeed,
   TranscriptEntry,
   TranscriptToolsEntry,
   UserContentPart,
-} from "../types/session.js";
+} from "../types/transcript.js";
 import type { ToolResult } from "../types/tool.js";
 import { assertJson, copyJson, copyJsonObject } from "../utils/immutable.js";
 
-export interface NormalizedSessionSeed {
-  readonly id?: string;
-  readonly userId?: string;
-  readonly context?: import("../types/shared.js").JsonObject;
-  readonly turnCount: number;
-  readonly revision: number;
-  readonly transcript: readonly TranscriptEntry[];
-}
-
-export function normalizeSessionSeed(seed: SessionSeed): NormalizedSessionSeed {
+export function validateTranscript(value: readonly TranscriptEntry[]): readonly TranscriptEntry[] {
   try {
-    return normalizeSeed(seed);
+    if (!Array.isArray(value)) fail("Transcript must be an array");
+    return Object.freeze(value.map((entry, index) => entryAt(entry, index)));
   } catch (cause) {
-    if (cause instanceof HarnessError && cause.code === "session.invalid-seed") throw cause;
-    throw new HarnessError("session.invalid-seed", "Session seed contains invalid typed JSON", {
+    if (cause instanceof HarnessError && cause.code === "execution.invalid-state") throw cause;
+    throw new HarnessError("execution.invalid-state", "Transcript contains invalid typed JSON", {
       cause,
     });
   }
-}
-
-function normalizeSeed(seed: SessionSeed): NormalizedSessionSeed {
-  if (!seed || typeof seed !== "object") fail("Session seed must be an object");
-  if (!Array.isArray(seed.transcript)) fail("Session seed transcript must be an array");
-  optionalString(seed.id, "Session seed id");
-  optionalString(seed.userId, "Session seed userId");
-  const turnCount = count(seed.turnCount, "turnCount");
-  const revision = count(seed.revision, "revision");
-  const transcript = Object.freeze(seed.transcript.map((entry, index) => entryAt(entry, index)));
-  return Object.freeze({
-    ...(seed.id === undefined ? {} : { id: seed.id }),
-    ...(seed.userId === undefined ? {} : { userId: seed.userId }),
-    ...(seed.context === undefined
-      ? {}
-      : { context: copyJsonObject(seed.context, "session seed context") }),
-    turnCount,
-    revision,
-    transcript,
-  });
 }
 
 function entryAt(value: unknown, index: number): TranscriptEntry {
@@ -75,9 +46,13 @@ function entryAt(value: unknown, index: number): TranscriptEntry {
           candidate: normalizeCandidate(entry.candidate as never),
         });
       } catch (cause) {
-        throw new HarnessError("session.invalid-seed", `Invalid candidate at transcript ${index}`, {
-          cause,
-        });
+        throw new HarnessError(
+          "execution.invalid-state",
+          `Invalid candidate at transcript ${index}`,
+          {
+            cause,
+          },
+        );
       }
     }
     case "tool-results": {
@@ -327,21 +302,10 @@ function exactKeys(
     if (!allowed.includes(key)) fail(`${label} has unknown field '${key}'`);
 }
 
-function count(value: unknown, label: string): number {
-  if (value === undefined) return 0;
-  if (!Number.isSafeInteger(value) || (value as number) < 0)
-    fail(`Session seed ${label} must be a non-negative safe integer`);
-  return value as number;
-}
-
-function optionalString(value: unknown, label: string): void {
-  if (value !== undefined) requiredString(value, label);
-}
-
 function requiredString(value: unknown, label: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0) fail(`${label} must be a non-empty string`);
 }
 
 function fail(message: string): never {
-  throw new HarnessError("session.invalid-seed", message);
+  throw new HarnessError("execution.invalid-state", message);
 }
