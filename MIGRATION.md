@@ -2,23 +2,24 @@
 
 This is a coordinated breaking beta for Harness, Runtime, Studio, and the creator. Upgrade them as a compatible set. Existing SessionRecord files are not the new ExecutionState format; keep backups and treat legacy event-only records as archived history.
 
-| Previous interface                                              | Replacement                                                                        |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `agent.run()` returns a Session; `session.input(...).completed` | `await agent.run({ input, state?, onModelCall })` returns an outcome and state     |
-| Harness sessions, submission queues, interruption               | Runtime `SessionHost`, or your own application host                                |
-| Session identity/context in Harness                             | Fresh `info` on every invocation; model-visible `request.context` remains explicit |
-| Per-turn/per-run `outputSchema`                                 | `Agent({ outputSchema })`                                                          |
-| Capability resource factories/disposal                          | Application-created dependencies and application-owned shutdown                    |
-| Dynamically exposed executable closures                         | Registered ordinary tools. Put discovered identity in tool arguments or `info`.    |
-| Session recorder/event replay                                   | Awaited `record(state)` callback; no automatic replay of uncertain effects         |
-| Default local persistence and file observer                     | Memory sessions and no file observer; explicitly opt into Node adapters            |
-| Root imports of local adapters, assets, or `piModel`            | Imports from `@nylorun/runtime/node`                                               |
+| Previous interface                                              | Replacement                                                                                          |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `agent.run()` returns a Session; `session.input(...).completed` | `await agent.run({ input, state?, onModelCall, info?, signal?, record? })` returns outcome and state |
+| Harness sessions, submission queues, interruption               | Runtime `SessionHost`, or your own application host                                                  |
+| Session identity/context in Harness                             | Fresh `info` on every invocation; model-visible `request.context` remains explicit                   |
+| Per-run application `scope` bag                                 | `RunOptions.info` / `request.info` / `context.info` (Runtime `getInfo` / `SubmitOptions.info`)       |
+| Per-turn/per-run `outputSchema`                                 | `Agent({ outputSchema })`                                                                            |
+| Capability resource factories/disposal                          | Application-created dependencies and application-owned shutdown                                      |
+| Dynamically exposed executable closures                         | Registered ordinary tools. Put discovered identity in tool arguments or `info`.                      |
+| Session recorder/event replay                                   | Awaited `record(state)` callback; no automatic replay of uncertain effects                           |
+| Default local persistence and file observer                     | Memory sessions and no file observer; explicitly opt into Node adapters                              |
+| Root imports of local adapters, assets, or `piModel`            | Imports from `@nylorun/runtime/node`                                                                 |
 
 ## Update execution
 
-Handle all four result statuses. A pause is a finished invocation: persist its state and resume through another `run()` call with a correlated approval, response, or deferred settlement. A cancellation is also a settled outcome. Keep the latest returned state for subsequent turns. Remove calls to Harness `stop()`, `close()`, public steps, queues, and completion handles.
+Handle all four result statuses. A pause is a finished invocation: persist its state and resume through another `run()` call with a correlated approval, response, or deferred settlement. A cancellation is also a settled outcome (`status: "cancelled"`). Pass `signal` (an `AbortSignal`) when the host needs to cancel an in-flight run; treat abort as a settled cancelled outcome rather than throwing through application code. Keep the latest returned state for subsequent turns. Remove calls to Harness `stop()`, `close()`, public steps, queues, and completion handles.
 
-Pass fresh application info to middleware and tools. Rename tool/model `context.sessionId` uses: `context.executionId` correlates Harness execution; Runtime's session ID is available through application info. Do not infer authorization from saved state. Tools must authorize the original bound resource with the current principal.
+Pass fresh application `info` to middleware and tools (formerly `scope`). Rename tool/model `context.sessionId` uses: `context.executionId` correlates Harness execution; Runtime's session ID is available through application info. Do not infer authorization from saved state. Tools must authorize the original bound resource with the current principal.
 
 Final output schemas now describe the agent definition. If different runs require different contracts, build distinct agent definitions. Preserve compatible deployed definitions to finish existing pauses, or reconcile them explicitly. Agent generation, drain, and migrate-in-place belong to the host, not Harness.
 

@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { preparedModel, type ModelCall, type ObserveEvent } from "../src/index.js";
-import { chatCompletionsAdapter, toMessages, toResponses } from "../src/execution/model/adapters.js";
+import {
+  chatCompletionsAdapter,
+  toMessages,
+  toResponses,
+} from "../src/execution/model/adapters.js";
 import { model, testAgent } from "./fixtures.js";
 
 const image = {

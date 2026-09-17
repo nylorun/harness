@@ -5,11 +5,7 @@ import type { ObserveEvent } from "../types/observe.js";
 import { HarnessError } from "../errors.js";
 import { copyJson } from "../utils/immutable.js";
 import { createId } from "../utils/ids.js";
-import {
-  createObservationSink,
-  type ExecutionOutcomeEvent,
-  type ObserveEmit,
-} from "./observe.js";
+import { createObservationSink, type ExecutionOutcomeEvent, type ObserveEmit } from "./observe.js";
 
 export interface Invocation {
   readonly agent: AgentDefinition;
