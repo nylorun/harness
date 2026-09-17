@@ -1,6 +1,7 @@
 import type { ModelAdapter } from "./model.js";
 import type { InputEvent, MessageInput, TranscriptEntry } from "./transcript.js";
-import type { JsonObject, JsonValue, ObserveEvent, Tripwire } from "./shared.js";
+import type { ObserveEvent } from "./observe.js";
+import type { JsonObject, JsonValue, Tripwire } from "./shared.js";
 import type { RequiredInteraction, ToolExecutionResume, ToolOutcome, ToolResult } from "./tool.js";
 
 export type ExecutionInput =
@@ -16,10 +17,7 @@ export type ExecutionInput =
 /** Portable reference to deployed code. Applications must preserve this value intact. */
 export interface ToolReference {
   readonly capabilityId: string;
-  readonly toolName?: string;
-  readonly familyId?: string;
-  readonly version?: string;
-  readonly binding?: JsonValue;
+  readonly toolName: string;
   readonly descriptor: {
     readonly name: string;
     readonly description?: string;
@@ -52,11 +50,10 @@ export interface ExecutionPlan {
   readonly calls: readonly SavedToolCall[];
 }
 
-/** Versioned continuation data, not a Session or a live execution object. */
+/** Versioned continuation data, not a live execution object. */
 export interface ExecutionState {
   readonly version: 1;
   readonly agentId: string;
-  readonly executionVersion: string;
   readonly executionId: string;
   readonly outputContract?: JsonObject;
   readonly revision: number;
@@ -81,11 +78,11 @@ export type ExecutionEvent = (
     }
 ) & { readonly executionId: string; readonly sequence: number; readonly runId: string };
 
-export interface RunOptions<Scope = unknown> {
+export interface RunOptions<Info = unknown> {
   readonly state?: ExecutionState;
   readonly input: ExecutionInput;
   readonly onModelCall: ModelAdapter;
-  readonly scope?: Scope;
+  readonly info?: Info;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: ExecutionEvent) => void | Promise<void>;
   readonly record?: (state: ExecutionState) => void | Promise<void>;

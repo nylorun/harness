@@ -15,7 +15,7 @@ import type {
 
 export interface SubmitOptions {
   readonly runId?: string;
-  readonly scope?: unknown;
+  readonly info?: unknown;
   readonly signal?: AbortSignal;
   readonly onModelCall: ModelAdapter;
   readonly secrets?: readonly string[];
@@ -198,7 +198,7 @@ export class SessionHost {
           const result = await agent.run({
             state: document.state,
             input,
-            scope: options.scope,
+            info: options.info,
             signal: controller.signal,
             onModelCall: options.onModelCall,
             onEvent: (event) => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createId } from "../src/utils/ids.js";
-import { emitObserve } from "../src/utils/observe.js";
+import { createObservationSink, emitObserve } from "../src/execution/observe.js";
 
 describe("portable utility primitives", () => {
   it("creates prefixed UUID v4 identifiers with Web Crypto", () => {
@@ -15,7 +15,7 @@ describe("observer emission", () => {
     let calls = 0;
     emitObserve(undefined, () => {
       calls += 1;
-      return { type: "session.stopped", reason: "unused" };
+      return { type: "middleware.entered", turnId: "turn", stepId: "step", middlewareId: "mw" };
     });
     expect(calls).toBe(0);
   });
@@ -27,21 +27,26 @@ describe("observer emission", () => {
       (event) => types.push(event.type),
       () => {
         calls += 1;
-        return { type: "session.stopped", reason: "done" };
+        return { type: "middleware.entered", turnId: "turn", stepId: "step", middlewareId: "mw" };
       },
     );
     expect(calls).toBe(1);
-    expect(types).toEqual(["session.stopped"]);
+    expect(types).toEqual(["middleware.entered"]);
   });
 
-  it("isolates observer failures from the session", () => {
+  it("isolates observer failures and reports observation.failed", () => {
+    const types: string[] = [];
+    const sink = createObservationSink({
+      listener: (event) => {
+        types.push(event.type);
+        if (event.type === "middleware.entered") throw new Error("observer failed");
+      },
+      executionId: () => "exec",
+      runId: "run",
+    });
     expect(() =>
-      emitObserve(
-        () => {
-          throw new Error("observer failed");
-        },
-        { type: "session.stopped", executionId: "session" },
-      ),
+      sink.emit({ type: "middleware.entered", turnId: "turn", stepId: "step", middlewareId: "mw" }),
     ).not.toThrow();
+    expect(types).toEqual(["middleware.entered", "observation.failed"]);
   });
 });

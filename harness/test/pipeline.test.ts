@@ -208,7 +208,7 @@ describe("step pipeline", () => {
   it("keeps a sibling Session running after a session-scoped tripwire", async () => {
     const agent = testAgent()
       .use("boom", async (request, next) => {
-        if ((request.scope as { userId?: string })?.userId === "a") {
+        if ((request.info as { userId?: string })?.userId === "a") {
           return request.tripwire({
             code: "policy.stop",
             message: "stop A",
@@ -255,6 +255,8 @@ describe("step pipeline", () => {
       );
     await turn(builder.build(), "go").handle.completed;
     expect(seen).toEqual([[]]);
-    expect(builder.build().manifest.middleware.map((item) => item.id)).toEqual(["nylorun-folder"]);
+    expect(builder.build().manifest.capabilities.map((item) => item.id)).toEqual([
+      "nylorun-folder",
+    ]);
   });
 });

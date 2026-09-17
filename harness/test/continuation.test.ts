@@ -80,9 +80,9 @@ it("restores an approval in a fresh process without redispatching its settled si
   if (first.status !== "paused") throw new Error("Expected pause");
   const script = `import {Agent} from './dist/index.js'; import {z} from 'zod';
     const state = JSON.parse(process.argv[1]);
-    const agent = Agent({id:'approval',name:'Approval'}).use({id:'tools',tools:['approved','done'].map(name=>({name,inputSchema:z.object({}),execute:async(_, {scope,resume})=>{if(name==='done')throw new Error('must not redispatch');if(resume.token.resource!=='original')throw new Error('lost original resource');return {kind:'completed',output:scope.principal};}}))}).build();
+    const agent = Agent({id:'approval',name:'Approval'}).use({id:'tools',tools:['approved','done'].map(name=>({name,inputSchema:z.object({}),execute:async(_, {info,resume})=>{if(name==='done')throw new Error('must not redispatch');if(resume.token.resource!=='original')throw new Error('lost original resource');return {kind:'completed',output:info.principal};}}))}).build();
     const call=state.plan.calls.find(call=>call.interaction);
-    const result=await agent.run({state,input:{kind:'approve',interactionId:call.interaction.id,approved:true},scope:{principal:'fresh authorization'},onModelCall:async()=> 'restored'});
+    const result=await agent.run({state,input:{kind:'approve',interactionId:call.interaction.id,approved:true},info:{principal:'fresh authorization'},onModelCall:async()=> 'restored'});
     process.stdout.write(JSON.stringify(result));`;
   const { stdout } = await promisify(execFile)(process.execPath, [
     "--input-type=module",

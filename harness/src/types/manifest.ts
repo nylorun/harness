@@ -1,18 +1,25 @@
-import type { BoundMiddleware, MiddlewareContributions } from "./middleware.js";
-import type { BuildDiagnostic } from "./shared.js";
+import type { ModelDirective } from "./model.js";
+import type { JsonObject } from "./shared.js";
 
-export interface MiddlewareManifest extends MiddlewareContributions {
+export interface ManifestTool {
+  readonly name: string;
+  readonly description?: string;
+  readonly inputSchema: JsonObject;
+  readonly outputSchema?: JsonObject;
+}
+
+export interface CapabilityManifest {
   readonly id: string;
+  readonly kind: "agent" | "capability" | "middleware";
+  readonly hasMiddleware: boolean;
+  readonly instructions?: readonly string[];
+  readonly tools?: readonly ManifestTool[];
+  readonly model?: Pick<ModelDirective, "id" | "controls">;
 }
 
 export interface AgentManifest {
   readonly id: string;
   readonly name: string;
-  readonly middleware: readonly MiddlewareManifest[];
+  readonly outputSchema?: JsonObject;
+  readonly capabilities: readonly CapabilityManifest[];
 }
-
-export type BuildResult<Agent> =
-  | { readonly ok: true; readonly agent: Agent; readonly manifest: AgentManifest }
-  | { readonly ok: false; readonly diagnostics: readonly BuildDiagnostic[] };
-
-export type { BoundMiddleware };

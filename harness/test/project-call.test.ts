@@ -7,7 +7,7 @@ import {
   type ModelRequest,
   type ModelConfigurationSnapshot,
 } from "../src/index.js";
-import { projectModelCall } from "../src/step/project.js";
+import { projectModelCall } from "../src/execution/model/project.js";
 import { testAgent, execution, model, offer, tool, toolCalls, turn } from "./fixtures.js";
 
 function configuration(

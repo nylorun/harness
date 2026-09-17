@@ -10,7 +10,6 @@ describe("public API", () => {
         "AgentBuilder",
         "AgentBuildError",
         "AgentLifecycleError",
-        "BuiltAgent",
         "tool",
         "defineSchema",
         "model",
@@ -18,6 +17,8 @@ describe("public API", () => {
       ]),
     );
     expect(api).not.toHaveProperty("bindAgent");
+    expect(api).not.toHaveProperty("BuiltAgent");
+    expect(api).not.toHaveProperty("defineToolFamily");
     expect(manifest.exports).toHaveProperty(".");
     expect(manifest.exports).toHaveProperty("./model/adapters");
     expect(Object.keys(manifest.exports)).toEqual([".", "./model/adapters"]);

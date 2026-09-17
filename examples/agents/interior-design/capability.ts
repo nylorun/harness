@@ -30,7 +30,7 @@ export function interiorDesign(
             };
           const source = await store.latestInput(
             "interior-design",
-            ((context.scope as { sessionId?: string } | undefined)?.sessionId ?? context.executionId),
+            ((context.info as { sessionId?: string } | undefined)?.sessionId ?? context.executionId),
           );
           if (!source)
             return {
@@ -40,7 +40,7 @@ export function interiorDesign(
             };
           const input = await store.read(
             "interior-design",
-            ((context.scope as { sessionId?: string } | undefined)?.sessionId ?? context.executionId),
+            ((context.info as { sessionId?: string } | undefined)?.sessionId ?? context.executionId),
             source.id,
           );
           if (!input)
@@ -58,7 +58,7 @@ export function interiorDesign(
             });
             const image = await store.saveGenerated(
               "interior-design",
-              ((context.scope as { sessionId?: string } | undefined)?.sessionId ?? context.executionId),
+              ((context.info as { sessionId?: string } | undefined)?.sessionId ?? context.executionId),
               result.mediaType,
               result.bytes,
             );

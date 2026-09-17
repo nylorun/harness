@@ -1,12 +1,12 @@
 import { expect, it } from "vitest";
 import { Agent } from "../src/index.js";
 
-it("isolates state, scope, and execution identities in concurrent calls", async () => {
-  const scopes: unknown[] = [];
+it("isolates state, info, and execution identities in concurrent calls", async () => {
+  const infos: unknown[] = [];
   const agent = Agent<{ name: string }>({ id: "a", name: "A" })
-    .use("scope", async (request, next) => {
-      scopes.push(request.scope);
-      request.context.set("name", [{ value: request.scope!.name }]);
+    .use("info", async (request, next) => {
+      infos.push(request.info);
+      request.context.set("name", [{ value: request.info!.name }]);
       return next();
     })
     .build();
@@ -14,7 +14,7 @@ it("isolates state, scope, and execution identities in concurrent calls", async 
     ["a", "b", "c"].map((name) =>
       agent.run({
         input: name,
-        scope: { name },
+        info: { name },
         onModelCall: async (_, { request }) => {
           await Promise.resolve();
           return String(request.context.items[0]!.value);
@@ -28,5 +28,5 @@ it("isolates state, scope, and execution identities in concurrent calls", async 
     "c",
   ]);
   expect(new Set(results.map((result) => result.state.executionId)).size).toBe(3);
-  expect(scopes).toEqual([{ name: "a" }, { name: "b" }, { name: "c" }]);
+  expect(infos).toEqual([{ name: "a" }, { name: "b" }, { name: "c" }]);
 });

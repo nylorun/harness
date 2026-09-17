@@ -29,9 +29,9 @@ A `SessionStore` provides `get(agentId, sessionId)`, atomic `put(agentId, sessio
 
 The host's scheduling scope is one process. A shared store is not a distributed scheduler. Advanced applications can use `SessionHost` without Hono, reuse `agUiEvents()` protocol translation, or compose Harness with their own host. Managed Cloud Runtime remains future work.
 
-## Scope, delivery, and resources
+## Info, delivery, and resources
 
-Application middleware authorizes every route. `getScope(context)` supplies fresh trusted application scope for each invocation; Runtime adds `sessionId`. `getEnvironment(context)` can supply per-request provider bindings without changing process globals. Neither scope nor live resources are implicitly model-visible. `getActor` remains a convenience for userId; use `getScope` for typed application identity.
+Application middleware authorizes every route. `getInfo(context)` supplies extra application data for each invocation; Runtime adds `sessionId`. `getEnvironment(context)` can supply per-request provider bindings without changing process globals. Neither info nor live resources are implicitly model-visible. `getActor` remains a convenience for userId; use `getInfo` for typed application identity.
 
 Runtime delivers ordered observations incrementally, separately from committed history. `tokens: true` enables provisional text previews on compatible model adapters; the default is off. `createModel({ environment, media, onPreview })` supplies preview support for custom adapters. Studio shows drafts separately and discards them on settlement; accepted output remains authoritative. Partial tool arguments never dispatch tools.
 

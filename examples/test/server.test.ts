@@ -92,7 +92,7 @@ describe("multi-agent Hono host", () => {
         manifest: {
           id: "interactions",
           name: "Interactions",
-          middleware: [
+          capabilities: [
             { id: "agent", instructions: [exampleInstructions] },
             {
               id: "model",
@@ -221,9 +221,12 @@ describe("multi-agent Hono host", () => {
       );
       expect(requests).toHaveLength(2);
       expect(requests[0]?.payload.invocationId).toEqual(expect.any(String));
-      expect(requests[0]?.payload.invocationId).not.toBe(requests[1]?.payload.invocationId);
-      expect(requests[0]?.payload.executionId).toBe(requests[1]?.payload.executionId);
-
+      expect(requests[0]?.payload.invocationId).not.toBe(
+        requests[1]?.payload.invocationId
+      );
+      expect(requests[0]?.payload.executionId).toBe(
+        requests[1]?.payload.executionId
+      );
     } finally {
       await runtime.close();
       await rm(root, { recursive: true, force: true });
@@ -239,15 +242,18 @@ describe("multi-agent Hono host", () => {
       model: "deterministic",
     });
     try {
-      const submitted = await runtime.app.request("http://local/interactions/v1/ag-ui", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          threadId: "notes",
-          runId: "run",
-          messages: [{ role: "user", content: "save a note" }],
-        }),
-      });
+      const submitted = await runtime.app.request(
+        "http://local/interactions/v1/ag-ui",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            threadId: "notes",
+            runId: "run",
+            messages: [{ role: "user", content: "save a note" }],
+          }),
+        }
+      );
       await submitted.text();
       const waiting = await runtime.app.request(
         "http://local/interactions/v1/sessions/notes"
@@ -268,20 +274,17 @@ describe("multi-agent Hono host", () => {
           }),
         ]),
       });
-      await runtime.app.request(
-        "http://local/interactions/v1/sessions/notes",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            interaction: {
-              id: state.pending_interaction!.id,
-              kind: "approval",
-              approved: true,
-            },
-          }),
-        }
-      );
+      await runtime.app.request("http://local/interactions/v1/sessions/notes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          interaction: {
+            id: state.pending_interaction!.id,
+            kind: "approval",
+            approved: true,
+          },
+        }),
+      });
       await expect(
         readFile(join(root, ".data", "interactions", "notes.jsonl"), "utf8")
       ).resolves.toContain("verified note");
@@ -372,13 +375,7 @@ describe("multi-agent Hono host", () => {
         ])
       );
       const journal = await readFile(
-        join(
-          root,
-          ".data",
-          "sessions",
-          "interior-design",
-          "room.json"
-        ),
+        join(root, ".data", "sessions", "interior-design", "room.json"),
         "utf8"
       );
       expect(journal).not.toContain(encodedPng);

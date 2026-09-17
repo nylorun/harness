@@ -95,7 +95,7 @@ function fixtureSession(agent: BuiltAgent, adapter: ModelAdapter, options: any):
         .run({
           state,
           input,
-          scope: options.scope ?? {
+          info: options.info ?? {
             userId: options.userId,
             ...(options.context === undefined ? {} : { context: options.context }),
           },

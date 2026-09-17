@@ -278,7 +278,7 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
       })
     ).text();
     expect(runOptions).toMatchObject({
-      scope: { userId: "person-1", tenant: "acme" },
+      info: { userId: "person-1", tenant: "acme" },
     });
     expect(received).toMatchObject({ metadata: { requestId: "request-1" } });
   } finally {

@@ -2,7 +2,7 @@ import { registered } from "./fixtures.js";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 import { tool } from "../src/index.js";
-import { defineSchema, normalizedSchemasFor } from "../src/build/schema.js";
+import { defineSchema, normalizedSchemasFor } from "../src/definition/schema.js";
 import { testAgent, model, toolCalls, turn } from "./fixtures.js";
 
 describe("Zod schemas", () => {

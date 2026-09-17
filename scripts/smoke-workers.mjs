@@ -50,10 +50,10 @@ try {
     `
     import {Hono} from 'hono';
     import {z} from 'zod';
-    import {Agent, defineToolFamily} from '../../harness/dist/index.js';
+    import {Agent} from '../../harness/dist/index.js';
     import {Runtime, serveAgents} from '../../runtime/dist/index.js';
-    const family = defineToolFamily({id:'echo',version:'1',bindingSchema:z.object({resource:z.string()}),describe:()=>({name:'echo',inputSchema:z.object({text:z.string()})}),execute:async(args,{binding,scope})=>({kind:'completed',output:{text:args.text,resource:binding.resource,scope:scope.sessionId}})});
-    const agent=Agent({id:'worker',name:'Worker'}).use({id:'tools',toolFamilies:[family],middleware:async(request,next)=>{request.configuration.tools.set('echo',[family.bind({resource:'original'})]);return next();}}).build();
+    const echo={name:'echo',inputSchema:z.object({text:z.string()}),execute:async(args,{info})=>({kind:'completed',output:{text:args.text,info:info.sessionId}})};
+    const agent=Agent({id:'worker',name:'Worker'}).use({id:'tools',tools:[echo]}).build();
     const app=new Hono(); app.route('/agents',serveAgents({agents:[agent],runtime:new Runtime()}));
     export default app;
   `,
@@ -109,7 +109,7 @@ try {
   const state = await (await fetch(`${url}/worker/v1/sessions/smoke`)).json();
   assert.equal(state.state, "completed");
   console.log(
-    "Workers local smoke passed: portable imports without nodejs_compat, environment bindings, HTTP model calls, family dispatch, streamed events, and stored history. No deployed support claim is implied.",
+    "Workers local smoke passed: portable imports without nodejs_compat, environment bindings, HTTP model calls, tool dispatch, streamed events, and stored history. No deployed support claim is implied.",
   );
 } finally {
   await group.close();

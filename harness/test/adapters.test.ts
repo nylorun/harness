@@ -10,7 +10,7 @@ import {
   toChatCompletions,
   toMessages,
   toResponses,
-} from "../src/model/adapters.js";
+} from "../src/execution/model/adapters.js";
 import type { ModelAdapterContext, ModelCall, ModelRequest } from "../src/types/model.js";
 
 const call: ModelCall = {

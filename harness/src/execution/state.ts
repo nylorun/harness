@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { HarnessError } from "../errors.js";
 import { assertJson, copyJson } from "../utils/immutable.js";
-import { createId } from "../utils/ids.js";
+import { definitionFor } from "../definition/agent-definition.js";
+import { initializeExecutionState } from "./initial-state.js";
 import { validateTranscript } from "../execution/transcript.js";
-import type { BuiltAgent } from "../build/agent.js";
+import type { BuiltAgent } from "../types/agent.js";
 import type { ExecutionInput, ExecutionState } from "../types/execution.js";
 import type { InputEvent } from "../types/transcript.js";
 
@@ -32,10 +33,7 @@ const outcome = z.discriminatedUnion("kind", [
 const reference = z
   .object({
     capabilityId: id,
-    toolName: id.optional(),
-    familyId: id.optional(),
-    version: id.optional(),
-    binding: json.optional(),
+    toolName: id,
     descriptor: z
       .object({
         name: id,
@@ -85,7 +83,6 @@ const schema = z
   .object({
     version: z.literal(1),
     agentId: id,
-    executionVersion: id,
     executionId: id,
     outputContract: z.record(z.string(), json).optional(),
     revision: z.number().int().nonnegative(),
@@ -107,26 +104,23 @@ const schema = z
   })
   .strict();
 
-export function createExecutionState(
-  agent: Pick<BuiltAgent, "id" | "executionVersion" | "output">,
+export function createExecutionState<Info, Output>(
+  agent: BuiltAgent<Info, Output>,
 ): ExecutionState {
-  return copyJson({
-    version: 1,
-    agentId: agent.id,
-    executionVersion: agent.executionVersion,
-    executionId: createId("execution"),
-    revision: 0,
-    turnCount: 0,
-    transcript: [],
-    status: "ready",
-    ...(agent.output ? { outputContract: agent.output.schema.jsonSchema } : {}),
-  });
+  return initializeExecutionState(definitionFor(agent));
+}
+
+function omitLegacyExecutionVersion(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  if (!("executionVersion" in value)) return value;
+  const { executionVersion: _ignored, ...rest } = value as Record<string, unknown>;
+  return rest;
 }
 
 export function validateExecutionState(value: unknown): ExecutionState {
   try {
     assertJson(value);
-    const parsed = schema.parse(value) as unknown as ExecutionState;
+    const parsed = schema.parse(omitLegacyExecutionVersion(value)) as unknown as ExecutionState;
     validateTranscript(parsed.transcript);
     const plan = parsed.plan;
     if (parsed.status === "paused" && !plan)
@@ -170,10 +164,10 @@ export function validateExecutionState(value: unknown): ExecutionState {
             "execution.invalid-state",
             "Pending tool name differs from its contract",
           );
-        if ((item.reference.toolName === undefined) === (item.reference.familyId === undefined))
+        if (item.toolName !== item.reference.toolName)
           throw new HarnessError(
             "execution.invalid-state",
-            "Tool reference must select exactly one definition",
+            "Pending tool name differs from its reference",
           );
         if (item.interaction) {
           if (interactions.has(item.interaction.id))

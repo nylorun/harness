@@ -7,7 +7,7 @@ Harness executes state-in/state-out. Runtime optionally adds sessions and HTTP d
 | Combination | Evidence | Limits |
 |---|---|---|
 | Node CLI + exported Hono app | Package, startup/reload/shutdown, and packed-starter checks | One host coordinates its sessions; local storage needs a persistent volume |
-| Workers + portable imports + `httpModel` custom endpoint | Local Wrangler/workerd smoke, without `nodejs_compat`, with actual HTTP requests, environment bindings, tool family dispatch and streaming | Local verification only; no deployed Workers support claim yet |
+| Workers + portable imports + `httpModel` custom endpoint | Local Wrangler/workerd smoke, without `nodejs_compat`, with actual HTTP requests, environment bindings, tool dispatch and streaming | Local verification only; no deployed Workers support claim yet |
 | Vercel Hono entrypoint | Follows official Hono deployment convention | Deployed Nylorun verification is pending provider access |
 | Node `piModel` | Mock-provider tests including signed Gemini continuation and local credential precedence | Provider catalog is Node-only; individual remote providers require application testing |
 | Portable `httpModel` | HTTP contract tests for OpenAI/custom and Anthropic, JSON output, cancellation and OpenAI previews | No portable media materialization; no OAuth/local credential discovery; no claim for every provider |
@@ -80,7 +80,7 @@ For durable conversations, use a store plus a host with execution ownership appr
 
 Use `MODEL_PROVIDER`, `MODEL`, `MODEL_PROVIDER_API_KEY`, and optional `MODEL_PROVIDER_BASE_URL`. Custom endpoints require the base URL. Environment API keys need no credential files. Use provider secret facilities for keys. Native provider variables remain available as fallbacks. Node-only credential discovery and OAuth remain explicit adapter features.
 
-The application owns route authorization and supplies fresh trusted scope. Infrastructure owns ingress buffering/timeouts, distributed scheduling, streaming reconnection and execution lifetime. Request-attached Runtime execution cancels cooperatively on connection loss. Developers can compose a different host with Harness; managed Cloud Runtime is future work.
+The application owns route authorization and supplies fresh application info. Infrastructure owns ingress buffering/timeouts, distributed scheduling, streaming reconnection and execution lifetime. Request-attached Runtime execution cancels cooperatively on connection loss. Developers can compose a different host with Harness; managed Cloud Runtime is future work.
 
 ## Repeat verification
 

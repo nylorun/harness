@@ -54,13 +54,11 @@ export type SchemaOutput<Schema> =
 export type ToolInputSchema = ToolSchemaSource;
 export type ToolOutputSchema = ToolSchemaSource;
 
-export interface BoundToolSchema<T> extends ToolSchema<T> {}
-
 type OutputFor<Schema> = Schema extends ToolSchemaSource ? SchemaOutput<Schema> : ToolContent;
 
 export interface ToolDefinition<
   InputSchema extends ToolInputSchema = ToolInputSchema,
-  Scope = unknown,
+  Info = unknown,
   OutputSchema extends ToolOutputSchema | undefined = undefined,
 > {
   readonly name: string;
@@ -69,19 +67,8 @@ export interface ToolDefinition<
   readonly outputSchema?: OutputSchema;
   execute(
     args: SchemaOutput<InputSchema>,
-    context: ToolExecutionContext<Scope>,
+    context: ToolExecutionContext<Info>,
   ): Promise<ToolOutcome<OutputFor<OutputSchema>>>;
-}
-
-export interface BoundToolDefinition<Scope = unknown> extends Omit<
-  ToolDefinition<ToolInputSchema, Scope, ToolOutputSchema | undefined>,
-  "inputSchema" | "outputSchema" | "execute"
-> {
-  readonly inputSchema: BoundToolSchema<unknown>;
-  readonly outputSchema?: BoundToolSchema<unknown>;
-  readonly execute: (args: unknown, context: ToolExecutionContext<Scope>) => Promise<ToolOutcome>;
-  readonly owner: ToolOwner;
-  readonly source: ToolDefinition<any, any, any>;
 }
 
 export interface ToolOwner {
@@ -108,12 +95,6 @@ export interface ToolExecutionResume {
   readonly token?: JsonValue;
 }
 
-export interface SealedToolCall {
-  readonly callId: string;
-  readonly toolName: string;
-  readonly args: JsonValue;
-}
-
 interface ToolExecutionContextBase {
   readonly executionId: string;
   readonly turnId: string;
@@ -126,8 +107,8 @@ interface ToolExecutionContextBase {
   readonly resume?: ToolExecutionResume;
 }
 
-export type ToolExecutionContext<Scope = unknown> = ToolExecutionContextBase & {
-  readonly scope?: Scope;
+export type ToolExecutionContext<Info = unknown> = ToolExecutionContextBase & {
+  readonly info?: Info;
 };
 
 export type ToolContent = JsonValue;
@@ -168,3 +149,12 @@ export type ToolResult =
       readonly message: string;
       readonly details?: ToolValidationFailureDetails;
     };
+
+/** Immutable tool metadata supplied to model adapters and observers. */
+export interface ToolDescriptor {
+  readonly name: string;
+  readonly description?: string;
+  readonly owner: ToolOwner;
+  readonly inputSchema: { readonly jsonSchema: JsonObject };
+  readonly outputSchema?: { readonly jsonSchema: JsonObject };
+}

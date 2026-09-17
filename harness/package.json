@@ -29,8 +29,8 @@
       "import": "./dist/index.js"
     },
     "./model/adapters": {
-      "types": "./dist/model/adapters.d.ts",
-      "import": "./dist/model/adapters.js"
+      "types": "./dist/execution/model/adapters.d.ts",
+      "import": "./dist/execution/model/adapters.js"
     }
   },
   "files": [

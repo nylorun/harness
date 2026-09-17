@@ -53,12 +53,3 @@ export interface TranscriptFinalEntry {
 }
 export type TranscriptEntry =
   TranscriptInputEntry | TranscriptCandidateEntry | TranscriptToolsEntry | TranscriptFinalEntry;
-
-/** Internal view consumed by a single model step. */
-export interface ExecutionSnapshot {
-  readonly id: string;
-  readonly status: "running";
-  readonly turnCount: number;
-  readonly revision: number;
-  readonly transcript: readonly TranscriptEntry[];
-}

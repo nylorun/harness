@@ -48,7 +48,7 @@ export type AgentRouterOptions = Readonly<{
   getActor?: (
     context: Context,
   ) => RuntimeActor | undefined | Promise<RuntimeActor | undefined>;
-  getScope?: (context: Context) => unknown | Promise<unknown>;
+  getInfo?: (context: Context) => unknown | Promise<unknown>;
   getEnvironment?: (
     context: Context,
   ) => ModelEnvironment | Promise<ModelEnvironment>;
@@ -90,7 +90,7 @@ export class Runtime {
     }
     const { media } = this.config;
     const app = new Hono<{
-      Variables: { scope: unknown; modelEnvironment: ModelEnvironment };
+      Variables: { info: unknown; modelEnvironment: ModelEnvironment };
     }>();
     if (processEnvironment().NYLORUN_DEV === "1")
       app.use(
@@ -120,15 +120,15 @@ export class Runtime {
         error instanceof HTTPException ? error.status : 500,
       ),
     );
-    // Application authorization/scope resolution precedes all store and media access.
+    // Application authorization/info resolution precedes all store and media access.
     app.use("*", async (context, next) => {
       const actor = await options.getActor?.(context);
-      const scope = options.getScope
-        ? await options.getScope(context)
+      const info = options.getInfo
+        ? await options.getInfo(context)
         : actor
           ? { ...actor.context, userId: actor.id }
           : undefined;
-      context.set("scope", scope);
+      context.set("info", info);
       if (options.getEnvironment)
         context.set("modelEnvironment", await options.getEnvironment(context));
       await next();
@@ -172,7 +172,7 @@ export class Runtime {
           ? environment(context)
           : undefined);
       return {
-        scope: { ...((context.get("scope") as object) ?? {}), sessionId },
+        info: { ...((context.get("info") as object) ?? {}), sessionId },
         onEvent: (event: CanonicalEvent) => {
           try {
             void Promise.resolve(

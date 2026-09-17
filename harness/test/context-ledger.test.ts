@@ -28,7 +28,7 @@ describe("runtime context", () => {
     expect(seen).toEqual([["retrieved"], []]);
   });
 
-  it("keeps application scope out of model context unless explicitly projected", async () => {
+  it("keeps application info out of model context unless explicitly projected", async () => {
     const snapshots: ContextSnapshot[] = [];
     let calls = 0;
     const agent = testAgent()

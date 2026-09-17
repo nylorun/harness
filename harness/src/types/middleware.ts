@@ -9,22 +9,8 @@ import type { InputEvent, TranscriptEntry } from "./transcript.js";
 import type { ContextItem, JsonObject, Tripwire } from "./shared.js";
 import type { Interaction, ToolDefinition, ToolResult } from "./tool.js";
 
-export interface StepInput {
-  readonly executionId: string;
-  readonly turnId: string;
-  readonly stepId: string;
-  /** One-based position of this turn within the Session. */
-  readonly turnNumber: number;
-  /** One-based position of this Model Step within the Turn. */
-  readonly stepNumber: number;
-  readonly scope?: unknown;
-  readonly arrivals: readonly InputEvent[];
-  readonly toolResults: readonly ToolResult[];
-  readonly transcript: readonly TranscriptEntry[];
-}
-
 interface StepRequestBase {
-  /** Opaque identity of the Session that owns this Step. */
+  /** Opaque identity of the execution that owns this Step. */
   readonly executionId: string;
   /** Opaque identity of the Turn that owns this Step. */
   readonly turnId: string;
@@ -69,7 +55,7 @@ interface StepRequestBase {
   tripwire(error: Tripwire): StepResponse;
 }
 
-export type StepRequest<Scope = unknown> = StepRequestBase & { readonly scope?: Scope };
+export type StepRequest<Info = unknown> = StepRequestBase & { readonly info?: Info };
 
 export interface StepResponse {
   candidate(): Readonly<ModelCandidate> | undefined;
@@ -80,43 +66,24 @@ export interface StepResponse {
   tripwire(error: Tripwire): StepResponse;
 }
 
-export type StepMiddleware<Scope = unknown> = (
-  request: StepRequest<Scope>,
+export type StepMiddleware<Info = unknown> = (
+  request: StepRequest<Info>,
   next: () => Promise<StepResponse>,
 ) => Promise<StepResponse>;
 
 export type CapabilityItems<Item> =
   readonly Item[] | Readonly<{ readonly slot: string; readonly items: readonly Item[] }>;
 
-export interface CapabilityDeclaration<Scope = unknown> {
+export interface CapabilityDeclaration<Info = unknown> {
   readonly id: string;
-  readonly tools?: CapabilityItems<ToolDefinition<any, Scope, any>>;
-  readonly toolFamilies?: readonly import("../build/tool-family.js").ToolFamily<
-    any,
-    any,
-    any,
-    Scope
-  >[];
+  readonly tools?: CapabilityItems<ToolDefinition<any, Info, any>>;
   readonly instructions?: CapabilityItems<string>;
   readonly model?: ModelDirective;
-  readonly middleware?: StepMiddleware<Scope>;
+  readonly middleware?: StepMiddleware<Info>;
 }
 
 export interface MiddlewareContributions {
   readonly instructions?: readonly string[];
   readonly tools?: readonly { readonly name: string; readonly description?: string }[];
   readonly model?: Pick<ModelDirective, "id" | "controls">;
-}
-
-export interface BoundMiddleware {
-  readonly id: string;
-  readonly handle: StepMiddleware;
-  readonly tools?: readonly ToolDefinition<any, any, any>[];
-  readonly toolFamilies?: readonly import("../build/tool-family.js").ToolFamily<
-    any,
-    any,
-    any,
-    any
-  >[];
-  readonly contributions?: MiddlewareContributions;
 }

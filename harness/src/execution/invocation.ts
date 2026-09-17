@@ -1,0 +1,59 @@
+import type { AgentDefinition } from "../definition/agent-definition.js";
+import type { BoundToolDefinition } from "../definition/bound.js";
+import type { ExecutionState, RunOptions } from "../types/execution.js";
+import type { ObserveEvent } from "../types/observe.js";
+import { HarnessError } from "../errors.js";
+import { copyJson } from "../utils/immutable.js";
+import { createId } from "../utils/ids.js";
+import {
+  createObservationSink,
+  type ExecutionOutcomeEvent,
+  type ObserveEmit,
+} from "./observe.js";
+
+export interface Invocation {
+  readonly agent: AgentDefinition;
+  readonly options: RunOptions<any>;
+  readonly signal: AbortSignal;
+  readonly definitions: Map<string, BoundToolDefinition>;
+  state: ExecutionState;
+  observe: ObserveEmit;
+  emit(event: ObserveEvent | ExecutionOutcomeEvent): void;
+  record(): Promise<void>;
+}
+
+export function createInvocation(input: {
+  readonly agent: AgentDefinition;
+  readonly options: RunOptions<any>;
+  readonly state: ExecutionState;
+  readonly definitions: Map<string, BoundToolDefinition>;
+}): Invocation {
+  const invocation = {
+    agent: input.agent,
+    options: input.options,
+    signal: input.options.signal ?? new AbortController().signal,
+    definitions: input.definitions,
+    state: input.state,
+  } as Invocation;
+  const sink = createObservationSink({
+    listener: input.options.onEvent,
+    executionId: () => invocation.state.executionId,
+    runId: createId("run"),
+  });
+  invocation.observe = sink.observe;
+  invocation.emit = sink.emit;
+  invocation.record = async () => {
+    invocation.state = copyJson({ ...invocation.state, revision: invocation.state.revision + 1 });
+    if (!input.options.record) return;
+    try {
+      await input.options.record(copyJson(invocation.state));
+    } catch (cause) {
+      throw new HarnessError(
+        "execution.record-failed",
+        "Recording failed. Execution stopped; reconcile any external effects before retrying.",
+        { cause },
+      );
+    }
+  };
+  return invocation;
+}

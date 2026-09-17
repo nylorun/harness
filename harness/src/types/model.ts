@@ -1,6 +1,6 @@
 import type { ContextItem, JsonObject, JsonValue } from "./shared.js";
 import type { InputEvent, TranscriptEntry } from "./transcript.js";
-import type { BoundToolDefinition, ToolResult } from "./tool.js";
+import type { ToolDescriptor, ToolResult } from "./tool.js";
 
 export interface ModelToolCall {
   readonly id: string;
@@ -87,8 +87,8 @@ export interface ModelConfigurationSnapshot {
   readonly version: 1;
   readonly model?: ModelDirective;
   readonly instructions: readonly ModelConfigurationInstruction[];
-  /** Bound tools are retained for execution. */
-  readonly tools: readonly BoundToolDefinition[];
+  /** Data-only descriptions of the selected tools. */
+  readonly tools: readonly ToolDescriptor[];
   readonly toolContracts: readonly ModelConfigurationTool[];
   readonly contributors: readonly ModelConfigurationContributor[];
 }
@@ -124,8 +124,8 @@ export interface ModelRequest {
   readonly transcript: readonly TranscriptEntry[];
   readonly arrivals: readonly InputEvent[];
   readonly toolResults: readonly ToolResult[];
-  /** Tools are normalized and immutable by the time a Model sees them. */
-  readonly tools: readonly BoundToolDefinition[];
+  /** Immutable tool descriptions; executable definitions stay inside Harness. */
+  readonly tools: readonly ToolDescriptor[];
   /** Optional portable contract for this turn's terminal JSON result. */
   readonly outputSchema?: JsonObject;
 }

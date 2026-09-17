@@ -1,4 +1,4 @@
-import { isStudioDiscovery, manifestMiddleware } from "../../src/protocol.js";
+import { isStudioDiscovery, manifestCapabilities } from "../../src/protocol.js";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   BrowserRouter,
@@ -49,10 +49,17 @@ import {
   type CanonicalEvent,
 } from "./event-presentation";
 
-export type MiddlewareManifest = Readonly<{
+export type CapabilityManifest = Readonly<{
   id: string;
+  kind?: "agent" | "capability" | "middleware";
+  hasMiddleware?: boolean;
   instructions?: readonly string[];
-  tools?: readonly Readonly<{ name: string; description?: string }>[];
+  tools?: readonly Readonly<{
+    name: string;
+    description?: string;
+    inputSchema?: Readonly<Record<string, unknown>>;
+    outputSchema?: Readonly<Record<string, unknown>>;
+  }>[];
   model?: Readonly<{
     id?: string;
     controls?: Readonly<{ temperature?: number; maxOutputTokens?: number }>;
@@ -65,13 +72,17 @@ export type AgentManifest = Readonly<{
   manifest?: {
     id: string;
     name: string;
-    middleware?: readonly MiddlewareManifest[];
+    outputSchema?: Readonly<Record<string, unknown>>;
+    capabilities?: readonly CapabilityManifest[];
+    middleware?: readonly CapabilityManifest[];
   };
   harness?: {
     manifest: {
       id: string;
       name: string;
-      middleware: readonly MiddlewareManifest[];
+      outputSchema?: Readonly<Record<string, unknown>>;
+      capabilities?: readonly CapabilityManifest[];
+      middleware?: readonly CapabilityManifest[];
     };
   };
   endpoints: { agUi: string; sessions: string };
@@ -146,7 +157,7 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
     : {};
 }
 function modelRequestDigests(
-  event: CanonicalEvent,
+  event: CanonicalEvent
 ): ModelRequestDigests | undefined {
   if (event.type !== "model.requested") return undefined;
   const value = record(record(event.payload).digests);
@@ -161,8 +172,7 @@ function modelRequestDigests(
   if (
     !fields.every(
       (field) =>
-        typeof value[field] === "string" &&
-        /^[a-f0-9]{64}$/u.test(value[field]),
+        typeof value[field] === "string" && /^[a-f0-9]{64}$/u.test(value[field])
     )
   )
     return undefined;
@@ -202,7 +212,7 @@ function useConnection(): Connection {
           throw new Error("No Agent Server URL configured.");
         const response = await fetch(
           endpoint(config.agentServerUrl, "v1/agents"),
-          { cache: "no-store" },
+          { cache: "no-store" }
         );
         if (!response.ok)
           throw new Error("Agent Server returned " + response.status + ".");
@@ -213,7 +223,7 @@ function useConnection(): Connection {
           discovery.agents.map(async (entry) => {
             const manifest = await fetch(
               endpoint(config.agentServerUrl!, entry.manifestUrl),
-              { cache: "no-store" },
+              { cache: "no-store" }
             );
             if (!manifest.ok)
               throw new Error(
@@ -221,7 +231,7 @@ function useConnection(): Connection {
                   entry.id +
                   " returned " +
                   manifest.status +
-                  ".",
+                  "."
               );
             const raw = (await manifest.json()) as AgentManifest;
             return {
@@ -230,11 +240,11 @@ function useConnection(): Connection {
                 agUi: endpoint(config.agentServerUrl!, raw.endpoints.agUi),
                 sessions: endpoint(
                   config.agentServerUrl!,
-                  raw.endpoints.sessions,
+                  raw.endpoints.sessions
                 ),
               },
             };
-          }),
+          })
         );
         if (!disposed)
           setConnection((previous) => ({
@@ -277,13 +287,13 @@ function useConnection(): Connection {
             return [
               agent.id,
               [...payload.sessions].sort(
-                (left, right) => right.startedAt - left.startedAt,
+                (left, right) => right.startedAt - left.startedAt
               ),
             ] as const;
           } catch {
             return [agent.id, undefined] as const;
           }
-        }),
+        })
       );
       if (cancelled) return;
       setConnection((previous) => {
@@ -338,9 +348,12 @@ function EmptyValue() {
   return <span className="text-muted-foreground">None declared</span>;
 }
 function constructorInstructions(
-  middleware: readonly MiddlewareManifest[],
+  capabilities: readonly CapabilityManifest[]
 ): readonly string[] {
-  return middleware.find((entry) => entry.id === "agent")?.instructions ?? [];
+  return (
+    capabilities.find((entry) => entry.kind === "agent" || entry.id === "agent")
+      ?.instructions ?? []
+  );
 }
 function InstructionList({ values }: Readonly<{ values: readonly string[] }>) {
   if (values.length === 0)
@@ -380,7 +393,7 @@ function ToolList({
 }
 function CompactModel({
   model,
-}: Readonly<{ model?: MiddlewareManifest["model"] }>) {
+}: Readonly<{ model?: CapabilityManifest["model"] }>) {
   if (model === undefined) return <EmptyValue />;
   const details = [
     model.id,
@@ -427,7 +440,7 @@ function Chat({
         agent.endpoints.agUi.replace(/\/$/u, "") +
           "/sessions/" +
           encodeURIComponent(sessionId),
-        { cache: "no-store" },
+        { cache: "no-store" }
       );
       if (history.ok) {
         const data = (await history.json()) as { messages: ChatMessage[] };
@@ -437,7 +450,7 @@ function Chat({
         agent.endpoints.sessions.replace(/\/$/u, "") +
           "/" +
           encodeURIComponent(sessionId),
-        { cache: "no-store" },
+        { cache: "no-store" }
       );
       if (summary.ok && !cancelled)
         setPending(
@@ -445,7 +458,7 @@ function Chat({
             (await summary.json()) as {
               pending_interaction?: PendingInteraction;
             }
-          ).pending_interaction,
+          ).pending_interaction
         );
     };
     void load();
@@ -518,7 +531,8 @@ function Chat({
         {
           onCustomEvent: ({ event }) => {
             const value = event.value as
-              { invocationId?: string; text?: string } | undefined;
+              | { invocationId?: string; text?: string }
+              | undefined;
             if (
               event.name === "nylorun.execution" &&
               event.value?.session === sessionId &&
@@ -541,7 +555,7 @@ function Chat({
               }));
             } else if (event.name === "nylorun.preview.incomplete") {
               setPreview((current) =>
-                current ? { ...current, incomplete: true } : undefined,
+                current ? { ...current, incomplete: true } : undefined
               );
             } else if (event.name === "nylorun.preview.settled")
               setPreview(undefined);
@@ -560,12 +574,12 @@ function Chat({
               };
               return current.some((item) => item.id === event.messageId)
                 ? current.map((item) =>
-                    item.id === event.messageId ? message : item,
+                    item.id === event.messageId ? message : item
                   )
                 : [...current, message];
             });
           },
-        },
+        }
       );
     } catch (cause) {
       setError(requestError(cause, "Agent request failed."));
@@ -577,7 +591,7 @@ function Chat({
   };
   const replyTo = async (
     body: Record<string, unknown>,
-    failed: string,
+    failed: string
   ): Promise<void> => {
     if (pending === undefined) return;
     setSending(true);
@@ -590,7 +604,7 @@ function Chat({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ interaction: { id: pending.id, ...body } }),
-        },
+        }
       );
       if (!response.ok)
         throw new Error(failed + " returned " + response.status + ".");
@@ -648,7 +662,7 @@ function Chat({
                     >
                       {pretty(part.value)}
                     </pre>
-                  ),
+                  )
                 )}
               </article>
             ))
@@ -689,7 +703,7 @@ function Chat({
                     onSubmit={() =>
                       void replyTo(
                         { kind: "respond", value: reply.trim() },
-                        "Reply",
+                        "Reply"
                       )
                     }
                     sending={sending}
@@ -704,7 +718,7 @@ function Chat({
                     onClick={() =>
                       void replyTo(
                         { kind: "approval", approved: true },
-                        "Approval",
+                        "Approval"
                       )
                     }
                   >
@@ -716,7 +730,7 @@ function Chat({
                     onClick={() =>
                       void replyTo(
                         { kind: "approval", approved: false },
-                        "Approval",
+                        "Approval"
                       )
                     }
                   >
@@ -754,9 +768,13 @@ function Chat({
 }
 
 function Manifest({ agent }: Readonly<{ agent: AgentManifest }>) {
-  const declared = manifestMiddleware(agent);
+  const declared = manifestCapabilities(agent);
   const instructions = constructorInstructions(declared);
-  const middleware = declared.filter((entry) => entry.id !== "agent");
+  const capabilities = declared.filter(
+    (entry) => entry.kind !== "agent" && entry.id !== "agent"
+  );
+  const outputSchema =
+    agent.manifest?.outputSchema ?? agent.harness?.manifest.outputSchema;
   return (
     <ScrollArea className="h-full">
       <div className="p-4">
@@ -769,6 +787,17 @@ function Manifest({ agent }: Readonly<{ agent: AgentManifest }>) {
           <h3 className="text-sm font-medium">Name</h3>
           <p className="mt-2 text-sm">{agent.name}</p>
         </section>
+        {outputSchema === undefined ? null : (
+          <>
+            <Separator className="my-4" />
+            <section>
+              <h3 className="text-sm font-medium">Output schema</h3>
+              <pre className="mt-2 overflow-x-auto font-mono text-xs">
+                {JSON.stringify(outputSchema, null, 2)}
+              </pre>
+            </section>
+          </>
+        )}
         <Separator className="my-4" />
         <section>
           <h3 className="text-sm font-medium">Instructions</h3>
@@ -776,17 +805,21 @@ function Manifest({ agent }: Readonly<{ agent: AgentManifest }>) {
         </section>
         <Separator className="my-4" />
         <section>
-          <h3 className="text-sm font-medium">Middleware</h3>
+          <h3 className="text-sm font-medium">Capabilities</h3>
           <div className="mt-3">
-            <Tokens values={middleware.map((entry) => entry.id)} />
+            <Tokens values={capabilities.map((entry) => entry.id)} />
           </div>
         </section>
-        {middleware.map((entry) => (
+        {capabilities.map((entry) => (
           <div key={entry.id}>
             <Separator className="my-4" />
             <section>
               <h3 className="font-mono text-sm font-medium">{entry.id}</h3>
               <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+                <dt className="text-muted-foreground">Kind</dt>
+                <dd>{entry.kind ?? "capability"}</dd>
+                <dt className="text-muted-foreground">Middleware</dt>
+                <dd>{entry.hasMiddleware ? "Yes" : "No"}</dd>
                 <dt className="text-muted-foreground">Instructions</dt>
                 <dd>
                   {entry.instructions === undefined ||
@@ -836,7 +869,7 @@ function EventTable({
   >();
   const eventTypes = useMemo(
     () => [...new Set(events.map((event) => event.type))].sort(),
-    [events],
+    [events]
   );
   const activeTypes = selectedTypes ?? eventTypes;
   const visibleEvents =
@@ -847,10 +880,10 @@ function EventTable({
     selectedTypes === undefined || selectedTypes.length === eventTypes.length
       ? "All event types"
       : selectedTypes.length === 0
-        ? "No event types"
-        : selectedTypes.length === 1
-          ? eventLabel({ type: selectedTypes[0] } as CanonicalEvent)
-          : selectedTypes.length + " event types";
+      ? "No event types"
+      : selectedTypes.length === 1
+      ? eventLabel({ type: selectedTypes[0] } as CanonicalEvent)
+      : selectedTypes.length + " event types";
   const toggleType = (type: string, checked: boolean): void => {
     setSelectedTypes((current) => {
       const next = (current ?? eventTypes).filter((entry) => entry !== type);
@@ -1023,7 +1056,7 @@ function Digest({ label, value }: Readonly<{ label: string; value: string }>) {
 
 function mergeEvents(
   current: readonly CanonicalEvent[],
-  incoming: readonly CanonicalEvent[],
+  incoming: readonly CanonicalEvent[]
 ): readonly CanonicalEvent[] {
   const bySequence = new Map(current.map((event) => [event.seq, event]));
   for (const event of incoming) {
@@ -1061,8 +1094,8 @@ function SessionWorkspace({
           setEvents((current) =>
             mergeEvents(
               current,
-              payload.events.map((event) => ({ ...event, committed: true })),
-            ),
+              payload.events.map((event) => ({ ...event, committed: true }))
+            )
           );
       }
     };
@@ -1100,7 +1133,7 @@ function SessionWorkspace({
           sessionId={sessionId}
           onEvent={(event) =>
             setEvents((current) =>
-              mergeEvents(current, [{ ...event, committed: false }]),
+              mergeEvents(current, [{ ...event, committed: false }])
             )
           }
         />
@@ -1213,7 +1246,7 @@ function Shell() {
   const connection = useConnection();
   const location = useLocation();
   const match = location.pathname.match(
-    /^\/agents\/([^/]+)(?:\/sessions\/([^/]+))?/u,
+    /^\/agents\/([^/]+)(?:\/sessions\/([^/]+))?/u
   );
   const activeAgentId =
     match === null ? undefined : decodeURIComponent(match[1]);
