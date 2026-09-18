@@ -3,27 +3,21 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, mkdtempSync, rmSync } from "node:fs";
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
-for (const field of [
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-  "optionalDependencies",
-])
-  if (pkg[field]?.["@nylorun/harness"])
-    throw new Error("Runtime must remain independent of Harness.");
-function scan(directory) {
-  for (const item of readdirSync(directory, { withFileTypes: true })) {
-    const path = `${directory}/${item.name}`;
-    if (item.isDirectory()) scan(path);
-    else if (
-      /\.(ts|js)$/.test(path) &&
-      /["']@nylorun\/harness(?:[\/"'])/.test(readFileSync(path, "utf8"))
-    )
-      throw new Error(`Engine import in ${path}`);
+if (!pkg.dependencies?.["@nylorun/harness"])
+  throw new Error("Runtime must use canonical Harness contracts through a direct dependency.");
+const visited = new Set();
+function scanPortable(path) {
+  if (visited.has(path)) return;
+  visited.add(path);
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/(?:from\s*|import\s*\(\s*)["']([^"']+)["']/g)) {
+    const name = match[1];
+    if (name.startsWith("node:") || name.includes("pi-ai"))
+      throw new Error(`Node-only import ${name} reachable from portable root in ${path}`);
+    if (name.startsWith(".")) scanPortable(join(path, "..", name));
   }
 }
-scan("src");
-scan("dist");
+scanPortable("dist/index.js");
 const cache = mkdtempSync(join(tmpdir(), "nylorun-runtime-pack-"));
 const output = execFileSync(
   process.platform === "win32" ? "npm.cmd" : "npm",
@@ -40,9 +34,12 @@ for (const path of [
   "dist/environment.js",
   "dist/index.js",
   "dist/index.d.ts",
+  "dist/node/index.js",
+  "dist/node/local-sessions.js",
+  "dist/sessions/host.js",
   "README.md",
   "CHANGELOG.md",
   "LICENSE",
 ])
   if (!files.includes(path)) throw new Error(`Missing ${path}`);
-console.log("Runtime package and independence checks passed.");
+console.log("Runtime package and portable import boundary checks passed.");

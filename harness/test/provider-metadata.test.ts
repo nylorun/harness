@@ -49,7 +49,7 @@ it("preserves opaque block metadata through normalization, canonicalization and 
     }
     expect(JSON.stringify(calls[3]?.prompt)).not.toContain("signature");
     const restored = agent.run({
-      seed: { transcript: JSON.parse(JSON.stringify(session.state.transcript)) },
+      state: { ...JSON.parse(JSON.stringify(session.state)), status: "completed" },
     });
     try {
       await restored.input("Restored conversation").completed;

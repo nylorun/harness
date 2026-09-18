@@ -23,7 +23,7 @@ const temps: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temps.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    temps.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
 });
 
@@ -34,7 +34,7 @@ function items<T>(value: CapabilityItems<T> | undefined): readonly T[] {
 
 function context() {
   return {
-    sessionId: "session",
+    executionId: "session",
     turnId: "turn",
     stepId: "step",
     callId: "call",
@@ -45,7 +45,7 @@ function context() {
 
 function catalogTool(
   name: string,
-  declaration: Awaited<ReturnType<typeof codeMode>>,
+  declaration: Awaited<ReturnType<typeof codeMode>>
 ): ToolDefinition {
   const found = items(declaration.tools).find((tool) => tool.name === name);
   if (!found) throw new Error(`Missing tool ${name}`);
@@ -82,8 +82,8 @@ describe("codeMode()", () => {
           ].join("\n"),
           description: "Convert 100/4 celsius to fahrenheit.",
         },
-        context(),
-      ),
+        context()
+      )
     ).resolves.toEqual({
       kind: "completed",
       output: {
@@ -129,8 +129,8 @@ describe("codeMode()", () => {
           ].join("\n"),
           description: "Catch an incompatible convert.",
         },
-        context(),
-      ),
+        context()
+      )
     ).resolves.toEqual({
       kind: "completed",
       output: {
@@ -159,8 +159,8 @@ describe("codeMode()", () => {
           code: "await tools.missing({});",
           description: "Call a tool that is not in the SDK.",
         },
-        context(),
-      ),
+        context()
+      )
     ).resolves.toEqual({
       kind: "failed",
       code: "code_run_failed",
@@ -184,16 +184,16 @@ describe("codeMode()", () => {
     })
       .use(await codeMode())
       .build();
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
+    expect(agent.manifest.capabilities.map((item) => item.id)).toEqual([
       "agent",
       "code-mode",
     ]);
-    const offered = agent.manifest.middleware.find(
-      (item) => item.id === "code-mode",
+    const offered = agent.manifest.capabilities.find(
+      (item) => item.id === "code-mode"
     );
     expect(offered?.tools?.map((tool) => tool.name)).toEqual(["run_code"]);
     expect(offered?.tools?.map((tool) => tool.name)).not.toEqual(
-      expect.arrayContaining(["calculate", "convert", "now"]),
+      expect.arrayContaining(["calculate", "convert", "now"])
     );
     expect(offered?.instructions?.join("\n")).toContain("calculate: (args:");
   });

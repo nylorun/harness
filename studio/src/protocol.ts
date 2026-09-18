@@ -17,7 +17,7 @@ export type StudioDiscoveryEntry = Readonly<{
 }>;
 
 export function isStudioDiscovery(
-  value: unknown,
+  value: unknown
 ): value is StudioDiscoveryDocument {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return false;
@@ -33,11 +33,31 @@ export type StudioEndpointSet = Readonly<{
   sessions: string;
 }>;
 
-export type StudioMiddlewareManifest = Readonly<{
+export type StudioManifestTool = Readonly<{
+  name: string;
+  description?: string;
+  inputSchema?: Readonly<Record<string, unknown>>;
+  outputSchema?: Readonly<Record<string, unknown>>;
+}>;
+
+export type StudioCapabilityManifest = Readonly<{
   id: string;
+  kind?: "agent" | "capability" | "middleware";
+  hasMiddleware?: boolean;
   instructions?: readonly string[];
-  tools?: readonly Readonly<{ name: string; description?: string }>[];
-  model?: Readonly<{ id?: string; controls?: Readonly<{ temperature?: number; maxOutputTokens?: number }> }>;
+  tools?: readonly StudioManifestTool[];
+  model?: Readonly<{
+    id?: string;
+    controls?: Readonly<{ temperature?: number; maxOutputTokens?: number }>;
+  }>;
+}>;
+
+type StudioInnerManifest = Readonly<{
+  id: string;
+  name: string;
+  outputSchema?: Readonly<Record<string, unknown>>;
+  capabilities?: readonly StudioCapabilityManifest[];
+  middleware?: readonly StudioCapabilityManifest[];
 }>;
 
 /** A generated, JSON-safe description of one direct Harness agent. */
@@ -45,18 +65,22 @@ export type StudioAgentManifest = Readonly<{
   protocolVersion: 1 | 2;
   id: string;
   name: string;
-  manifest?: Readonly<{ id: string; name: string; middleware?: readonly StudioMiddlewareManifest[] }>;
+  manifest?: StudioInnerManifest;
   engine?: Readonly<{ name: string; details?: unknown }>;
   harness?: Readonly<{
-    manifest: Readonly<{
-      id: string;
-      name: string;
-      middleware: readonly StudioMiddlewareManifest[];
-    }>;
+    manifest: StudioInnerManifest;
   }>;
   endpoints: StudioEndpointSet;
 }>;
 
-export function manifestMiddleware(agent: StudioAgentManifest): readonly StudioMiddlewareManifest[] {
-  return agent.manifest?.middleware ?? agent.harness?.manifest.middleware ?? [];
+export function manifestCapabilities(
+  agent: StudioAgentManifest
+): readonly StudioCapabilityManifest[] {
+  return (
+    agent.manifest?.capabilities ??
+    agent.manifest?.middleware ??
+    agent.harness?.manifest.capabilities ??
+    agent.harness?.manifest.middleware ??
+    []
+  );
 }

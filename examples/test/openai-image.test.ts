@@ -7,9 +7,8 @@ import type {
   ModelCall,
   ModelRequest,
 } from "@nylorun/harness";
-import { piModel } from "../../runtime/src/model/pi-model.js";
 import { createOpenAIImageEditor } from "../agents/interior-design/image-editor.js";
-import { MediaStore } from "@nylorun/runtime";
+import { MediaStore, piModel } from "@nylorun/runtime/node";
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const encodedPng = Buffer.from(png).toString("base64");
@@ -108,7 +107,7 @@ describe("OpenAI image integrations", () => {
       },
     } as ModelAdapterContext;
     const call: ModelCall = {
-      sessionId: "room",
+      executionId: "room",
       prompt: [
         {
           kind: "message",

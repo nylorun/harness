@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { Agent } from "../src/index.js";
 import { expectBuildError, model, testAgent, tool, turn } from "./fixtures.js";
 
@@ -14,7 +15,10 @@ describe("build", () => {
     expect(agent.manifest).toEqual({
       id: "test",
       name: "Test",
-      middleware: [{ id: "first" }, { id: "second" }],
+      capabilities: [
+        { id: "first", kind: "middleware", hasMiddleware: true },
+        { id: "second", kind: "middleware", hasMiddleware: true },
+      ],
     });
     expect(agent.manifest).not.toHaveProperty("adapters");
     expect(Object.isFrozen(agent.manifest)).toBe(true);
@@ -40,7 +44,14 @@ describe("build", () => {
     expect(agent.manifest).toEqual({
       id: "test",
       name: "Test",
-      middleware: [{ id: "model", model: { id: "opus", controls: { temperature: 0.2 } } }],
+      capabilities: [
+        {
+          id: "model",
+          kind: "capability",
+          hasMiddleware: false,
+          model: { id: "opus", controls: { temperature: 0.2 } },
+        },
+      ],
     });
     expect(agent.manifest).not.toHaveProperty("model");
   });
@@ -54,14 +65,19 @@ describe("build", () => {
         model: { id: "opus", controls: { temperature: 0.2 } },
       })
       .build();
-    expect(agent.manifest.middleware).toEqual([
+    expect(agent.manifest.capabilities).toEqual([
       {
         id: "notes",
+        kind: "capability",
+        hasMiddleware: false,
         instructions: ["Write notes."],
-        tools: [{ name: "write_note" }],
+        tools: [{ name: "write_note", inputSchema: expect.any(Object) }],
         model: { id: "opus", controls: { temperature: 0.2 } },
       },
     ]);
+    expect(agent.manifest.capabilities[0]?.tools?.[0]?.inputSchema).toMatchObject({
+      type: "object",
+    });
   });
 
   it("reports empty identity at build", () => {
@@ -78,10 +94,15 @@ describe("build", () => {
       .use(async (_request, next) => next())
       .use("named", async (_request, next) => next())
       .build();
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
+    expect(agent.manifest.capabilities.map((item) => item.id)).toEqual([
       "middleware-1",
       "middleware-2",
       "named",
+    ]);
+    expect(agent.manifest.capabilities).toEqual([
+      { id: "middleware-1", kind: "middleware", hasMiddleware: true },
+      { id: "middleware-2", kind: "middleware", hasMiddleware: true },
+      { id: "named", kind: "middleware", hasMiddleware: true },
     ]);
   });
 
@@ -89,7 +110,9 @@ describe("build", () => {
     const id = { value: "original" };
     const builder = testAgent().use(id.value, async (_request, next) => next());
     id.value = "mutated";
-    expect(builder.build().manifest.middleware).toEqual([{ id: "original" }]);
+    expect(builder.build().manifest.capabilities).toEqual([
+      { id: "original", kind: "middleware", hasMiddleware: true },
+    ]);
   });
 
   it("hides internal model and tool registries", () => {
@@ -138,8 +161,49 @@ describe("build", () => {
     expect(contributors).toContainEqual(
       expect.objectContaining({ middlewareId: "agent", slot: "agent" }),
     );
-    expect(agent.manifest.middleware).toEqual([{ id: "agent", instructions: ["Be concise."] }]);
+    expect(agent.manifest.capabilities).toEqual([
+      { id: "agent", kind: "agent", hasMiddleware: false, instructions: ["Be concise."] },
+    ]);
     await session.stop();
+  });
+
+  it("publishes the agent output schema on the catalog", () => {
+    const agent = Agent({
+      id: "extractor",
+      name: "Extractor",
+      outputSchema: z.object({ answer: z.string() }),
+    }).build();
+    expect(agent.manifest.outputSchema).toMatchObject({
+      type: "object",
+      properties: { answer: { type: "string" } },
+    });
+  });
+
+  it("marks author-supplied declaration middleware", () => {
+    const agent = testAgent()
+      .use({
+        id: "notes",
+        tools: [tool("write_note")],
+        middleware: async (_request, next) => next(),
+      })
+      .build();
+    expect(agent.manifest.capabilities).toEqual([
+      {
+        id: "notes",
+        kind: "capability",
+        hasMiddleware: true,
+        tools: [{ name: "write_note", inputSchema: expect.any(Object) }],
+      },
+    ]);
+  });
+
+  it("projects a raw middleware layer as id only besides kind flags", () => {
+    const agent = testAgent()
+      .use(async (_request, next) => next())
+      .build();
+    expect(agent.manifest.capabilities).toEqual([
+      { id: "middleware-1", kind: "middleware", hasMiddleware: true },
+    ]);
   });
 
   it("rejects a capability that reuses the reserved agent id", () => {

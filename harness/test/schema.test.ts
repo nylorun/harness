@@ -1,7 +1,8 @@
+import { registered } from "./fixtures.js";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 import { tool } from "../src/index.js";
-import { defineSchema, normalizedSchemasFor } from "../src/build/schema.js";
+import { defineSchema, normalizedSchemasFor } from "../src/definition/schema.js";
 import { testAgent, model, toolCalls, turn } from "./fixtures.js";
 
 describe("Zod schemas", () => {
@@ -17,10 +18,13 @@ describe("Zod schemas", () => {
       },
     });
     const result = testAgent()
-      .use("parsed", async (request, next) => {
-        request.configuration.tools.set("parsed", [convert]);
-        return next();
-      })
+      .use(
+        "parsed",
+        registered([[convert]], (registeredTools) => async (request, next) => {
+          request.configuration.tools.set("parsed", registeredTools[0]);
+          return next();
+        }),
+      )
       .with(
         model(async () => {
           call += 1;
@@ -46,10 +50,13 @@ describe("Zod schemas", () => {
       },
     });
     const result = testAgent()
-      .use("zod", async (request, next) => {
-        request.configuration.tools.set("zod", [echo]);
-        return next();
-      })
+      .use(
+        "zod",
+        registered([[echo]], (registeredTools) => async (request, next) => {
+          request.configuration.tools.set("zod", registeredTools[0]);
+          return next();
+        }),
+      )
       .with(
         model(async (_call, { request }) => {
           expect(request.tools[0]?.inputSchema.jsonSchema).toMatchObject({
@@ -107,10 +114,13 @@ describe("Zod schemas", () => {
     };
     let calls = 0;
     const result = testAgent()
-      .use("tools", async (request, next) => {
-        request.configuration.tools.set("tools", [prepared, raw]);
-        return next();
-      })
+      .use(
+        "tools",
+        registered([[prepared, raw]], (registeredTools) => async (request, next) => {
+          request.configuration.tools.set("tools", registeredTools[0]);
+          return next();
+        }),
+      )
       .with(
         model(async () => {
           calls += 1;
@@ -140,95 +150,118 @@ describe("Zod schemas", () => {
 
   it("tripwires an invalid raw tool literal when it is first bound", async () => {
     const invoke = vi.fn(async () => "done");
-    const result = testAgent()
-      .use("bad", async (request, next) => {
-        request.configuration.tools.set("bad", [
-          {
-            name: "bad",
-            inputSchema: z.string() as never,
-            async execute() {
-              return { kind: "completed" as const, output: null };
+    expect(() =>
+      testAgent()
+        .use(
+          "bad",
+          registered(
+            [
+              [
+                {
+                  name: "bad",
+                  inputSchema: z.string() as never,
+                  async execute() {
+                    return { kind: "completed" as const, output: null };
+                  },
+                },
+              ],
+            ],
+            (registeredTools) => async (request, next) => {
+              request.configuration.tools.set("bad", registeredTools[0]);
+              return next();
             },
-          },
-        ]);
-        return next();
-      })
-      .with(model(invoke))
-      .build();
-    const output = (await turn(result, "go").handle.completed).events;
-    expect(output).toMatchObject([
-      { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "tool.invalid-schema" } },
-    ]);
+          ),
+        )
+        .with(model(invoke))
+        .build(),
+    ).toThrow();
     expect(invoke).not.toHaveBeenCalled();
   });
 
   it("tripwires declared asynchronous Zod checks before the Model runs", async () => {
     const invoke = vi.fn(async () => "done");
     const inputSchema = z.object({ text: z.string() }).refine(async () => true);
-    const result = testAgent()
-      .use("async", async (request, next) => {
-        request.configuration.tools.set("async", [
-          tool({
-            name: "async",
-            inputSchema,
-            async execute(args) {
-              return { kind: "completed", output: args };
+    expect(() =>
+      testAgent()
+        .use(
+          "async",
+          registered(
+            [
+              [
+                tool({
+                  name: "async",
+                  inputSchema,
+                  async execute(args) {
+                    return { kind: "completed", output: args };
+                  },
+                }),
+              ],
+            ],
+            (registeredTools) => async (request, next) => {
+              request.configuration.tools.set("async", registeredTools[0]);
+              return next();
             },
-          }),
-        ]);
-        return next();
-      })
-      .with(model(invoke))
-      .build();
-    const output = (await turn(result, "go").handle.completed).events;
-    expect(output).toMatchObject([
-      { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "tool.invalid-schema" } },
-    ]);
+          ),
+        )
+        .with(model(invoke))
+        .build(),
+    ).toThrow();
     expect(invoke).not.toHaveBeenCalled();
   });
 
   it("tripwires a Zod object that cannot convert to JSON Schema before the Model runs", async () => {
     const invoke = vi.fn(async () => "done");
-    const result = testAgent()
-      .use("unconvertible", async (request, next) => {
-        request.configuration.tools.set("unconvertible", [
-          tool({
-            name: "bigint",
-            inputSchema: z.object({ value: z.bigint() }),
-            async execute() {
-              return { kind: "completed", output: null };
+    expect(() =>
+      testAgent()
+        .use(
+          "unconvertible",
+          registered(
+            [
+              [
+                tool({
+                  name: "bigint",
+                  inputSchema: z.object({ value: z.bigint() }),
+                  async execute() {
+                    return { kind: "completed", output: null };
+                  },
+                }),
+              ],
+            ],
+            (registeredTools) => async (request, next) => {
+              request.configuration.tools.set("unconvertible", registeredTools[0]);
+              return next();
             },
-          }),
-        ]);
-        return next();
-      })
-      .with(model(invoke))
-      .build();
-    const output = (await turn(result, "go").handle.completed).events;
-    expect(output).toMatchObject([
-      { type: "input", event: { kind: "user-message", text: "go" } },
-      { type: "tripwire", tripwire: { code: "tool.invalid-schema" } },
-    ]);
+          ),
+        )
+        .with(model(invoke))
+        .build(),
+    ).toThrow();
     expect(invoke).not.toHaveBeenCalled();
   });
 
   it("seals invalid Zod arguments as tool.invalid-arguments", async () => {
     let call = 0;
     const result = testAgent()
-      .use("typed", async (request, next) => {
-        request.configuration.tools.set("typed", [
-          tool({
-            name: "echo",
-            inputSchema: z.object({ text: z.string() }),
-            async execute(args) {
-              return { kind: "completed", output: args };
-            },
-          }),
-        ]);
-        return next();
-      })
+      .use(
+        "typed",
+        registered(
+          [
+            [
+              tool({
+                name: "echo",
+                inputSchema: z.object({ text: z.string() }),
+                async execute(args) {
+                  return { kind: "completed", output: args };
+                },
+              }),
+            ],
+          ],
+          (registeredTools) => async (request, next) => {
+            request.configuration.tools.set("typed", registeredTools[0]);
+            return next();
+          },
+        ),
+      )
       .with(
         model(async () => {
           call += 1;
@@ -284,19 +317,27 @@ describe("Zod schemas", () => {
       },
     };
     const result = testAgent()
-      .use("standard", async (request, next) => {
-        request.configuration.tools.set("standard", [
-          tool({
-            name: "standard",
-            inputSchema: standard,
-            async execute(args) {
-              executed = args;
-              return { kind: "completed", output: args };
-            },
-          }),
-        ]);
-        return next();
-      })
+      .use(
+        "standard",
+        registered(
+          [
+            [
+              tool({
+                name: "standard",
+                inputSchema: standard,
+                async execute(args) {
+                  executed = args;
+                  return { kind: "completed", output: args };
+                },
+              }),
+            ],
+          ],
+          (registeredTools) => async (request, next) => {
+            request.configuration.tools.set("standard", registeredTools[0]);
+            return next();
+          },
+        ),
+      )
       .with(
         model(async () =>
           executed === undefined
@@ -337,19 +378,27 @@ describe("Zod schemas", () => {
   it("validates, transforms, records, and projects the one completed output", async () => {
     let call = 0;
     const result = testAgent()
-      .use("output", async (request, next) => {
-        request.configuration.tools.set("output", [
-          tool({
-            name: "output",
-            inputSchema: z.object({}),
-            outputSchema: z.object({ count: z.coerce.number() }),
-            async execute() {
-              return { kind: "completed", output: { count: "2" } as never };
-            },
-          }),
-        ]);
-        return next();
-      })
+      .use(
+        "output",
+        registered(
+          [
+            [
+              tool({
+                name: "output",
+                inputSchema: z.object({}),
+                outputSchema: z.object({ count: z.coerce.number() }),
+                async execute() {
+                  return { kind: "completed", output: { count: "2" } as never };
+                },
+              }),
+            ],
+          ],
+          (registeredTools) => async (request, next) => {
+            request.configuration.tools.set("output", registeredTools[0]);
+            return next();
+          },
+        ),
+      )
       .with(
         model(async (_call, { request }) => {
           call += 1;
@@ -370,19 +419,27 @@ describe("Zod schemas", () => {
   it("turns invalid output into a model-visible failed result", async () => {
     let call = 0;
     const result = testAgent()
-      .use("output", async (request, next) => {
-        request.configuration.tools.set("output", [
-          tool({
-            name: "output",
-            inputSchema: z.object({}),
-            outputSchema: z.object({ count: z.number() }),
-            async execute() {
-              return { kind: "completed", output: { count: "bad" } as never };
-            },
-          }),
-        ]);
-        return next();
-      })
+      .use(
+        "output",
+        registered(
+          [
+            [
+              tool({
+                name: "output",
+                inputSchema: z.object({}),
+                outputSchema: z.object({ count: z.number() }),
+                async execute() {
+                  return { kind: "completed", output: { count: "bad" } as never };
+                },
+              }),
+            ],
+          ],
+          (registeredTools) => async (request, next) => {
+            request.configuration.tools.set("output", registeredTools[0]);
+            return next();
+          },
+        ),
+      )
       .with(
         model(async (_call, { request }) => {
           call += 1;

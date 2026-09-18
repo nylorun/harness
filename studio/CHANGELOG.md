@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0-beta
+
+### Minor Changes
+
+- Breaking: Studio reads `manifest.capabilities` (capability id, `kind`, `hasMiddleware`, tool
+  schemas). `manifestCapabilities()` still accepts legacy `middleware` / `harness.manifest`
+  documents. `StudioMiddlewareManifest` is now `StudioCapabilityManifest`.
+- c5bbb1a: Breaking beta: make Harness `run()` a direct async state-in/state-out executor with
+  serializable pauses, application `info`, cancellation signals, awaited recording, and
+  agent-level output schemas. Runtime owns session scheduling with memory-default or exclusive
+  local storage and imports Harness contracts. Isolate Node adapters under `runtime/node`, stream
+  observations incrementally, and add opt-in bounded token previews with Studio reconciliation.
+  Migrate consumers and deployment guidance together; legacy event records remain archived, not
+  automatically replayed.
+
 ## 0.4.2-beta
 
 ### Patch Changes

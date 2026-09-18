@@ -54,13 +54,11 @@ export type SchemaOutput<Schema> =
 export type ToolInputSchema = ToolSchemaSource;
 export type ToolOutputSchema = ToolSchemaSource;
 
-export interface BoundToolSchema<T> extends ToolSchema<T> {}
-
 type OutputFor<Schema> = Schema extends ToolSchemaSource ? SchemaOutput<Schema> : ToolContent;
 
 export interface ToolDefinition<
   InputSchema extends ToolInputSchema = ToolInputSchema,
-  State = never,
+  Info = unknown,
   OutputSchema extends ToolOutputSchema | undefined = undefined,
 > {
   readonly name: string;
@@ -69,18 +67,8 @@ export interface ToolDefinition<
   readonly outputSchema?: OutputSchema;
   execute(
     args: SchemaOutput<InputSchema>,
-    context: ToolExecutionContext<State>,
+    context: ToolExecutionContext<Info>,
   ): Promise<ToolOutcome<OutputFor<OutputSchema>>>;
-}
-
-export interface BoundToolDefinition<State = never> extends Omit<
-  ToolDefinition<ToolInputSchema, State, ToolOutputSchema | undefined>,
-  "inputSchema" | "outputSchema" | "execute"
-> {
-  readonly inputSchema: BoundToolSchema<unknown>;
-  readonly outputSchema?: BoundToolSchema<unknown>;
-  readonly execute: (args: unknown, context: ToolExecutionContext<State>) => Promise<ToolOutcome>;
-  readonly owner: ToolOwner;
 }
 
 export interface ToolOwner {
@@ -107,26 +95,21 @@ export interface ToolExecutionResume {
   readonly token?: JsonValue;
 }
 
-export interface SealedToolCall {
-  readonly callId: string;
-  readonly toolName: string;
-  readonly args: JsonValue;
-}
-
 interface ToolExecutionContextBase {
-  readonly sessionId: string;
+  readonly executionId: string;
   readonly turnId: string;
   readonly stepId: string;
   readonly callId: string;
   readonly invocationId: string;
   readonly signal: AbortSignal;
-  /** The session's model callable, for tools that explicitly run a child agent. */
+  /** The invocation's model callable, for tools that explicitly run a child agent. */
   readonly onModelCall?: ModelAdapter;
   readonly resume?: ToolExecutionResume;
 }
 
-export type ToolExecutionContext<State = never> = ToolExecutionContextBase &
-  ([State] extends [never] ? object : { readonly state: Promise<State> });
+export type ToolExecutionContext<Info = unknown> = ToolExecutionContextBase & {
+  readonly info?: Info;
+};
 
 export type ToolContent = JsonValue;
 export type ToolOutcome<Output = ToolContent> =
@@ -166,3 +149,12 @@ export type ToolResult =
       readonly message: string;
       readonly details?: ToolValidationFailureDetails;
     };
+
+/** Immutable tool metadata supplied to model adapters and observers. */
+export interface ToolDescriptor {
+  readonly name: string;
+  readonly description?: string;
+  readonly owner: ToolOwner;
+  readonly inputSchema: { readonly jsonSchema: JsonObject };
+  readonly outputSchema?: { readonly jsonSchema: JsonObject };
+}

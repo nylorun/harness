@@ -25,7 +25,7 @@ export function sandboxTools(workspaces: Map<string, DockerWorkspace>) {
           try {
             return {
               kind: "completed" as const,
-              output: { files: await workspace(context.sessionId).list() },
+              output: { files: await workspace(((context.info as { sessionId?: string } | undefined)?.sessionId ?? context.executionId)).list() },
             };
           } catch (error) {
             return failure(error);
@@ -42,7 +42,7 @@ export function sandboxTools(workspaces: Map<string, DockerWorkspace>) {
               kind: "completed" as const,
               output: {
                 path,
-                content: await workspace(context.sessionId).read(path),
+                content: await workspace(((context.info as { sessionId?: string } | undefined)?.sessionId ?? context.executionId)).read(path),
               },
             };
           } catch (error) {
@@ -66,7 +66,7 @@ export function sandboxTools(workspaces: Map<string, DockerWorkspace>) {
             };
           }
           try {
-            await workspace(context.sessionId).write(path, content);
+            await workspace(((context.info as { sessionId?: string } | undefined)?.sessionId ?? context.executionId)).write(path, content);
             return {
               kind: "completed" as const,
               output: { path, bytes: Buffer.byteLength(content) },
@@ -84,7 +84,7 @@ export function sandboxTools(workspaces: Map<string, DockerWorkspace>) {
           try {
             return {
               kind: "completed" as const,
-              output: await workspace(context.sessionId).shell(
+              output: await workspace(((context.info as { sessionId?: string } | undefined)?.sessionId ?? context.executionId)).shell(
                 script,
                 context.signal,
               ),

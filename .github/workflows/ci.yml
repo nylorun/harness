@@ -26,6 +26,8 @@ jobs:
       - run: npm run setup
       - run: npm run check -- --built
       - run: npm run check:stack -- --built
+      - run: npm run test:workers
+      - run: node create-agent/scripts/smoke-starter.mjs
       - run: npm run test:dev
       - run: npm run test:setup
       - name: Validate a proposed release

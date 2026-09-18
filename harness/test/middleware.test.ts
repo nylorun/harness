@@ -1,3 +1,4 @@
+import { registered } from "./fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { testAgent, execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 
@@ -30,11 +31,11 @@ describe("middleware", () => {
   });
 
   it("exposes the same Session identity to middleware across a tool loop", async () => {
-    const sessionIds: string[] = [];
+    const executionIds: string[] = [];
     let calls = 0;
     const result = testAgent()
       .use("durability", async (request, next) => {
-        sessionIds.push(request.sessionId);
+        executionIds.push(request.executionId);
         return next();
       })
       .use("tools", offer(tool()))
@@ -47,7 +48,7 @@ describe("middleware", () => {
 
     await turn(result, "go", { id: "durable-session" }).handle.completed;
 
-    expect(sessionIds).toEqual(["durable-session", "durable-session"]);
+    expect(executionIds).toEqual(["durable-session", "durable-session"]);
   });
 
   it("tripwires conflicting model selection", async () => {
@@ -91,13 +92,19 @@ describe("middleware", () => {
         }).toThrow();
         return response;
       })
-      .use("restrictions", async (request, next) => {
-        request.configuration.tools.set("restrictions", [tool("echo", execution(execute))]);
-        const response = await next();
-        response.deny("deny", "policy");
-        response.requireInteraction("deny", { kind: "approval", prompt: "approve" });
-        return response;
-      })
+      .use(
+        "restrictions",
+        registered(
+          [[tool("echo", execution(execute))]],
+          (registeredTools) => async (request, next) => {
+            request.configuration.tools.set("restrictions", registeredTools[0]);
+            const response = await next();
+            response.deny("deny", "policy");
+            response.requireInteraction("deny", { kind: "approval", prompt: "approve" });
+            return response;
+          },
+        ),
+      )
       .with(
         model(async (_call, { request }) => {
           if (++step > 1) return "done";
@@ -151,7 +158,7 @@ describe("middleware", () => {
         tripwire: { code: "middleware.invalid-response", scope: "step" },
       },
     ]);
-    expect(omittedNextReturnTurn.session.state.status).toBe("idle");
+    expect(omittedNextReturnTurn.session.state.status).toBe("stopped");
 
     const doubled = testAgent()
       .use("double", async (_request, next) => {
@@ -180,7 +187,7 @@ describe("middleware", () => {
       { type: "input", event: { kind: "user-message", text: "go" } },
       { type: "tripwire", tripwire: { code: "middleware.failed" } },
     ]);
-    expect(spoofedTurn.session.state.status).toBe("idle");
+    expect(spoofedTurn.session.state.status).toBe("stopped");
   });
 
   it("copies context contributions before their source can mutate", async () => {
@@ -466,11 +473,11 @@ describe("middleware", () => {
   });
 
   it("exposes stable session and unique turn/step identities on the middleware lease", async () => {
-    const seen: Array<{ sessionId: string; turnId: string; stepId: string }> = [];
+    const seen: Array<{ executionId: string; turnId: string; stepId: string }> = [];
     const session = testAgent()
       .use("identity", async (request, next) => {
         seen.push({
-          sessionId: request.sessionId,
+          executionId: request.executionId,
           turnId: request.turnId,
           stepId: request.stepId,
         });
@@ -483,7 +490,7 @@ describe("middleware", () => {
     await session.input("second").completed;
 
     expect(seen).toHaveLength(2);
-    expect(seen.map((item) => item.sessionId)).toEqual(["session-identity", "session-identity"]);
+    expect(seen.map((item) => item.executionId)).toEqual(["session-identity", "session-identity"]);
     expect(seen[0]?.turnId).not.toBe(seen[1]?.turnId);
     expect(seen[0]?.stepId).not.toBe(seen[1]?.stepId);
   });

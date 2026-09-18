@@ -1,279 +1,132 @@
 import { z } from "zod";
 import {
   Agent,
-  HarnessError,
-  preparedModel,
+  createExecutionState,
+  type BuiltAgent,
+  type ModelRequest,
+  type ToolDescriptor,
   tool,
   type CapabilityDeclaration,
-  type AgentManifest,
-  type HarnessErrorCode,
-  type InputEvent,
-  type InputCompletion,
-  type BuiltAgent,
-  type BoundToolSchema,
-  type BuildDiagnostic,
-  type ModelAdapter,
-  type ModelCall,
-  type ModelCandidate,
-  type ModelDirective,
-  type ModelRequest,
-  type ModelConfigurationSnapshot,
-  type Session,
-  type SessionRecord,
-  type SessionRecorder,
-  type SessionSeed,
-  type SessionInput,
-  type SessionOptions,
+  type ExecutionState,
+  type RunResult,
   type StepRequest,
-  type StepResponse,
 } from "../../src/index.js";
-// @ts-expect-error bindAgent is not a public export
+// @ts-expect-error Session objects are no longer exported.
+import type { Session } from "../../src/index.js";
+// @ts-expect-error Private binding implementation is not public.
 import { bindAgent } from "../../src/index.js";
 
-tool({
-  name: "echo",
-  inputSchema: z.object({ text: z.string().trim() }),
-  async execute(args) {
-    return { kind: "completed", output: { text: args.text } };
-  },
-});
-
-tool({
-  name: "invalid-root",
-  inputSchema: z.string(),
-  async execute() {
-    return { kind: "completed", output: null };
-  },
-});
-
-tool({
-  name: "removed-parameters",
-  // @ts-expect-error parameters was replaced by inputSchema in v1.
-  parameters: z.object({}),
-  async execute() {
-    return { kind: "completed", output: null };
-  },
-});
-
-Agent({ id: "echo", name: "Echo" })
-  .use("echo", async (_request, next) => next())
-  .build()
-  .run({ onModelCall: async () => "done" });
-
-// @ts-expect-error bind-time model directives were removed; use a declaration.
-Agent({ id: "echo", name: "Echo" }, { id: "opus" });
-
-declare const manifest: AgentManifest;
-void manifest.id;
-void manifest.name;
-void manifest.middleware[0]?.instructions;
-void manifest.middleware[0]?.tools;
-void manifest.middleware[0]?.model;
-// @ts-expect-error model selection is no longer top-level manifest state.
-void manifest.model;
-
-type CounterState = { count: number };
-const counterSchema = z.object({});
-const counterTool = tool<typeof counterSchema, CounterState>({
-  name: "counter",
-  inputSchema: counterSchema,
-  async execute(_args, context) {
-    const state: CounterState = await context.state;
-    return { kind: "completed", output: state.count };
-  },
-});
-const counterCapability: CapabilityDeclaration<CounterState> = {
-  id: "counter",
-  state: { create: () => ({ count: 0 }) },
-  tools: [counterTool],
-  middleware: async (request, next) => {
-    const state: CounterState = await request.state;
-    state.count += 1;
-    return next();
-  },
-};
-Agent({ id: "counter", name: "Counter" }).use(counterCapability);
-const statelessCapability: CapabilityDeclaration = {
-  id: "stateless",
-  middleware: async (request, next) => {
-    // @ts-expect-error declarations without state do not expose request.state
-    void request.state;
-    return next();
-  },
-};
-void statelessCapability;
-
-// @ts-expect-error identity options are required
-Agent();
-
-// @ts-expect-error Agent takes identity options, not an invoker object
-Agent({ invoke: async () => "done" });
-
-// @ts-expect-error Agent takes identity options, not a create-options bag
-Agent({ model: { invoke: async () => "done" } });
-
-Agent({ id: "echo", name: "Echo" })
-  .use("echo", async (_request, next) => next())
-  .build();
-
-// @ts-expect-error with() was removed; model execution belongs to run().
-Agent({ id: "echo", name: "Echo" }).with(async () => "done");
-
-// @ts-expect-error run belongs on BuiltAgent, not the builder
-Agent({ id: "echo", name: "Echo" }).run();
-
-// @ts-expect-error Agent is a factory, not a constructable class
-new Agent({ id: "echo", name: "Echo" });
-
-declare const session: Session;
-session.interrupt("ok");
-session.interrupt({ text: "ok" });
-session.input({
-  content: [
-    { type: "text", text: "Inspect this." },
-    { type: "media", mediaType: "image/png", reference: { url: "https://example.test/chart.png" } },
+type Info = { tenantId: string };
+const schema = z.object({ count: z.number() });
+const capability: CapabilityDeclaration<Info> = {
+  id: "tools",
+  tools: [
+    tool({
+      name: "count",
+      inputSchema: z.object({ value: z.number() }),
+      execute: async ({ value }, { info }) => {
+        const tenant: string | undefined = info?.tenantId;
+        return { kind: "completed", output: { value, tenant: tenant ?? "" } };
+      },
+    }),
   ],
+  middleware: async (request, next) => {
+    const tenant: string | undefined = request.info?.tenantId;
+    // @ts-expect-error Resource creation and session-owned state were removed.
+    request.state;
+    request.context.set("tenant", [{ value: tenant ?? "" }]);
+    return next();
+  },
+};
+const scoped = Agent<Info>({ id: "a", name: "A" }).use(capability).build();
+const promise: Promise<RunResult<string>> = scoped.run({
+  input: "hi",
+  info: { tenantId: "t" },
+  onModelCall: async () => "hello",
 });
-const structuredHandle = session.input("Extract", {
-  outputSchema: z.object({ summary: z.string(), count: z.number() }),
+// @ts-expect-error run returns a Promise, not a handle.
+promise.completed;
+// @ts-expect-error No public step loop.
+scoped.step;
+// @ts-expect-error Cancellation belongs to an AbortController.
+scoped.cancel;
+// @ts-expect-error Info is typed.
+scoped.run({ input: "hi", info: { tenantId: 2 }, onModelCall: async () => "hello" });
+// @ts-expect-error Every invocation specifies input.
+scoped.run({ onModelCall: async () => "hello" });
+// @ts-expect-error Per-run final schemas were removed.
+scoped.run({ input: "hi", outputSchema: schema, onModelCall: async () => "hello" });
+// @ts-expect-error No run-time tool resolver.
+scoped.run({ input: "hi", resolveTool: () => null, onModelCall: async () => "hello" });
+
+const typed = Agent({ id: "structured", name: "Structured", outputSchema: schema }).build();
+const typedResult = await typed.run({
+  input: "go",
+  onModelCall: async () => ({ output: [{ type: "json", value: { count: 1 } }] }),
 });
-const structuredCompletion: Promise<InputCompletion<{ summary: string; count: number }>> =
-  structuredHandle.completed;
-void structuredCompletion;
-// @ts-expect-error output schemas belong to ordinary input turns.
-session.continue({ outputSchema: z.object({}) });
-// @ts-expect-error input() does not accept interrupt
-session.input({ kind: "interrupt", text: "x" });
-
-declare const agent: BuiltAgent;
-const agentId: string = agent.id;
-const agentName: string = agent.name;
-void [agentId, agentName];
-
-const seed: SessionSeed = { transcript: [], revision: 4 };
-const recorder: SessionRecorder = { async record(_value: SessionRecord) {} };
-agent.run({ seed, recorder, onModelCall: async () => "done" }).continue();
-
-// @ts-expect-error adapters were removed
-agent.with({});
-
-// @ts-expect-error Session limits are application middleware policy.
-agent.run({ limits: { maxTurns: 1 } });
-
-// @ts-expect-error run is a Session factory; submit work through session.input
-agent.run("hello");
-
-// @ts-expect-error SessionOptions.model was removed and onModelCall is required.
-const sessionOptions: SessionOptions = { model: "opus" };
-// @ts-expect-error observation is configured when the session is created.
-session.observe(() => undefined);
-
+if (typedResult.status === "completed") {
+  const count: number = typedResult.output.count;
+  // @ts-expect-error Inferred output is not string.
+  const wrong: string = typedResult.output;
+}
+const scopedTyped = Agent<Info, typeof schema>({
+  id: "scoped",
+  name: "Scoped",
+  outputSchema: schema,
+})
+  .use(capability)
+  .build();
+void scopedTyped;
+declare const state: ExecutionState;
+await scoped.run({
+  state,
+  input: "again",
+  onModelCall: async () => "done",
+  record: async (snapshot) => {
+    const revision: number = snapshot.revision;
+  },
+  onEvent: (event) => {
+    const sequence: number = event.sequence;
+  },
+});
+// @ts-expect-error Legacy state factories are removed.
+const bad: CapabilityDeclaration = { id: "bad", state: { create: () => ({}) } };
 declare const request: StepRequest;
-request.context.set("note", [{ type: "note", value: 1 }]);
-// @ts-expect-error context lifetime belongs to application state, not Harness.
-request.context.set("note", [{ type: "note", value: 1 }], { lifetime: "step" });
-// @ts-expect-error Context declarations are scoped to this step and cannot be removed.
-request.context.remove("note");
-// @ts-expect-error context.add was replaced by context.set
-request.context.add({ value: 1 });
-const sessionId: string = request.sessionId;
-const turnId: string = request.turnId;
-const stepId: string = request.stepId;
-void [sessionId, turnId, stepId];
-// @ts-expect-error sessionId is immutable
-request.sessionId = "other-session";
-// @ts-expect-error selectModel was replaced by request.model.select
-request.selectModel("opus");
-// @ts-expect-error prefix was renamed to configuration.
-request.prefix;
+// @ts-expect-error Harness does not expose a Session on middleware requests.
+request.session;
 
-declare const configuration: ModelConfigurationSnapshot;
-// @ts-expect-error Model configuration no longer exposes globally withheld tools.
-configuration.withheldTools;
-
-const candidate: ModelCandidate = {
-  output: [{ type: "text", text: "ok" }],
-  finishReason: "stop",
-};
-// @ts-expect-error content was replaced by output blocks
-const oldContent: ModelCandidate = { content: "hi" };
-// @ts-expect-error toolCalls was replaced by output blocks
-const oldCalls: ModelCandidate = { toolCalls: [] };
-// @ts-expect-error metadata was removed
-const oldMetadata: ModelCandidate = { output: [], metadata: {} };
-// @ts-expect-error error is not a successful finishReason
-const failed: ModelCandidate = { output: [], finishReason: "error" };
-
-declare const call: ModelCall;
-const prompt = call.prompt;
-const callSessionId: string = call.sessionId;
-void prompt;
-void callSessionId;
-// @ts-expect-error system was replaced by prompt
-call.system = "";
-// @ts-expect-error messages were replaced by prompt
-call.messages = [];
-// @ts-expect-error turnId is not on ModelCall
-call.turnId = "turn";
-// @ts-expect-error stepId is not on ModelCall
-call.stepId = "step";
-
+const typedAgent: BuiltAgent<Info, { count: number }> = scopedTyped;
+const initialized: ExecutionState = createExecutionState(typedAgent);
+createExecutionState(scoped);
+// @ts-expect-error BuiltAgent has no runtime constructor.
+new BuiltAgent();
+// @ts-expect-error BuiltAgent cannot be used with instanceof.
+scoped instanceof BuiltAgent;
+// @ts-expect-error The registry is internal.
+scoped.registry;
+// @ts-expect-error Compiled middleware is internal.
+scoped.middleware;
+// @ts-expect-error Bound output validation is internal.
+typed.output;
+// @ts-expect-error Compiled middleware is not a public contract.
+import type { BoundMiddleware } from "../../src/index.js";
+// @ts-expect-error Step input is internal.
+import type { StepInput } from "../../src/index.js";
+// @ts-expect-error Bound schemas are internal.
+import type { BoundToolSchema } from "../../src/index.js";
+// @ts-expect-error Executable bound definitions are internal.
+import type { BoundToolDefinition } from "../../src/index.js";
+// @ts-expect-error Sealed calls are internal.
+import type { SealedToolCall } from "../../src/index.js";
 declare const modelRequest: ModelRequest;
-declare const invoke: ModelAdapter;
-void invoke(call, {
-  request: modelRequest,
-  invocationId: "invocation",
-  signal: new AbortController().signal,
-  reportPreparedCall: () => undefined,
-});
-// @ts-expect-error ModelAdapter receives the projected call before its context object
-void invoke(call, modelRequest, new AbortController().signal);
-
-declare const sessionInput: SessionInput;
-void sessionInput;
-
-declare const inputEvent: InputEvent;
-if (inputEvent.kind === "user-message" || inputEvent.kind === "interrupt") void inputEvent.text;
-
-preparedModel({
-  adapter: "example",
-  async prepare() {
-    return { request: { provider: "example" }, observed: { provider: "example" } };
-  },
-  async send() {
-    return { text: "done" };
-  },
-  decode(response) {
-    return (response as { text: string }).text;
-  },
-});
-
-declare const inputHandle: import("../../src/index.js").InputHandle;
-// @ts-expect-error completed replaced the redundant consume alias
-void inputHandle.consume();
-
-declare const response: StepResponse;
-const tripped: StepResponse = response.tripwire({ code: "policy.block", message: "Blocked" });
-void tripped;
-
-const harnessCode: HarnessErrorCode = "configuration.duplicate-tool-name";
-const harnessError = new HarnessError(harnessCode, "Duplicate tool");
-void harnessError;
-
-declare const boundSchema: BoundToolSchema<{ text: string }>;
-void boundSchema.validate({ text: "ok" });
-
-const obsoleteDiagnostic: BuildDiagnostic = {
-  code: "build.invalid",
-  message: "Invalid",
-  // @ts-expect-error diagnostics no longer identify capabilities
-  capabilityId: "removed",
-};
-void obsoleteDiagnostic;
-
-const directive: ModelDirective = {
-  id: "opus",
-  controls: { temperature: 0.2, maxOutputTokens: 128 },
-};
-// @ts-expect-error extra directive keys are not allowed
-const extra: ModelDirective = { id: "opus", extra: true };
+const descriptor: ToolDescriptor = modelRequest.tools[0]!;
+const descriptionSchema = descriptor.inputSchema.jsonSchema;
+const owner: string = descriptor.owner.middlewareId;
+// @ts-expect-error Adapters cannot dispatch tools through descriptors.
+descriptor.execute({}, {});
+// @ts-expect-error Descriptors do not expose original definitions.
+descriptor.source;
+// @ts-expect-error Descriptors do not expose validators.
+descriptor.inputSchema.validate({});
+// @ts-expect-error The configuration view also contains only descriptors.
+modelRequest.configuration.tools[0]!.execute({}, {});

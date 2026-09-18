@@ -1,6 +1,6 @@
-import type { ContextItem, DeferredOutcome, JsonObject, JsonValue } from "./shared.js";
-import type { InputEvent, TranscriptEntry } from "./session.js";
-import type { BoundToolDefinition, ToolResult } from "./tool.js";
+import type { ContextItem, JsonObject, JsonValue } from "./shared.js";
+import type { InputEvent, TranscriptEntry } from "./transcript.js";
+import type { ToolDescriptor, ToolResult } from "./tool.js";
 
 export interface ModelToolCall {
   readonly id: string;
@@ -87,8 +87,8 @@ export interface ModelConfigurationSnapshot {
   readonly version: 1;
   readonly model?: ModelDirective;
   readonly instructions: readonly ModelConfigurationInstruction[];
-  /** Bound tools are retained for execution. */
-  readonly tools: readonly BoundToolDefinition[];
+  /** Data-only descriptions of the selected tools. */
+  readonly tools: readonly ToolDescriptor[];
   readonly toolContracts: readonly ModelConfigurationTool[];
   readonly contributors: readonly ModelConfigurationContributor[];
 }
@@ -113,7 +113,7 @@ export interface ContextSnapshot {
 }
 
 export interface ModelRequest {
-  readonly sessionId: string;
+  readonly executionId: string;
   readonly turnId: string;
   readonly stepId: string;
   readonly model?: ModelDirective;
@@ -124,8 +124,8 @@ export interface ModelRequest {
   readonly transcript: readonly TranscriptEntry[];
   readonly arrivals: readonly InputEvent[];
   readonly toolResults: readonly ToolResult[];
-  /** Tools are normalized and immutable by the time a Model sees them. */
-  readonly tools: readonly BoundToolDefinition[];
+  /** Immutable tool descriptions; executable definitions stay inside Harness. */
+  readonly tools: readonly ToolDescriptor[];
   /** Optional portable contract for this turn's terminal JSON result. */
   readonly outputSchema?: JsonObject;
 }
@@ -178,7 +178,7 @@ export interface ModelCall {
   readonly tools: readonly ModelCallTool[];
   /** Optional portable contract for this turn's terminal JSON result. */
   readonly outputSchema?: JsonObject;
-  readonly sessionId: string;
+  readonly executionId: string;
 }
 
 export interface ModelAdapterContext {
@@ -197,4 +197,4 @@ export interface ModelPreparedCall {
 export type ModelAdapter = (
   call: ModelCall,
   context: ModelAdapterContext,
-) => Promise<ModelCandidate | string | DeferredOutcome>;
+) => Promise<ModelCandidate | string>;

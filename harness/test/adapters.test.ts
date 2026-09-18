@@ -10,11 +10,11 @@ import {
   toChatCompletions,
   toMessages,
   toResponses,
-} from "../src/model/adapters.js";
+} from "../src/execution/model/adapters.js";
 import type { ModelAdapterContext, ModelCall, ModelRequest } from "../src/types/model.js";
 
 const call: ModelCall = {
-  sessionId: "session-1",
+  executionId: "session-1",
   model: { controls: { temperature: 0.2, maxOutputTokens: 256 } },
   prompt: [
     { kind: "instructions", role: "system", content: [{ type: "text", text: "Be brief." }] },

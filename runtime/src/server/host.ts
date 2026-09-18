@@ -1,37 +1,33 @@
-import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import type {
   JsonValue,
   MessageInput,
-  RuntimeSession,
   RuntimeAgent,
-  RuntimeInput,
   UserContentPart,
 } from "../contracts.js";
-import { agUiEvents, sse } from "./ag-ui.js";
-import { observedPayload } from "./digests.js";
-import { localJsonl, scrub, type CanonicalEvent } from "../adapters/journal.js";
-import { jsonlObserver } from "../adapters/observe.js";
+import type { ExecutionInput, ModelAdapter } from "@nylorun/harness";
+import { agUiEvents } from "./ag-ui.js";
+import { EventDelivery } from "./delivery.js";
+import { scrub } from "../redact.js";
+import { memorySessions, type CanonicalEvent } from "../sessions/store.js";
+import { SessionHost } from "../sessions/host.js";
 import {
   IMAGE_MEDIA_TYPES,
   MAX_IMAGE_BYTES,
+  decodeImageBase64,
   type RuntimeMedia,
   type MediaAsset,
-} from "../adapters/media.js";
+} from "../media.js";
 import type { RuntimeConfig } from "../config.js";
-import { projectSecrets } from "../model/settings.js";
-import { piModel } from "../model/pi-model.js";
-
-type Live = {
-  session: RuntimeSession;
-  writes: Promise<void>;
-  events: CanonicalEvent[];
-  messages: ChatMessage[];
-  status: "running" | "waiting" | "completed" | "failed";
-  sequence: number;
-};
+import {
+  defaultModel,
+  processEnvironment,
+  registerRuntimeLifecycle,
+} from "../model/defaults.js";
+import type { ModelEnvironment } from "../model/http-model.js";
+const randomUUID = () => crypto.randomUUID();
 
 type ChatContent =
   | { readonly type: "text"; readonly text: string }
@@ -43,17 +39,19 @@ type ChatMessage = {
   readonly content: readonly ChatContent[];
 };
 type IncomingMessage = Readonly<{ input: MessageInput; chat: ChatMessage }>;
-
 export type RuntimeActor = Readonly<{
   id: string;
   context?: Record<string, JsonValue>;
 }>;
 export type AgentRouterOptions = Readonly<{
-  /** Override the public URL prefix; defaults to the current Hono mount path. */
   basePath?: string;
   getActor?: (
     context: Context
   ) => RuntimeActor | undefined | Promise<RuntimeActor | undefined>;
+  getInfo?: (context: Context) => unknown | Promise<unknown>;
+  getEnvironment?: (
+    context: Context
+  ) => ModelEnvironment | Promise<ModelEnvironment>;
   getRequestMetadata?: (
     context: Context
   ) =>
@@ -61,30 +59,25 @@ export type AgentRouterOptions = Readonly<{
     | undefined
     | Promise<Record<string, JsonValue> | undefined>;
 }>;
-
 export type ServeAgentsOptions = AgentRouterOptions & {
   readonly agents: readonly RuntimeAgent[];
   readonly runtime: Runtime;
 };
-
 const kServe = Symbol("serve");
 
 export class Runtime {
-  readonly #config: RuntimeConfig;
-  #served = false;
-  #closing?: Promise<void>;
-  #shutdown?: () => Promise<void>;
-
-  constructor(options: RuntimeConfig = {}) {
-    this.#config = options;
+  readonly host: SessionHost;
+  private served = false;
+  private closing?: Promise<void>;
+  constructor(private readonly config: RuntimeConfig = {}) {
+    this.host = new SessionHost(config.sessions ?? memorySessions());
+    registerRuntimeLifecycle(this.close);
   }
+  close = (): Promise<void> => (this.closing ??= this.host.close());
 
-  close = (): Promise<void> =>
-    (this.#closing ??= this.#shutdown?.() ?? Promise.resolve());
-
-  [kServe](options: Omit<ServeAgentsOptions, "runtime">): Hono {
-    if (this.#served) throw new Error("A Runtime may only be served once.");
-    this.#served = true;
+  [kServe](options: Omit<ServeAgentsOptions, "runtime">): Hono<any> {
+    if (this.served) throw new Error("A Runtime may only be served once.");
+    this.served = true;
     const agents = [...options.agents];
     const byId = new Map(agents.map((agent) => [agent.id, agent]));
     if (byId.size !== agents.length)
@@ -95,15 +88,11 @@ export class Runtime {
       if (agent.id !== agent.manifest.id || agent.name !== agent.manifest.name)
         throw new Error("Agent identity must match its manifest.");
     }
-    const media = this.#config.media;
-    const onModelCall = this.#config.onModelCall ?? piModel({ media });
-    const journal = this.#config.durability ?? localJsonl();
-    const configuredObserver = this.#config.observer;
-    const redact = (value: unknown) => scrub(value, projectSecrets());
-    const live = new Map<string, Live>();
-    const routerOptions = options;
-    const app = new Hono();
-    if (process.env.NYLORUN_DEV === "1") {
+    const { media } = this.config;
+    const app = new Hono<{
+      Variables: { info: unknown; modelEnvironment: ModelEnvironment };
+    }>();
+    if (processEnvironment().NYLORUN_DEV === "1")
       app.use(
         "*",
         cors({
@@ -119,51 +108,97 @@ export class Runtime {
               return undefined;
             }
           },
-          allowMethods: [
-            "GET",
-            "HEAD",
-            "POST",
-            "PUT",
-            "PATCH",
-            "DELETE",
-            "OPTIONS",
-          ],
         })
       );
-    }
     app.onError((error, context) =>
       context.json(
-        { error: String(redact(error.message)) },
+        {
+          error: String(
+            scrub(error.message, secretValues(environment(context)))
+          ),
+        },
         error instanceof HTTPException ? error.status : 500
       )
     );
-
+    // Application authorization/info resolution precedes all store and media access.
     app.use("*", async (context, next) => {
+      const actor = await options.getActor?.(context);
+      const info = options.getInfo
+        ? await options.getInfo(context)
+        : actor
+        ? { ...actor.context, userId: actor.id }
+        : undefined;
+      context.set("info", info);
+      if (options.getEnvironment)
+        context.set("modelEnvironment", await options.getEnvironment(context));
       await next();
       if (
         context.res.headers.get("content-type")?.includes("application/json")
       ) {
-        const value: unknown = await context.res.json();
-        context.res = new Response(JSON.stringify(redact(value)), {
-          status: context.res.status,
-          headers: context.res.headers,
-        });
+        const value = await context.res.json();
+        context.res = new Response(
+          JSON.stringify(scrub(value, secretValues(environment(context)))),
+          { status: context.res.status, headers: context.res.headers }
+        );
       }
     });
-    // Infer the public mount from this request URL and the local route path.
-    // Do not use hono/route basePath: consumers often install a separate `hono`
-    // copy, and that helper's match-result Symbol then misses the parent's match.
-    const publicPath = (context: Context, routePath: string, path: string) =>
+    const environment = (context: Context): ModelEnvironment =>
+      context.get("modelEnvironment") ??
+      this.config.environment ??
+      bindingsEnvironment(context) ??
+      processEnvironment();
+    const path = (context: Context, route: string, suffix: string) =>
       `${normalizeBasePath(
-        routerOptions.basePath ?? inferMountPath(context, routePath)
-      )}${path}`;
-
+        options.basePath ?? inferMountPath(context, route)
+      )}${suffix}`;
+    const agentFor = (context: Context) => {
+      const agent = byId.get(context.req.param("agentId")!);
+      if (!agent) throw new HTTPException(404, { message: "unknown agent" });
+      const session = context.req.param("session");
+      if (session !== undefined && !isSessionId(session))
+        throw new HTTPException(400, { message: "Invalid session identifier" });
+      return agent;
+    };
+    const submitOptions = (
+      context: Context,
+      sessionId: string,
+      onPreview?: (preview: import("../model/defaults.js").ModelPreview) => void
+    ) => {
+      // Leave undefined on Node so defaultModel can use the installed piModel
+      // factory. Hono's Node adapter puts stream bindings on context.env; those
+      // must not be treated as Workers-style provider bindings.
+      const explicitEnvironment =
+        context.get("modelEnvironment") ??
+        this.config.environment ??
+        bindingsEnvironment(context);
+      return {
+        info: { ...((context.get("info") as object) ?? {}), sessionId },
+        onEvent: (event: CanonicalEvent) => {
+          try {
+            void Promise.resolve(
+              this.config.observer?.({ type: event.type, ...event.payload })
+            ).catch(() => {});
+          } catch {
+            /* Observation cannot acknowledge persistence. */
+          }
+        },
+        onModelCall:
+          this.config.onModelCall ??
+          (this.config.createModel ?? defaultModel)({
+            environment: explicitEnvironment,
+            onPreview,
+            media,
+          }),
+        secrets: secretValues(environment(context)),
+        signal: context.req.raw.signal,
+      };
+    };
     app.get("/v1/agents", (context) =>
       context.json({
         protocolVersion: 2,
         agents: agents.map((agent) => ({
           id: agent.id,
-          manifestUrl: publicPath(
+          manifestUrl: path(
             context,
             "/v1/agents",
             `/${agent.id}/manifest.json`
@@ -171,382 +206,261 @@ export class Runtime {
         })),
       })
     );
-
-    app.get("/:agentId/manifest.json", (context) => {
-      const agent = byId.get(context.req.param("agentId"));
-      return agent === undefined
-        ? context.json({ error: "unknown agent" }, 404)
-        : context.json(
-            manifest(agent, media !== undefined, (path) =>
-              publicPath(context, "/:agentId/manifest.json", path)
-            )
-          );
-    });
-
+    app.get("/:agentId/manifest.json", (context) =>
+      context.json(
+        manifest(agentFor(context), media !== undefined, (suffix) =>
+          path(context, "/:agentId/manifest.json", suffix)
+        )
+      )
+    );
     app.get("/:agentId/v1/media/:session/:assetId", async (context) => {
-      const agent = requireAgent(context.req.param("agentId"));
-      if (!agent) return context.json({ error: "unknown agent" }, 404);
+      const agent = agentFor(context);
       const asset = await media?.read(
         agent.id,
         context.req.param("session"),
         context.req.param("assetId")
       );
       if (!asset) return context.json({ error: "unknown media asset" }, 404);
-      context.header("cache-control", "no-store");
       return context.body(asset.bytes as Uint8Array<ArrayBuffer>, 200, {
         "content-type": asset.asset.mediaType,
+        "cache-control": "no-store",
       });
     });
-
-    app.get("/:agentId/v1/sessions", async (context) => {
-      const agent = requireAgent(context.req.param("agentId"));
-      if (agent === undefined)
-        return context.json({ error: "unknown agent" }, 404);
-      const listed = await journal.list(agent.id);
-      return context.json({
-        sessions: listed.map((summary) => {
-          const found = live.get(keyOf(agent.id, summary.session));
-          if (found?.status === "running")
-            return { ...summary, status: "running" as const };
-          if (found?.status === "waiting")
-            return { ...summary, status: "waiting" as const };
-          return summary;
-        }),
-      });
-    });
-
+    app.get("/:agentId/v1/sessions", async (context) =>
+      context.json({ sessions: await this.host.list(agentFor(context).id) })
+    );
     app.get("/:agentId/v1/sessions/:session", async (context) => {
-      const agent = requireAgent(context.req.param("agentId"));
-      if (!agent) return context.json({ error: "unknown agent" }, 404);
-      const key = keyOf(agent.id, context.req.param("session"));
-      const found = live.get(key);
-      const events =
-        found?.events ??
-        (await journal.events(agent.id, context.req.param("session")));
-      if (!found && events.length === 0)
-        return context.json({ error: "unknown session" }, 404);
+      const document = await this.host.read(
+        agentFor(context).id,
+        context.req.param("session")
+      );
+      if (!document) return context.json({ error: "unknown session" }, 404);
       return context.json({
-        id: context.req.param("session"),
-        state: found?.status ?? status(events),
-        pending_interaction: pending(events),
+        id: document.id,
+        state: document.status,
+        pending_interaction: document.state?.plan?.calls.find(
+          (call) => call.status === "interaction"
+        )?.interaction,
       });
     });
-
     app.post("/:agentId/v1/sessions/:session", async (context) => {
-      const agent = requireAgent(context.req.param("agentId"));
-      if (!agent) return context.json({ error: "unknown agent" }, 404);
-      const found = live.get(keyOf(agent.id, context.req.param("session")));
-      if (!found)
-        return context.json({ error: "session is no longer live" }, 409);
-      const payload = await context.req
-        .json<Record<string, unknown>>()
-        .catch(() => undefined);
-      const interaction = payload?.interaction as
-        | Record<string, unknown>
-        | undefined;
-      if (!interaction || typeof interaction.id !== "string")
-        return context.json({ error: "expected interaction" }, 400);
-      const waiting = pending(found.events) as
-        | { id?: string; kind?: string }
-        | undefined;
-      if (
-        found.status !== "waiting" ||
-        !waiting ||
-        waiting.id !== interaction.id
+      const agent = agentFor(context),
+        sessionId = context.req.param("session");
+      const payload = await context.req.json<Record<string, any>>();
+      const interaction = payload.interaction;
+      let input: ExecutionInput;
+      if (payload.action === "cancel") {
+        await this.host.cancel(agent, sessionId);
+        return context.json({ session_id: sessionId, state: "cancelled" });
+      }
+      if (payload.action === "interrupt") {
+        const result = await this.host.interrupt(
+          agent,
+          sessionId,
+          payload.input,
+          submitOptions(context, sessionId)
+        );
+        return context.json(
+          {
+            session_id: sessionId,
+            state: result.status === "paused" ? "waiting" : result.status,
+          },
+          202
+        );
+      }
+      if (payload.settlement) input = { kind: "settle", ...payload.settlement };
+      else if (
+        interaction?.kind === "approval" &&
+        typeof interaction.id === "string" &&
+        typeof interaction.approved === "boolean"
       )
-        return context.json({ error: "interaction is no longer pending" }, 409);
-      if (interaction.kind === "approval") {
-        if (typeof interaction.approved !== "boolean")
-          return context.json({ error: "expected approval interaction" }, 400);
-        found.status = "running";
-        await submit(found, {
+        input = {
           kind: "approve",
           interactionId: interaction.id,
           approved: interaction.approved,
-        });
-        return context.json(
-          { session_id: context.req.param("session"), state: found.status },
-          202
-        );
-      }
-      if (interaction.kind === "respond") {
-        if (!("value" in interaction))
-          return context.json({ error: "expected respond interaction" }, 400);
-        found.status = "running";
-        await submit(found, {
+        };
+      else if (
+        interaction?.kind === "respond" &&
+        typeof interaction.id === "string" &&
+        "value" in interaction
+      )
+        input = {
           kind: "respond",
           interactionId: interaction.id,
-          value: interaction.value as JsonValue,
-        });
+          value: interaction.value,
+        };
+      else
         return context.json(
-          { session_id: context.req.param("session"), state: found.status },
-          202
+          { error: "expected a correlated interaction or settlement" },
+          400
         );
-      }
+      const document = await this.host.read(agent.id, sessionId);
+      if (!document || document.status !== "waiting")
+        return context.json({ error: "interaction is no longer pending" }, 409);
+      const result = await this.host.submit(
+        agent,
+        sessionId,
+        input,
+        submitOptions(context, sessionId)
+      );
       return context.json(
-        { error: "expected approval or respond interaction" },
-        400
+        {
+          session_id: sessionId,
+          state: result.status === "paused" ? "waiting" : result.status,
+        },
+        202
       );
     });
-
     app.get("/:agentId/v1/sessions/:session/events", async (context) => {
-      const agent = requireAgent(context.req.param("agentId"));
-      if (!agent) return context.json({ error: "unknown agent" }, 404);
+      const document = await this.host.read(
+        agentFor(context).id,
+        context.req.param("session")
+      );
       const after = Number(context.req.query("after") ?? "0");
-      const session = context.req.param("session");
-      const events =
-        live.get(keyOf(agent.id, session))?.events ??
-        (await journal.events(agent.id, session));
+      if (!Number.isSafeInteger(after) || after < 0)
+        return context.json({ error: "Invalid event cursor" }, 400);
+      const events = document?.events ?? [];
       return context.json({
         events: events.filter((event) => event.seq > after),
         next_cursor: events.at(-1)?.seq ?? after,
       });
     });
-
     app.get("/:agentId/v1/ag-ui/sessions/:session", async (context) => {
-      const agent = requireAgent(context.req.param("agentId"));
-      if (!agent) return context.json({ error: "unknown agent" }, 404);
-      const found = live.get(keyOf(agent.id, context.req.param("session")));
+      const agent = agentFor(context);
       return context.json({
-        messages:
-          found?.messages ??
-          messages(
-            agent.id,
-            await journal.events(agent.id, context.req.param("session"))
-          ),
+        messages: messages(
+          agent.id,
+          (await this.host.read(agent.id, context.req.param("session")))
+            ?.events ?? []
+        ),
       });
     });
-
     app.post("/:agentId/v1/ag-ui", async (context) => {
-      const agent = requireAgent(context.req.param("agentId"));
-      if (!agent) return context.json({ error: "unknown agent" }, 404);
-      const payload = await context.req
-        .json<Record<string, unknown>>()
-        .catch(() => undefined);
+      const agent = agentFor(context);
+      const payload = await context.req.json<Record<string, unknown>>();
       const threadId =
-        typeof payload?.threadId === "string" && payload.threadId
+        typeof payload.threadId === "string" && payload.threadId
           ? payload.threadId
           : randomUUID();
       if (!isSessionId(threadId))
-        return context.json(
-          {
-            error:
-              "threadId may only contain letters, digits, '.', '_' and '-'",
-          },
-          400
-        );
+        return context.json({ error: "Invalid threadId" }, 400);
       const runId =
-        typeof payload?.runId === "string" && payload.runId
+        typeof payload.runId === "string" && payload.runId
           ? payload.runId
           : randomUUID();
-      let message: IncomingMessage;
-      let actor: RuntimeActor | undefined;
-      try {
-        actor = await routerOptions.getActor?.(context);
-        const metadata = await routerOptions.getRequestMetadata?.(context);
-        message = await latestMessage(
-          payload?.messages,
-          media,
-          agent.id,
-          threadId,
-          metadata
-        );
-      } catch (error) {
-        return context.json(
-          {
-            error:
-              error instanceof Error
-                ? error.message
-                : "Invalid AG-UI user message",
-          },
-          400
-        );
-      }
-      const found = await begin(agent, threadId, message, actor);
-      const start = found.events.length;
-      await submit(found, message.input);
-      return sse(
-        agUiEvents(found.events.slice(start), threadId, runId),
+      const message = await latestMessage(
+        payload.messages,
+        media,
+        agent.id,
+        threadId,
+        await options.getRequestMetadata?.(context)
+      );
+      const controller = new AbortController();
+      const abort = () => controller.abort(context.req.raw.signal.reason);
+      context.req.raw.signal.addEventListener("abort", abort, { once: true });
+      if (context.req.raw.signal.aborted) abort();
+      const delivery = new EventDelivery(
+        () => controller.abort(new Error("Delivery connection ended")),
+        this.config.delivery,
         context.res.headers
       );
-    });
-
-    function requireAgent(id: string): RuntimeAgent | undefined {
-      return byId.get(id);
-    }
-
-    async function begin(
-      agent: RuntimeAgent,
-      sessionId: string,
-      message: IncomingMessage,
-      actor?: RuntimeActor
-    ): Promise<Live> {
-      const key = keyOf(agent.id, sessionId);
-      const existing = live.get(key);
-      if (existing) {
-        existing.messages.push(message.chat);
-        return existing;
-      }
-      const archived = await journal.events(agent.id, sessionId);
-      const concurrent = live.get(key);
-      if (concurrent) {
-        concurrent.messages.push(message.chat);
-        return concurrent;
-      }
-      if (archived.length)
-        throw new HTTPException(409, {
-          message: "This session is archived. Start a new conversation.",
-        });
-      let entry!: Live;
-      const observer =
-        configuredObserver ?? jsonlObserver({ agentId: agent.id, sessionId });
-      const session = agent.run({
-        id: sessionId,
-        onModelCall,
-        observer: (event) => {
-          const image = generatedImageMessage(event, agent.id, sessionId);
-          if (image) entry.messages.push(image);
-          add(entry, agent.id, event.type, observedPayload(event));
-          void Promise.resolve(observer(event)).catch(() => {});
+      delivery.push({ type: "RUN_STARTED", threadId, runId });
+      const modelOptions = submitOptions(
+        context,
+        threadId,
+        this.config.tokens
+          ? (preview) =>
+              delivery.push(
+                {
+                  type: "CUSTOM",
+                  name: "nylorun.preview",
+                  value: { ...preview, runId },
+                },
+                preview.invocationId
+              )
+          : undefined
+      );
+      const task = this.host.submit(agent, threadId, message.input, {
+        ...modelOptions,
+        runId,
+        signal: controller.signal,
+        started: {
+          input_kind: "user-message",
+          message: message.chat,
+          ...(firstText(message.chat) === undefined
+            ? {}
+            : { input: firstText(message.chat) }),
         },
-        ...(actor === undefined ? {} : { userId: actor.id }),
-        ...(actor?.context === undefined ? {} : { context: actor.context }),
-      });
-      entry = {
-        session,
-        events: [],
-        messages: [message.chat],
-        status: "running",
-        sequence: 0,
-        writes: Promise.resolve(),
-      };
-      live.set(key, entry);
-
-      return entry;
-    }
-
-    function add(
-      entry: Live,
-      agentId: string,
-      type: string,
-      payload: Record<string, unknown>
-    ) {
-      const event: CanonicalEvent = {
-        session: entry.session.id,
-        seq: ++entry.sequence,
-        ts: new Date().toISOString(),
-        type,
-        payload: redact(payload) as Record<string, unknown>,
-      };
-      entry.events.push(event);
-      entry.writes = entry.writes.then(() => journal.append(agentId, event));
-      // The submit/close paths observe durability errors; avoid an unhandled rejection meanwhile.
-      void entry.writes.catch(() => {});
-    }
-    async function submit(entry: Live, input: RuntimeInput) {
-      const agentId = [...live]
-        .find(([, value]) => value === entry)![0]
-        .split(":")[0]!;
-      entry.status = "running";
-      const inputEvent =
-        typeof input === "string"
-          ? { kind: "user-message" as const, text: input }
-          : "kind" in input
-          ? input
-          : { kind: "user-message" as const, ...input };
-      const message = chatFromInput(inputEvent, agentId, entry.session.id);
-      add(entry, agentId, "session.run.started", {
-        input_kind: inputEvent.kind,
-        input: message ? firstText(message) : undefined,
-        ...(message ? { message } : {}),
-        ...("approved" in inputEvent ? { approved: inputEvent.approved } : {}),
-        ...("value" in inputEvent ? { value: inputEvent.value } : {}),
-      });
-      const start = entry.events.length;
-      try {
-        const result = await entry.session.input(input).completed;
-        for (const event of result.events) {
-          if (event.type === "final" && event.output !== undefined) {
-            entry.messages.push({
-              id: randomUUID(),
-              role: "assistant",
-              content: finalContent(event.output),
-            });
-            add(entry, agentId, "final", { output: event.output });
-          } else if (event.type === "interaction.required") {
-            add(entry, agentId, event.type, { interaction: event.interaction });
-          }
-        }
-        const observedFailure = entry.events
-          .slice(start)
-          .some((event) => event.type === "error" || event.type === "tripwire");
-        const completionFailure = result.events.find(
-          (event) => event.type === "error" || event.type === "tripwire"
-        );
-        const failed =
-          observedFailure ||
-          completionFailure !== undefined ||
-          (result.status !== "completed" && result.status !== "waiting");
-        if (!observedFailure && completionFailure) {
-          add(
-            entry,
-            agentId,
-            completionFailure.type,
-            observedPayload(completionFailure)
-          );
-        } else if (!observedFailure && failed) {
-          add(entry, agentId, "error", {
-            message: `Agent run ${result.status}.`,
+        onEvent: (event) => {
+          delivery.push({
+            type: "CUSTOM",
+            name: "nylorun.execution",
+            value: event,
           });
-        }
-        entry.status = failed
-          ? "failed"
-          : result.status === "waiting"
-          ? "waiting"
-          : "completed";
-        await entry.writes;
-      } catch (error) {
-        entry.status = "failed";
-        add(entry, agentId, "error", {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        await entry.writes;
-        throw error;
-      }
-    }
-
-    this.#shutdown = async () => {
-      const sessions = await Promise.allSettled(
-        [...live.values()].map(async (entry) => {
-          try {
-            await entry.session.stop();
-            await entry.writes;
-          } finally {
+          for (const projected of agUiEvents([event], threadId, runId))
+            if (
+              !["RUN_STARTED", "RUN_FINISHED"].includes(String(projected.type))
+            )
+              delivery.push(projected);
+          modelOptions.onEvent(event);
+        },
+      });
+      void task
+        .then(
+          (result) => {
+            delivery.push({
+              type: "CUSTOM",
+              name: "nylorun.preview.settled",
+              value: { runId, status: result.status },
+            });
+            if (result.status !== "failed")
+              delivery.push({ type: "RUN_FINISHED", threadId, runId });
+          },
+          (error) => {
+            delivery.push({
+              type: "RUN_ERROR",
+              message: String(
+                scrub(
+                  error instanceof Error ? error.message : String(error),
+                  modelOptions.secrets
+                )
+              ),
+            });
           }
-        })
-      );
-      const resources = await Promise.allSettled(
-        agents.map((agent) => agent.close?.())
-      );
-      const failure = [...sessions, ...resources].find(
-        (result) => result.status === "rejected"
-      );
-      if (failure?.status === "rejected") throw failure.reason;
-    };
+        )
+        .finally(() => {
+          context.req.raw.signal.removeEventListener("abort", abort);
+          delivery.end();
+        });
+      return delivery.response;
+    });
     return app;
   }
 }
-
-/** Create the Hono protocol mount for a runtime. Applications may close it during graceful shutdown. */
-// `any` avoids leaking a second physical Hono installation through a peer boundary.
-// The returned value is the caller's Hono router at runtime.
-export function serveAgents(options: ServeAgentsOptions): any {
-  if (!(options.runtime instanceof Runtime))
-    throw new Error("serveAgents requires a Runtime.");
+export function serveAgents(options: ServeAgentsOptions): Hono<any> {
   const { runtime, ...rest } = options;
   return runtime[kServe](rest);
 }
+/** Workers-style provider bindings on context.env; ignore Hono Node stream slots. */
+function bindingsEnvironment(context: Context): ModelEnvironment | undefined {
+  const env = context.env as ModelEnvironment | null | undefined;
+  if (!env || typeof env !== "object") return undefined;
+  const keys = Object.keys(env);
+  if (!keys.length) return undefined;
+  if (keys.every((key) => key === "incoming" || key === "outgoing"))
+    return undefined;
+  return env;
+}
 
+function secretValues(environment: ModelEnvironment): readonly string[] {
+  return Object.entries(environment).flatMap(([key, value]) =>
+    /key|token|secret|password|credential/i.test(key) &&
+    typeof value === "string" &&
+    value
+      ? [value]
+      : []
+  );
+}
 function manifest(
   agent: RuntimeAgent,
   media: boolean,
@@ -583,7 +497,8 @@ async function latestMessage(
   sessionId: string,
   metadata: Record<string, JsonValue> | undefined
 ): Promise<IncomingMessage> {
-  if (!Array.isArray(value)) throw new Error("AG-UI requires a user message.");
+  if (!Array.isArray(value))
+    throw new HTTPException(400, { message: "AG-UI requires a user message." });
   for (let i = value.length - 1; i >= 0; i -= 1) {
     const item = value[i] as Record<string, unknown>;
     if (item?.role !== "user") continue;
@@ -596,7 +511,9 @@ async function latestMessage(
     );
     if (content) return content;
   }
-  throw new Error("AG-UI requires a non-empty user message.");
+  throw new HTTPException(400, {
+    message: "AG-UI requires a non-empty user message.",
+  });
 }
 
 function pending(events: readonly CanonicalEvent[]): unknown {
@@ -668,8 +585,13 @@ async function incomingContent(
         continue;
       }
       if (part?.type !== "image")
-        throw new Error("Only text and image inputs are supported.");
-      if (++images > 1) throw new Error("Attach only one image per message.");
+        throw new HTTPException(400, {
+          message: "Only text and image inputs are supported.",
+        });
+      if (++images > 1)
+        throw new HTTPException(400, {
+          message: "Attach only one image per message.",
+        });
       const source = part.source as Record<string, unknown> | undefined;
       if (
         !source ||
@@ -677,10 +599,22 @@ async function incomingContent(
         typeof source.value !== "string" ||
         typeof source.mimeType !== "string"
       )
-        throw new Error(
-          "Image input must contain base64 data and a media type."
-        );
-      if (!media) throw new Error("This runtime does not support image input.");
+        throw new HTTPException(400, {
+          message: "Image input must contain base64 data and a media type.",
+        });
+      if (!media)
+        throw new HTTPException(400, {
+          message: "This runtime does not support image input.",
+        });
+      try {
+        decodeImageBase64(source.mimeType, source.value);
+      } catch (cause) {
+        throw new HTTPException(400, {
+          message:
+            cause instanceof Error ? cause.message : "Invalid image input",
+          cause,
+        });
+      }
       const asset = await media.saveInput(
         agentId,
         sessionId,
@@ -690,7 +624,7 @@ async function incomingContent(
       parts.push({
         type: "media",
         mediaType: asset.mediaType,
-        reference: { agentId, assetId: asset.id },
+        reference: { agentId, sessionId, assetId: asset.id },
       });
       chat.push({
         type: "image",

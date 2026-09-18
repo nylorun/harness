@@ -1,6 +1,6 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { scrub } from "./journal.js";
+import { scrub } from "../redact.js";
 import { projectSecrets } from "../model/settings.js";
 
 /** Local JSONL observer. Writes raw engine events beside session durability files. */

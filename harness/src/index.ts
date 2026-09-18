@@ -1,21 +1,18 @@
-export { Agent, AgentBuilder, AgentBuildError, AgentLifecycleError } from "./build/builder.js";
-export type { AgentOptions } from "./build/builder.js";
+export { Agent, AgentBuilder, AgentBuildError, AgentLifecycleError } from "./definition/builder.js";
+export type { AgentOptions } from "./definition/builder.js";
 export { HarnessError, isHarnessError } from "./errors.js";
 export type { HarnessErrorCode, HarnessErrorDetails, HarnessErrorOptions } from "./errors.js";
-export { BuiltAgent } from "./build/agent.js";
-export { middleware, model, tool } from "./build/helpers.js";
-export { defineSchema } from "./build/schema.js";
-export { preparedModel } from "./model/prepared.js";
-export type { PreparedModelOptions } from "./model/prepared.js";
+export type { BuiltAgent } from "./types/agent.js";
+export { middleware, model, tool } from "./definition/helpers.js";
+export { defineSchema } from "./definition/schema.js";
+export { preparedModel } from "./execution/model/prepared.js";
+export type { PreparedModelOptions } from "./execution/model/prepared.js";
 
-export type { AgentManifest, MiddlewareManifest } from "./types/manifest.js";
+export type { AgentManifest, CapabilityManifest, ManifestTool } from "./types/manifest.js";
 export type {
-  BoundMiddleware,
   CapabilityDeclaration,
   CapabilityItems,
-  CapabilityState,
   MiddlewareContributions,
-  StepInput,
   StepMiddleware,
   StepRequest,
   StepResponse,
@@ -53,49 +50,41 @@ export type {
   JsonObject,
   JsonPrimitive,
   JsonValue,
+  Tripwire,
+} from "./types/shared.js";
+export type {
   ObserveEvent,
   ObserveModelConfigurationSnapshot,
   ObserveModelRequested,
   ObserveSealedCall,
   ObserveToolSnapshot,
   Observer,
-  Tripwire,
-} from "./types/shared.js";
+} from "./types/observe.js";
 export type {
-  ActiveExecutionRecord,
-  ActiveInteractionExecutionRecord,
-  ActiveModelExecutionRecord,
-  ActiveToolCallRecord,
-  ActiveToolsExecutionRecord,
-  InteractionReply,
-  InputCompletion,
   InputEvent,
-  InputHandle,
-  InputOptions,
-  OutputInputOptions,
   MessageInput,
-  Session,
-  SessionInput,
-  SessionIdentity,
-  SessionEvent,
-  SessionOptions,
-  SessionRecord,
-  SessionRecorder,
-  SessionRunOptions,
-  SessionSeed,
-  SeededSessionOptions,
-  SessionSnapshot,
+  InteractionReply,
   TranscriptEntry,
   UserContentPart,
-} from "./types/session.js";
+} from "./types/transcript.js";
 export type {
-  BoundToolSchema,
-  BoundToolDefinition,
+  ExecutionInput,
+  ExecutionState,
+  ExecutionEvent,
+  RunOptions,
+  RunResult,
+  SavedToolCall,
+  ExecutionPlan,
+  ToolReference,
+} from "./types/execution.js";
+export { createExecutionState, validateExecutionState } from "./execution/state.js";
+
+export type {
   Interaction,
   RequiredInteraction,
-  SealedToolCall,
   ToolContent,
   ToolDefinition,
+  ToolDescriptor,
   ToolExecutionContext,
   ToolExecutionResume,
   ToolInputSchema,

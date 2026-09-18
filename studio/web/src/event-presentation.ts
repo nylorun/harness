@@ -1,4 +1,5 @@
 export type CanonicalEvent = Readonly<{
+  committed?: boolean;
   session: string;
   seq: number;
   ts: string;

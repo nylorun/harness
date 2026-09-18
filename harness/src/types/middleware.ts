@@ -5,35 +5,18 @@ import type {
   ModelToolCall,
   ModelConfigurationMutationOptions,
 } from "./model.js";
-import type { InputEvent, SessionIdentity, TranscriptEntry } from "./session.js";
+import type { InputEvent, TranscriptEntry } from "./transcript.js";
 import type { ContextItem, JsonObject, Tripwire } from "./shared.js";
 import type { Interaction, ToolDefinition, ToolResult } from "./tool.js";
 
-export interface StepInput {
-  readonly sessionId: string;
-  readonly turnId: string;
-  readonly stepId: string;
-  /** One-based position of this turn within the Session. */
-  readonly turnNumber: number;
-  /** One-based position of this Model Step within the Turn. */
-  readonly stepNumber: number;
-  readonly session: Readonly<{
-    readonly userId?: string;
-    readonly context?: JsonObject;
-  }>;
-  readonly arrivals: readonly InputEvent[];
-  readonly toolResults: readonly ToolResult[];
-  readonly transcript: readonly TranscriptEntry[];
-}
-
 interface StepRequestBase {
-  /** Opaque identity of the Session that owns this Step. */
-  readonly sessionId: string;
+  /** Opaque identity of the execution that owns this Step. */
+  readonly executionId: string;
   /** Opaque identity of the Turn that owns this Step. */
   readonly turnId: string;
   /** Opaque identity of this Model Step. */
   readonly stepId: string;
-  readonly session: StepInput["session"];
+
   readonly turnNumber: number;
   readonly stepNumber: number;
   readonly arrivals: readonly InputEvent[];
@@ -72,8 +55,7 @@ interface StepRequestBase {
   tripwire(error: Tripwire): StepResponse;
 }
 
-export type StepRequest<State = never> = StepRequestBase &
-  ([State] extends [never] ? object : { readonly state: Promise<State> });
+export type StepRequest<Info = unknown> = StepRequestBase & { readonly info?: Info };
 
 export interface StepResponse {
   candidate(): Readonly<ModelCandidate> | undefined;
@@ -84,38 +66,24 @@ export interface StepResponse {
   tripwire(error: Tripwire): StepResponse;
 }
 
-export type StepMiddleware<State = never> = (
-  request: StepRequest<State>,
+export type StepMiddleware<Info = unknown> = (
+  request: StepRequest<Info>,
   next: () => Promise<StepResponse>,
 ) => Promise<StepResponse>;
-
-export interface CapabilityState<State> {
-  create(session: SessionIdentity, signal: AbortSignal): State | Promise<State>;
-  dispose?(value: State): void | Promise<void>;
-}
 
 export type CapabilityItems<Item> =
   readonly Item[] | Readonly<{ readonly slot: string; readonly items: readonly Item[] }>;
 
-/** A named capability that may supply static model surface and one typed middleware handler. */
-export interface CapabilityDeclaration<State = never> {
+export interface CapabilityDeclaration<Info = unknown> {
   readonly id: string;
-  readonly tools?: CapabilityItems<ToolDefinition<ToolDefinition["inputSchema"], State>>;
+  readonly tools?: CapabilityItems<ToolDefinition<any, Info, any>>;
   readonly instructions?: CapabilityItems<string>;
   readonly model?: ModelDirective;
-  readonly state?: CapabilityState<State>;
-  readonly middleware?: StepMiddleware<State>;
+  readonly middleware?: StepMiddleware<Info>;
 }
 
 export interface MiddlewareContributions {
   readonly instructions?: readonly string[];
   readonly tools?: readonly { readonly name: string; readonly description?: string }[];
   readonly model?: Pick<ModelDirective, "id" | "controls">;
-}
-
-export interface BoundMiddleware {
-  readonly id: string;
-  readonly handle: StepMiddleware;
-  readonly state?: CapabilityState<unknown>;
-  readonly contributions?: MiddlewareContributions;
 }

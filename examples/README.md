@@ -1,6 +1,6 @@
 # Harness examples
 
-An exact create-agent project shell with eleven authored Harness demonstrations under `agents/`. `src/index.ts` is the Hono entrypoint; the authored catalog serves agents with Runtime (local JSONL durability/observer and the media adapter). The application owns HTTP and lifecycle.
+An exact create-agent project shell with eleven authored Harness demonstrations under `agents/`. `src/index.ts` is the Hono entrypoint; the authored catalog serves agents with Runtime (explicit local session storage and the media adapter). The application owns HTTP and lifecycle.
 
 ## Install and configure
 
@@ -174,7 +174,7 @@ For the browser-side protocol, read the [Studio README](../studio/README.md).
 ## Records, secrets, and cleanup
 
 Notes, media assets, and canonical session records are written below `.data/`, grouped by agent and
-session. Image bytes are stored only in `.data/media/`; session journals retain metadata, opaque
+session. Image bytes are stored only in `.data/media/`; session documents retain metadata, opaque
 asset references, and loopback preview paths. They are ignored by Git. Known environment secrets
 and credential-shaped fields are redacted before records or HTTP responses are created; request
 headers and raw provider payloads are never exposed.
@@ -184,3 +184,6 @@ Stop the processes with `Ctrl-C`. To start from a clean local history, remove `.
 ```sh
 rm -rf .data
 ```
+
+
+The generated starter defaults to memory sessions. This examples recipe explicitly chooses `localSessions({ root: ".data/sessions" })`. Its application signal handlers drain Runtime before closing external tools. Harness has no session or resource-disposal lifecycle.

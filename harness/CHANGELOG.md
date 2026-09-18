@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.13.0-beta
+
+### Minor Changes
+
+- Breaking beta: replace `AgentManifest.middleware` with a capability catalog. The published
+  snapshot is `id`, `name`, optional `outputSchema`, and `capabilities` (`kind`,
+  `hasMiddleware`, declared instructions / tool JSON schemas / model controls). Join traces by
+  capability id. `MiddlewareManifest` is removed; import `CapabilityManifest`.
+- Breaking beta: expose `BuiltAgent` as a type-only facade from `Agent(...).use(...).build()`.
+  Hide compiled middleware, tool registries, and output validators. `AgentBuilder` accepts public
+  agent options. `createExecutionState` requires the original built agent. Drop agent-level
+  `executionVersion`; `ExecutionState.version` stays `1` and leftover keys are ignored. Model
+  adapters receive immutable `ToolDescriptor` metadata only. Remove `defineToolFamily` /
+  `ToolFamily` / `capability.toolFamilies` and the internal Bound\* / `SealedToolCall` root
+  exports. Rename the per-run bag from `scope` to `info`.
+- c5bbb1a: Breaking beta: make Harness `run()` a direct async state-in/state-out executor with
+  serializable pauses, application `info`, cancellation signals, awaited recording, and
+  agent-level output schemas. Runtime owns session scheduling with memory-default or exclusive
+  local storage and imports Harness contracts. Isolate Node adapters under `runtime/node`, stream
+  observations incrementally, and add opt-in bounded token previews with Studio reconciliation.
+  Migrate consumers and deployment guidance together; legacy event records remain archived, not
+  automatically replayed.
+
 ## 0.12.0-beta
 
 ### Minor Changes

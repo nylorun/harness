@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ts from "typescript";
+import { checkPackedConsumer } from "./check-consumer.mjs";
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 const canonicalLicense = readFileSync("../LICENSE", "utf8");
@@ -85,21 +86,44 @@ try {
     "LICENSE",
     "dist/index.js",
     "dist/index.d.ts",
-    "dist/model/adapters.js",
-    "dist/model/adapters.d.ts",
+    "dist/execution/model/adapters.js",
+    "dist/execution/model/adapters.d.ts",
   ]) {
     if (!files.includes(required)) throw new Error(`Missing tarball file: ${required}`);
   }
   const entry = await import(new URL("../dist/index.js", import.meta.url));
-  const adapters = await import(new URL("../dist/model/adapters.js", import.meta.url));
+  for (const removed of [
+    "Session",
+    "SessionRecorder",
+    "SessionRecord",
+    "InputHandle",
+    "BuiltAgent",
+    "defineToolFamily",
+  ])
+    if (removed in entry) throw new Error(`Obsolete Harness session export: ${removed}`);
+  for (const path of [
+    "definition/bind-agent.js",
+    "definition/agent-definition.js",
+    "definition/bound.js",
+    "execution/step/runtime.js",
+  ]) {
+    try {
+      await import(`@nylorun/harness/${path}`);
+      throw new Error(`Internal subpath must not be importable: ${path}`);
+    } catch (error) {
+      if (error.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw error;
+    }
+  }
+  const adapters = await import(new URL("../dist/execution/model/adapters.js", import.meta.url));
   for (const name of [
+    "createExecutionState",
+    "validateExecutionState",
     "AgentBuilder",
     "AgentBuildError",
     "AgentLifecycleError",
     "HarnessError",
     "isHarnessError",
     "Agent",
-    "BuiltAgent",
     "tool",
     "model",
     "middleware",
@@ -119,6 +143,7 @@ try {
   ]) {
     if (!(name in adapters)) throw new Error(`Missing model adapter export: ${name}`);
   }
+  checkPackedConsumer(cache);
   console.log(`Tarball and dependency boundary passed (${files.length} files).`);
 } finally {
   rmSync(cache, { recursive: true, force: true });

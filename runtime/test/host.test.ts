@@ -1,14 +1,16 @@
+import { Agent } from "@nylorun/harness";
+import { z } from "zod";
 import { expect, it } from "vitest";
 import { Hono } from "hono";
 import { agentContract } from "./contract-suite.js";
-import { memoryHistory } from "../src/adapters/journal.js";
+import { memorySessions } from "../src/sessions/store.js";
 import { Runtime, serveAgents } from "../src/server/host.js";
 import type { RuntimeAgent, RuntimeEvent } from "../src/contracts.js";
 
 function isolated(agents: readonly RuntimeAgent[]) {
   const runtime = new Runtime({
     observer: () => {},
-    durability: memoryHistory(),
+    sessions: memorySessions(),
   });
   return { runtime, app: serveAgents({ agents, runtime }) };
 }
@@ -18,63 +20,45 @@ function engine(
   onClose = async () => {},
   interaction?: "approval" | "response"
 ): RuntimeAgent {
-  return {
-    id: "echo",
-    name: "Echo",
-    manifest: { id: "echo", name: "Echo" },
-    close: onClose,
-    run({ id = "session" } = {}) {
-      return {
-        id,
-        input(input) {
-          const event =
-            typeof input === "string"
-              ? { kind: "user-message" as const, text: input }
-              : "content" in input
-              ? { kind: "user-message" as const, content: input.content }
-              : { kind: "user-message" as const, text: "hello" };
-          if (interaction && !(typeof input === "object" && "kind" in input)) {
-            return {
-              completed: Promise.resolve({
-                status: "waiting" as const,
-                events: [
-                  {
-                    type: "interaction.required",
-                    interaction: {
-                      id: "question",
-                      kind: interaction,
-                      prompt: "confirm",
-                    },
-                  },
-                ],
-              }),
-            };
-          }
-          const events: RuntimeEvent[] = [
-            { type: "input", event },
-            { type: "final", output: "hello" },
-          ];
-          return {
-            completed: Promise.resolve({
-              status: "completed" as const,
-              events,
-            }),
-          };
+  const agent = Agent({ id: "echo", name: "Echo" })
+    .use({
+      id: "tools",
+      tools: [
+        {
+          name: "confirm",
+          inputSchema: z.object({}),
+          execute: async () => ({ kind: "completed", output: "done" }),
         },
-        async *stream() {},
-        observe() {
-          return () => {};
-        },
-        async stop() {
-          onStop();
-        },
-      };
-    },
-  };
+      ],
+      middleware: async (_, next) => {
+        const response = await next();
+        if (interaction)
+          for (const call of response.toolCalls())
+            response.requireInteraction(call.id, {
+              id: "question",
+              kind: interaction,
+              prompt: "confirm",
+            });
+        return response;
+      },
+    })
+    .build();
+  const run = agent.run.bind(agent);
+  agent.run = (options) =>
+    run({
+      ...options,
+      onModelCall: async (call) =>
+        interaction && !call.prompt.some((item) => item.kind === "tool-result")
+          ? {
+              output: [
+                { type: "tool-call", id: "c", name: "confirm", args: {} },
+              ],
+            }
+          : "hello",
+    });
+  return agent;
 }
-agentContract("Independent engine", (kind) =>
-  engine(undefined, undefined, kind)
-);
+agentContract("Harness", (kind) => engine(undefined, undefined, kind));
 it("advertises root-mounted agent routes without an agents segment", async () => {
   const { runtime, app } = isolated([engine()]);
   try {
@@ -94,7 +78,7 @@ it("advertises root-mounted agent routes without an agents segment", async () =>
 it("advertises and serves routes from the agents mount", async () => {
   const runtime = new Runtime({
     observer: () => {},
-    durability: memoryHistory(),
+    sessions: memorySessions(),
   });
   const app = new Hono();
   app.route(
@@ -129,7 +113,7 @@ it("advertises and serves routes from the agents mount", async () => {
   }
 });
 
-it("stops sessions and then closes agent resources", async () => {
+it("does not assume ownership of application resources", async () => {
   const steps: string[] = [];
   const { runtime, app } = isolated([
     engine(
@@ -144,7 +128,7 @@ it("stops sessions and then closes agent resources", async () => {
     body: JSON.stringify({ messages: [{ role: "user", content: "hello" }] }),
   });
   await runtime.close();
-  expect(steps).toEqual(["session", "agent"]);
+  expect(steps).toEqual([]);
 });
 it("rejects duplicate identities", () => {
   expect(() =>
@@ -152,35 +136,37 @@ it("rejects duplicate identities", () => {
       agents: [engine(), engine()],
       runtime: new Runtime({
         observer: () => {},
-        durability: memoryHistory(),
+        sessions: memorySessions(),
       }),
     })
   ).toThrow("unique");
 });
 
-it("persists history across restarts without overwriting archived session events", async () => {
+it("continues saved sessions across restarts without losing history", async () => {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { localJsonl } = await import("../src/adapters/journal.js");
+  const { localSessions } = await import("../src/node/local-sessions.js");
   const root = await mkdtemp(join(tmpdir(), "runtime-history-"));
   const agents = [engine()];
-  const isolatedConfig = {
+  const isolatedConfig = () => ({
     observer: () => {},
-    durability: localJsonl({ root }),
-  };
-  let runtime = new Runtime(isolatedConfig);
+    sessions: localSessions({ root }),
+  });
+  let runtime = new Runtime(isolatedConfig());
   let app = serveAgents({ agents, runtime });
   try {
-    await app.request("http://local/echo/v1/ag-ui", {
-      method: "POST",
-      body: JSON.stringify({
-        threadId: "saved",
-        messages: [{ role: "user", content: "hello" }],
-      }),
-    });
+    await (
+      await app.request("http://local/echo/v1/ag-ui", {
+        method: "POST",
+        body: JSON.stringify({
+          threadId: "saved",
+          messages: [{ role: "user", content: "hello" }],
+        }),
+      })
+    ).text();
     await runtime.close();
-    runtime = new Runtime(isolatedConfig);
+    runtime = new Runtime(isolatedConfig());
     app = serveAgents({ agents, runtime });
     const history = await (
       await app.request("http://local/echo/v1/ag-ui/sessions/saved")
@@ -193,7 +179,8 @@ it("persists history across restarts without overwriting archived session events
         messages: [{ role: "user", content: "again" }],
       }),
     });
-    expect(archived.status).toBe(409);
+    expect(archived.status).toBe(200);
+    expect(await archived.text()).toContain("RUN_FINISHED");
   } finally {
     await runtime.close();
     await rm(root, { recursive: true, force: true });
@@ -226,6 +213,7 @@ it("rejects path-shaped thread IDs before running the agent", async () => {
           messages: [{ role: "user", content: "hello" }],
         }),
       });
+      await response.text();
       expect(response.status, threadId).toBe(threadId === "" ? 200 : 400);
     }
     expect(runs).toBe(1);
@@ -244,19 +232,13 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
     ...base,
     run(options) {
       runOptions = options;
-      const session = base.run(options);
-      return {
-        ...session,
-        input(input) {
-          received = input;
-          return session.input(input);
-        },
-      };
+      received = options.input;
+      return base.run(options);
     },
   };
   const runtime = new Runtime({
     observer: () => {},
-    durability: memoryHistory(),
+    sessions: memorySessions(),
   });
   const app = new Hono();
   app.route(
@@ -287,13 +269,16 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
     expect(
       new URL(manifest.endpoints.agUi, "http://local/api/agents/").pathname
     ).toBe("/api/agents/echo/v1/ag-ui");
-    await app.request("http://local/api/agents/echo/v1/ag-ui", {
-      method: "POST",
-      body: JSON.stringify({ messages: [{ role: "user", content: "hello" }] }),
-    });
+    await (
+      await app.request("http://local/api/agents/echo/v1/ag-ui", {
+        method: "POST",
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "hello" }],
+        }),
+      })
+    ).text();
     expect(runOptions).toMatchObject({
-      userId: "person-1",
-      context: { tenant: "acme" },
+      info: { userId: "person-1", tenant: "acme" },
     });
     expect(received).toMatchObject({ metadata: { requestId: "request-1" } });
   } finally {
@@ -405,5 +390,112 @@ it("allows local Studio discovery and preflight only in development", async () =
   } finally {
     if (previous === undefined) delete process.env.NYLORUN_DEV;
     else process.env.NYLORUN_DEV = previous;
+  }
+});
+
+it("ignores Hono Node stream bindings when selecting the model environment", async () => {
+  const { serve } = await import("@hono/node-server");
+  let seenEnvironment: unknown = "unset";
+  const runtime = new Runtime({
+    observer: () => {},
+    sessions: memorySessions(),
+    createModel: (options) => {
+      seenEnvironment = options.environment;
+      return async () => "ok";
+    },
+  });
+  const app = new Hono();
+  app.route("/agents", serveAgents({ agents: [engine()], runtime }));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const server = serve({ fetch: app.fetch.bind(app), port: 0 }, (info) => {
+        void (async () => {
+          try {
+            const response = await fetch(
+              `http://127.0.0.1:${info.port}/agents/echo/v1/ag-ui`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  threadId: "node-env",
+                  messages: [{ role: "user", content: "hello" }],
+                }),
+              }
+            );
+            expect(response.status).toBe(200);
+            expect(await response.text()).toContain("RUN_FINISHED");
+            expect(seenEnvironment).toBeUndefined();
+            resolve();
+          } catch (error) {
+            reject(error);
+          } finally {
+            server.close();
+          }
+        })();
+      });
+      server.on("error", reject);
+    });
+  } finally {
+    await runtime.close();
+  }
+});
+
+it("still accepts Workers-style context.env provider bindings", async () => {
+  const { serve } = await import("@hono/node-server");
+  let seenEnvironment: unknown = "unset";
+  const runtime = new Runtime({
+    observer: () => {},
+    sessions: memorySessions(),
+    createModel: (options) => {
+      seenEnvironment = options.environment;
+      return async () => "ok";
+    },
+  });
+  const bindings = {
+    MODEL_PROVIDER: "custom",
+    MODEL: "fixture",
+    MODEL_PROVIDER_BASE_URL: "https://provider.example/v1",
+    MODEL_PROVIDER_API_KEY: "fixture-key",
+  };
+  const app = new Hono();
+  app.use("*", async (context, next) => {
+    Object.defineProperty(context, "env", {
+      configurable: true,
+      get: () => bindings,
+    });
+    await next();
+  });
+  app.route("/agents", serveAgents({ agents: [engine()], runtime }));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const server = serve({ fetch: app.fetch.bind(app), port: 0 }, (info) => {
+        void (async () => {
+          try {
+            const response = await fetch(
+              `http://127.0.0.1:${info.port}/agents/echo/v1/ag-ui`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  threadId: "workers-env",
+                  messages: [{ role: "user", content: "hello" }],
+                }),
+              }
+            );
+            expect(response.status).toBe(200);
+            expect(await response.text()).toContain("RUN_FINISHED");
+            expect(seenEnvironment).toEqual(bindings);
+            resolve();
+          } catch (error) {
+            reject(error);
+          } finally {
+            server.close();
+          }
+        })();
+      });
+      server.on("error", reject);
+    });
+  } finally {
+    await runtime.close();
   }
 });

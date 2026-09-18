@@ -26,7 +26,7 @@ const temps: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temps.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    temps.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
 });
 
@@ -41,13 +41,13 @@ async function writeSkill(
   directoryName: string,
   frontmatter: string,
   body: string,
-  extras: Readonly<Record<string, string>> = {},
+  extras: Readonly<Record<string, string>> = {}
 ): Promise<string> {
   const directory = join(root, directoryName);
   await mkdir(directory, { recursive: true });
   await writeFile(
     join(directory, "SKILL.md"),
-    `---\n${frontmatter}\n---\n\n${body}\n`,
+    `---\n${frontmatter}\n---\n\n${body}\n`
   );
   for (const [path, content] of Object.entries(extras)) {
     const full = join(directory, path);
@@ -64,7 +64,7 @@ function items<T>(value: CapabilityItems<T> | undefined): readonly T[] {
 
 function toolNamed(
   declaration: CapabilityDeclaration,
-  name: string,
+  name: string
 ): ToolDefinition {
   const found = items(declaration.tools).find((tool) => tool.name === name);
   if (!found) throw new Error(`Missing tool ${name}`);
@@ -73,7 +73,7 @@ function toolNamed(
 
 function context() {
   return {
-    sessionId: "session",
+    executionId: "session",
     turnId: "turn",
     stepId: "step",
     callId: "call",
@@ -96,7 +96,7 @@ describe("SkillRoster", () => {
         '  version: "1.0"',
       ].join("\n"),
       "Read references/FORMS.md first.",
-      { "references/FORMS.md": "# Forms\n" },
+      { "references/FORMS.md": "# Forms\n" }
     );
     const roster = await SkillRoster.fromDirectory(root);
     expect(roster.list()).toMatchObject([
@@ -131,7 +131,7 @@ describe("SkillRoster", () => {
       root,
       "other-name",
       "name: pdf-processing\ndescription: Extract PDF text. Use when handling PDFs.",
-      "Body.",
+      "Body."
     );
     const roster = await SkillRoster.fromDirectory(root);
     expect(roster.get("pdf-processing")?.body).toBe("Body.\n");
@@ -150,11 +150,11 @@ describe("SkillRoster", () => {
       root,
       "pdf-processing",
       "name: pdf-processing\ndescription: Use this skill when: the user asks about PDFs",
-      "Body.",
+      "Body."
     );
     const roster = await SkillRoster.fromDirectory(root);
     expect(roster.get("pdf-processing")?.description).toBe(
-      "Use this skill when: the user asks about PDFs",
+      "Use this skill when: the user asks about PDFs"
     );
   });
 });
@@ -184,7 +184,7 @@ describe("skills()", () => {
       ]),
     ]);
     expect(items(declaration.instructions)[1]).toContain(
-      "<name>structured-summary</name>",
+      "<name>structured-summary</name>"
     );
     expect(items(declaration.instructions)[1]).not.toContain("## Claim");
     expect(formatSkillCatalog([])).toBe("");
@@ -200,12 +200,12 @@ describe("skills()", () => {
       "code-review",
       "name: code-review\ndescription: Review a change. Use when editing code.",
       "Read CHECKLIST.md, then review.",
-      { "CHECKLIST.md": "- tests\n" },
+      { "CHECKLIST.md": "- tests\n" }
     );
     const declaration = await skills({ directory: root });
     const result = await toolNamed(declaration, "load_skill").execute(
       { name: "code-review" },
-      context(),
+      context()
     );
     expect(result).toMatchObject({
       kind: "completed",
@@ -244,8 +244,8 @@ describe("skills()", () => {
     await expect(
       toolNamed(declaration, "read_skill_resource").execute(
         { name: "code-review", path: "CHECKLIST.md" },
-        context(),
-      ),
+        context()
+      )
     ).resolves.toEqual({
       kind: "completed",
       output: {
@@ -269,7 +269,7 @@ describe("skills()", () => {
       root,
       "structured-summary",
       "name: structured-summary\ndescription: Produce a fixed-heading summary. Use when asked to summarize.",
-      "## Claim",
+      "## Claim"
     );
     const agent = Agent({
       id: "skills",
@@ -278,14 +278,16 @@ describe("skills()", () => {
     })
       .use(await skills({ directory: root }))
       .build();
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
+    expect(agent.manifest.capabilities.map((item) => item.id)).toEqual([
       "agent",
       "skills",
     ]);
     expect(
-      agent.manifest.middleware.find((item) => item.id === "skills"),
-    ).toEqual({
+      agent.manifest.capabilities.find((item) => item.id === "skills")
+    ).toMatchObject({
       id: "skills",
+      kind: "capability",
+      hasMiddleware: false,
       instructions: [
         SKILLS_USAGE,
         expect.stringContaining("<name>structured-summary</name>"),

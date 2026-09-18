@@ -16,13 +16,14 @@ import type {
   RuntimeModelCandidate,
 } from "../contracts.js";
 import type { RuntimeMedia } from "../adapters/media.js";
-import { scrub } from "../adapters/journal.js";
+import { scrub } from "../redact.js";
 import { ProjectCredentialStore } from "./auth-store.js";
 import { modelsFor, type Selection } from "./models.js";
 import { modelSelection, projectSecrets } from "./settings.js";
 
 export interface PiModelOptions {
   readonly root?: string;
+  readonly onPreview?: (preview: import("./defaults.js").ModelPreview) => void;
   readonly selection?: Selection;
   readonly media?: Pick<RuntimeMedia, "dataUrl">;
 }
@@ -35,12 +36,19 @@ const emptyUsage = (): Usage => ({
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 });
 
-/** A plain portable callable. Provider credentials are read only when it is invoked. */
+/** Node model adapter. Local provider configuration is read only when invoked. */
 export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
   return async (call, context) => {
     context.signal.throwIfAborted();
     const root = options.root ?? process.cwd();
-    const selection = options.selection ?? modelSelection(root);
+    const configured = options.selection ?? modelSelection(root);
+    const requested = call.model?.id;
+    const selection = {
+      ...configured,
+      model: requested?.startsWith(`${configured.provider}/`)
+        ? requested.slice(configured.provider.length + 1)
+        : (requested ?? configured.model),
+    };
     const registry = modelsFor(
       selection,
       new ProjectCredentialStore(
@@ -107,7 +115,9 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
             throw new Error("Expected a local media reference.");
           const asset = await options.media?.dataUrl(
             { agentId: ref.agentId, assetId: ref.assetId },
-            call.sessionId,
+            "sessionId" in ref && typeof ref.sessionId === "string"
+              ? ref.sessionId
+              : call.executionId,
           );
           if (!asset)
             throw new Error(
@@ -205,7 +215,14 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
       parameters: { ...tool.inputSchema },
     }));
     const request: Context = {
-      systemPrompt: instructions.join("\n"),
+      systemPrompt: [
+        ...instructions,
+        ...(call.outputSchema
+          ? [
+              `Return the final answer as JSON matching this schema: ${JSON.stringify(call.outputSchema)}. Use tools when needed before returning the final JSON.`,
+            ]
+          : []),
+      ].join("\n"),
       messages,
       tools,
     };
@@ -216,14 +233,42 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
       call: scrub(call, secrets) as JsonValue,
     });
     try {
-      const response = await registry.complete(selected, request, {
+      const invocationOptions = {
         signal: context.signal,
         temperature: call.model?.controls?.temperature,
         maxTokens: call.model?.controls?.maxOutputTokens,
         ...(call.model?.config
           ? { samplingParams: { ...call.model.config } }
           : {}),
-      });
+      };
+      let response: AssistantMessage;
+      if (options.onPreview) {
+        const stream = registry.streamSimple(
+          selected,
+          request,
+          invocationOptions,
+        );
+        for await (const event of stream) {
+          if (event.type === "text_delta") {
+            try {
+              void Promise.resolve(
+                options.onPreview({
+                  invocationId: context.invocationId,
+                  text: event.delta,
+                }),
+              ).catch(() => {});
+            } catch {
+              /* Preview delivery is independent. */
+            }
+          }
+        }
+        response = await stream.result();
+      } else
+        response = await registry.complete(
+          selected,
+          request,
+          invocationOptions,
+        );
       context.signal.throwIfAborted();
       if (
         response.stopReason === "error" ||
@@ -255,6 +300,17 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
             args: part.arguments,
             ...metadataFor(part.thoughtSignature),
           });
+      }
+      if (
+        call.outputSchema &&
+        !output.some((part) => part.type === "tool-call")
+      ) {
+        const text = output
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("");
+        const value = JSON.parse(text);
+        output.splice(0, output.length, { type: "json", value });
       }
       return {
         output,

@@ -5,10 +5,11 @@ import {
   type BuiltAgent,
   type ModelAdapter,
 } from "@nylorun/harness";
-import { piModel, type RuntimeAgent } from "@nylorun/runtime";
+import type { RuntimeAgent } from "@nylorun/runtime";
+import { piModel } from "@nylorun/runtime/node";
 import { agentContract } from "../../runtime/test/contract-suite.js";
 
-// These assignments must compile without assertions or either package importing the other.
+// These assignments must compile without assertions; Runtime depends on canonical Harness types.
 const adapter: ModelAdapter = piModel();
 const built: BuiltAgent = Agent({ id: "configured", name: "Configured" }).build();
 const portable: RuntimeAgent = built;

@@ -1,3 +1,4 @@
+import { registered } from "./fixtures.js";
 import { describe, expect, it } from "vitest";
 import { type ContextSnapshot } from "../src/index.js";
 import { testAgent, model, offer, tool, toolCalls, turn } from "./fixtures.js";
@@ -7,12 +8,15 @@ describe("runtime context", () => {
     const seen: string[][] = [];
     let calls = 0;
     const agent = testAgent()
-      .use("retrieval", async (request, next) => {
-        request.configuration.tools.set("tools", [tool()]);
-        if (request.stepNumber === 1)
-          request.context.set("docs", [{ type: "note", value: "retrieved" }]);
-        return next();
-      })
+      .use(
+        "retrieval",
+        registered([[tool()]], (registeredTools) => async (request, next) => {
+          request.configuration.tools.set("tools", registeredTools[0]);
+          if (request.stepNumber === 1)
+            request.context.set("docs", [{ type: "note", value: "retrieved" }]);
+          return next();
+        }),
+      )
       .with(
         model(async (_call, { request }) => {
           seen.push(request.context.items.map((item) => String(item.value)));
@@ -24,7 +28,7 @@ describe("runtime context", () => {
     expect(seen).toEqual([["retrieved"], []]);
   });
 
-  it("injects run context on every model call without a mutable reserved slot", async () => {
+  it("keeps application info out of model context unless explicitly projected", async () => {
     const snapshots: ContextSnapshot[] = [];
     let calls = 0;
     const agent = testAgent()
@@ -42,14 +46,8 @@ describe("runtime context", () => {
       .build();
     await turn(agent, "go", { context: { user: "ada" } }).handle.completed;
     expect(snapshots.map((snapshot) => snapshot.items)).toEqual([
-      [
-        { type: "session", value: { user: "ada" } },
-        { type: "note", value: "current-step" },
-      ],
-      [
-        { type: "session", value: { user: "ada" } },
-        { type: "note", value: "current-step" },
-      ],
+      [{ type: "note", value: "current-step" }],
+      [{ type: "note", value: "current-step" }],
     ]);
   });
 
@@ -58,12 +56,15 @@ describe("runtime context", () => {
     const contexts: string[][] = [];
     let calls = 0;
     const agent = testAgent()
-      .use("assembly", async (request, next) => {
-        request.configuration.instructions.set("policy", ["Stable policy"]);
-        request.configuration.tools.set("tools", [tool()]);
-        request.context.set("current", [{ value: `step-${request.stepNumber}` }]);
-        return next();
-      })
+      .use(
+        "assembly",
+        registered([[tool()]], (registeredTools) => async (request, next) => {
+          request.configuration.instructions.set("policy", ["Stable policy"]);
+          request.configuration.tools.set("tools", registeredTools[0]);
+          request.context.set("current", [{ value: `step-${request.stepNumber}` }]);
+          return next();
+        }),
+      )
       .with(
         model(async (_call, { request }) => {
           configurations.push(request.configuration.instructions.map((item) => item.text));

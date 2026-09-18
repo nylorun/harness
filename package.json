@@ -30,7 +30,8 @@
     "examples:check": "npm run examples:check --workspace @nylorun/create-agent",
     "changeset": "changeset",
     "release:prepare": "node scripts/release/prepare.mjs",
-    "release:check": "node scripts/release/check.mjs"
+    "release:check": "node scripts/release/check.mjs",
+    "test:workers": "node scripts/smoke-workers.mjs"
   },
   "packageManager": "npm@11.15.0",
   "devDependencies": {
@@ -40,6 +41,7 @@
     "@changesets/read": "^1.0.1",
     "@manypkg/get-packages": "^3.1.0",
     "chokidar": "^5.0.0",
-    "semver": "^7.7.4"
+    "semver": "^7.7.4",
+    "wrangler": "4.131.2"
   }
 }

@@ -71,3 +71,10 @@ export function deepFreeze<T>(value: T): T {
   }
   return value;
 }
+
+export function freezeGraph<T>(value: T, seen = new WeakSet<object>()): T {
+  if (!value || typeof value !== "object" || seen.has(value)) return value;
+  seen.add(value);
+  for (const item of Object.values(value as Record<string, unknown>)) freezeGraph(item, seen);
+  return Object.freeze(value);
+}

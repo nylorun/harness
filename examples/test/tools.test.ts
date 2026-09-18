@@ -19,7 +19,7 @@ const temps: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temps.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    temps.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
 });
 
@@ -30,7 +30,7 @@ function items<T>(value: CapabilityItems<T> | undefined): readonly T[] {
 
 function context() {
   return {
-    sessionId: "session",
+    executionId: "session",
     turnId: "turn",
     stepId: "step",
     callId: "call",
@@ -41,7 +41,7 @@ function context() {
 
 function catalogTool(
   name: string,
-  declaration: Awaited<ReturnType<typeof tools>>,
+  declaration: Awaited<ReturnType<typeof tools>>
 ): ToolDefinition {
   const found = items(declaration.tools).find((tool) => tool.name === name);
   if (!found) throw new Error(`Missing tool ${name}`);
@@ -54,8 +54,8 @@ describe("tools()", () => {
     await expect(
       catalogTool("calculate", declaration).execute(
         { expression: "19 * 7" },
-        context(),
-      ),
+        context()
+      )
     ).resolves.toEqual({
       kind: "completed",
       output: { expression: "19 * 7", value: 133 },
@@ -68,14 +68,14 @@ describe("tools()", () => {
     await expect(
       convert.execute(
         { value: 25, from: "celsius", to: "fahrenheit" },
-        context(),
-      ),
+        context()
+      )
     ).resolves.toEqual({
       kind: "completed",
       output: { value: 25, from: "celsius", to: "fahrenheit", result: 77 },
     });
     await expect(
-      convert.execute({ value: 1, from: "celsius", to: "meter" }, context()),
+      convert.execute({ value: 1, from: "celsius", to: "meter" }, context())
     ).resolves.toEqual({
       kind: "failed",
       code: "convert.incompatible",
@@ -109,12 +109,12 @@ describe("tools()", () => {
     })
       .use(await tools())
       .build();
-    expect(agent.manifest.middleware.map((item) => item.id)).toEqual([
+    expect(agent.manifest.capabilities.map((item) => item.id)).toEqual([
       "agent",
       "tools",
     ]);
     const offered =
-      agent.manifest.middleware.find((item) => item.id === "tools")?.tools ??
+      agent.manifest.capabilities.find((item) => item.id === "tools")?.tools ??
       [];
     expect(offered.map((tool) => tool.name).sort()).toEqual([
       "calculate",

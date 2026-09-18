@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { Agent, tool } from "@nylorun/harness";
-import { piModel } from "@nylorun/runtime";
+import { piModel } from "@nylorun/runtime/node";
 import { z } from "zod";
 
 afterEach(() => {
@@ -64,16 +64,12 @@ it("completes a signed Gemini tool conversation across the published engine/runt
       ],
     })
     .build();
-  const session = agent.run({
+  const result = await agent.run({
+    input: "Add 19 and 7",
     onModelCall: piModel({
       selection: { provider: "google", model: "gemini-flash-latest" },
     }),
   });
-  try {
-    const result = await session.input("Add 19 and 7").completed;
-    expect(result.events.at(-1)).toMatchObject({ type: "final", output: "26" });
-    expect(requests).toBe(2);
-  } finally {
-    await session.stop();
-  }
+  expect(result).toMatchObject({ status: "completed", output: "26" });
+  expect(requests).toBe(2);
 });
