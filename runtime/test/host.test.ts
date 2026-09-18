@@ -18,7 +18,7 @@ function isolated(agents: readonly RuntimeAgent[]) {
 function engine(
   onStop = () => {},
   onClose = async () => {},
-  interaction?: "approval" | "response",
+  interaction?: "approval" | "response"
 ): RuntimeAgent {
   const agent = Agent({ id: "echo", name: "Echo" })
     .use({
@@ -83,7 +83,7 @@ it("advertises and serves routes from the agents mount", async () => {
   const app = new Hono();
   app.route(
     "/agents",
-    serveAgents({ agents: [engine()], runtime, basePath: "/agents" }),
+    serveAgents({ agents: [engine()], runtime, basePath: "/agents" })
   );
   try {
     const discovery = await (
@@ -96,7 +96,7 @@ it("advertises and serves routes from the agents mount", async () => {
     expect(manifest.endpoints.agUi).toBe("/agents/echo/v1/ag-ui");
     expect(
       (await app.request("http://local/agents/agents/echo/manifest.json"))
-        .status,
+        .status
     ).toBe(404);
     expect(
       (
@@ -106,7 +106,7 @@ it("advertises and serves routes from the agents mount", async () => {
             messages: [{ role: "user", content: "hello" }],
           }),
         })
-      ).status,
+      ).status
     ).toBe(200);
   } finally {
     await runtime.close();
@@ -120,7 +120,7 @@ it("does not assume ownership of application resources", async () => {
       () => steps.push("session"),
       async () => {
         steps.push("agent");
-      },
+      }
     ),
   ]);
   await app.request("http://local/echo/v1/ag-ui", {
@@ -138,7 +138,7 @@ it("rejects duplicate identities", () => {
         observer: () => {},
         sessions: memorySessions(),
       }),
-    }),
+    })
   ).toThrow("unique");
 });
 
@@ -194,7 +194,7 @@ it("rejects path-shaped thread IDs before running the agent", async () => {
       engine(
         () => {},
         async () => {},
-        undefined,
+        undefined
       ),
     ].map((agent) => ({
       ...agent,
@@ -202,7 +202,7 @@ it("rejects path-shaped thread IDs before running the agent", async () => {
         runs += 1;
         return agent.run(options);
       },
-    })),
+    }))
   );
   try {
     for (const threadId of ["../escape", "a/b", "..", ""]) {
@@ -249,14 +249,14 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
       basePath: "/api/agents",
       getActor: async () => ({ id: "person-1", context: { tenant: "acme" } }),
       getRequestMetadata: async () => ({ requestId: "request-1" }),
-    }),
+    })
   );
   try {
     const discovery = await (
       await app.request("http://local/api/agents/v1/agents")
     ).json();
     expect(discovery.agents[0].manifestUrl).toBe(
-      "/api/agents/echo/manifest.json",
+      "/api/agents/echo/manifest.json"
     );
     const manifest = await (
       await app.request("http://local/api/agents/echo/manifest.json")
@@ -264,10 +264,10 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
     expect(manifest.endpoints.agUi).toBe("/api/agents/echo/v1/ag-ui");
     expect(
       new URL(discovery.agents[0].manifestUrl, "http://local/api/agents/")
-        .pathname,
+        .pathname
     ).toBe("/api/agents/echo/manifest.json");
     expect(
-      new URL(manifest.endpoints.agUi, "http://local/api/agents/").pathname,
+      new URL(manifest.endpoints.agUi, "http://local/api/agents/").pathname
     ).toBe("/api/agents/echo/v1/ag-ui");
     await (
       await app.request("http://local/api/agents/echo/v1/ag-ui", {
@@ -299,7 +299,7 @@ it("infers each request's mount including parameterized and multiple mounts", as
     ]) {
       const discovery = await (await app.request(`${prefix}/v1/agents`)).json();
       expect(discovery.agents[0].manifestUrl).toBe(
-        `${prefix}/echo/manifest.json`,
+        `${prefix}/echo/manifest.json`
       );
       const manifest = await (
         await app.request(discovery.agents[0].manifestUrl)
@@ -341,10 +341,10 @@ it("allows local Studio discovery and preflight only in development", async () =
           ]) {
             const response = await app.request(path, { headers: { origin } });
             expect(response.headers.get("access-control-allow-origin")).toBe(
-              allowed ? origin : null,
+              allowed ? origin : null
             );
             expect(
-              response.headers.get("access-control-allow-credentials"),
+              response.headers.get("access-control-allow-credentials")
             ).toBeNull();
           }
           if (allowed) {
@@ -357,11 +357,11 @@ it("allows local Studio discovery and preflight only in development", async () =
               }),
             });
             expect(stream.headers.get("access-control-allow-origin")).toBe(
-              origin,
+              origin
             );
             expect(stream.headers.get("vary")).toContain("Origin");
             expect(stream.headers.get("content-type")).toContain(
-              "text/event-stream",
+              "text/event-stream"
             );
             expect(await stream.text()).toContain("RUN_FINISHED");
           }
@@ -376,10 +376,10 @@ it("allows local Studio discovery and preflight only in development", async () =
           if (allowed) {
             expect(preflight.status).toBe(204);
             expect(
-              preflight.headers.get("access-control-allow-methods"),
+              preflight.headers.get("access-control-allow-methods")
             ).toContain("POST");
             expect(
-              preflight.headers.get("access-control-allow-headers"),
+              preflight.headers.get("access-control-allow-headers")
             ).toContain("content-type");
           }
         }
@@ -390,5 +390,112 @@ it("allows local Studio discovery and preflight only in development", async () =
   } finally {
     if (previous === undefined) delete process.env.NYLORUN_DEV;
     else process.env.NYLORUN_DEV = previous;
+  }
+});
+
+it("ignores Hono Node stream bindings when selecting the model environment", async () => {
+  const { serve } = await import("@hono/node-server");
+  let seenEnvironment: unknown = "unset";
+  const runtime = new Runtime({
+    observer: () => {},
+    sessions: memorySessions(),
+    createModel: (options) => {
+      seenEnvironment = options.environment;
+      return async () => "ok";
+    },
+  });
+  const app = new Hono();
+  app.route("/agents", serveAgents({ agents: [engine()], runtime }));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const server = serve({ fetch: app.fetch.bind(app), port: 0 }, (info) => {
+        void (async () => {
+          try {
+            const response = await fetch(
+              `http://127.0.0.1:${info.port}/agents/echo/v1/ag-ui`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  threadId: "node-env",
+                  messages: [{ role: "user", content: "hello" }],
+                }),
+              }
+            );
+            expect(response.status).toBe(200);
+            expect(await response.text()).toContain("RUN_FINISHED");
+            expect(seenEnvironment).toBeUndefined();
+            resolve();
+          } catch (error) {
+            reject(error);
+          } finally {
+            server.close();
+          }
+        })();
+      });
+      server.on("error", reject);
+    });
+  } finally {
+    await runtime.close();
+  }
+});
+
+it("still accepts Workers-style context.env provider bindings", async () => {
+  const { serve } = await import("@hono/node-server");
+  let seenEnvironment: unknown = "unset";
+  const runtime = new Runtime({
+    observer: () => {},
+    sessions: memorySessions(),
+    createModel: (options) => {
+      seenEnvironment = options.environment;
+      return async () => "ok";
+    },
+  });
+  const bindings = {
+    MODEL_PROVIDER: "custom",
+    MODEL: "fixture",
+    MODEL_PROVIDER_BASE_URL: "https://provider.example/v1",
+    MODEL_PROVIDER_API_KEY: "fixture-key",
+  };
+  const app = new Hono();
+  app.use("*", async (context, next) => {
+    Object.defineProperty(context, "env", {
+      configurable: true,
+      get: () => bindings,
+    });
+    await next();
+  });
+  app.route("/agents", serveAgents({ agents: [engine()], runtime }));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const server = serve({ fetch: app.fetch.bind(app), port: 0 }, (info) => {
+        void (async () => {
+          try {
+            const response = await fetch(
+              `http://127.0.0.1:${info.port}/agents/echo/v1/ag-ui`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  threadId: "workers-env",
+                  messages: [{ role: "user", content: "hello" }],
+                }),
+              }
+            );
+            expect(response.status).toBe(200);
+            expect(await response.text()).toContain("RUN_FINISHED");
+            expect(seenEnvironment).toEqual(bindings);
+            resolve();
+          } catch (error) {
+            reject(error);
+          } finally {
+            server.close();
+          }
+        })();
+      });
+      server.on("error", reject);
+    });
+  } finally {
+    await runtime.close();
   }
 });

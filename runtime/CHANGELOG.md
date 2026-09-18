@@ -18,6 +18,9 @@
 
 ### Patch Changes
 
+- Ignore Hono Node `context.env` stream bindings (`incoming`/`outgoing`) when
+  resolving model environment so Node `nylorun dev` uses process `.env` /
+  `piModel` instead of an empty portable HTTP adapter.
 - Update Runtime's canonical Harness dependency to the tested release.
 - Updated dependencies [c5bbb1a]
   - @nylorun/harness@0.13.0-beta

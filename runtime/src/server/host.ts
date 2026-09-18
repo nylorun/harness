@@ -46,14 +46,14 @@ export type RuntimeActor = Readonly<{
 export type AgentRouterOptions = Readonly<{
   basePath?: string;
   getActor?: (
-    context: Context,
+    context: Context
   ) => RuntimeActor | undefined | Promise<RuntimeActor | undefined>;
   getInfo?: (context: Context) => unknown | Promise<unknown>;
   getEnvironment?: (
-    context: Context,
+    context: Context
   ) => ModelEnvironment | Promise<ModelEnvironment>;
   getRequestMetadata?: (
-    context: Context,
+    context: Context
   ) =>
     | Record<string, JsonValue>
     | undefined
@@ -108,17 +108,17 @@ export class Runtime {
               return undefined;
             }
           },
-        }),
+        })
       );
     app.onError((error, context) =>
       context.json(
         {
           error: String(
-            scrub(error.message, secretValues(environment(context))),
+            scrub(error.message, secretValues(environment(context)))
           ),
         },
-        error instanceof HTTPException ? error.status : 500,
-      ),
+        error instanceof HTTPException ? error.status : 500
+      )
     );
     // Application authorization/info resolution precedes all store and media access.
     app.use("*", async (context, next) => {
@@ -126,8 +126,8 @@ export class Runtime {
       const info = options.getInfo
         ? await options.getInfo(context)
         : actor
-          ? { ...actor.context, userId: actor.id }
-          : undefined;
+        ? { ...actor.context, userId: actor.id }
+        : undefined;
       context.set("info", info);
       if (options.getEnvironment)
         context.set("modelEnvironment", await options.getEnvironment(context));
@@ -138,18 +138,19 @@ export class Runtime {
         const value = await context.res.json();
         context.res = new Response(
           JSON.stringify(scrub(value, secretValues(environment(context)))),
-          { status: context.res.status, headers: context.res.headers },
+          { status: context.res.status, headers: context.res.headers }
         );
       }
     });
     const environment = (context: Context): ModelEnvironment =>
       context.get("modelEnvironment") ??
       this.config.environment ??
-      (context.env && Object.keys(context.env).length
-        ? context.env
-        : processEnvironment());
+      bindingsEnvironment(context) ??
+      processEnvironment();
     const path = (context: Context, route: string, suffix: string) =>
-      `${normalizeBasePath(options.basePath ?? inferMountPath(context, route))}${suffix}`;
+      `${normalizeBasePath(
+        options.basePath ?? inferMountPath(context, route)
+      )}${suffix}`;
     const agentFor = (context: Context) => {
       const agent = byId.get(context.req.param("agentId")!);
       if (!agent) throw new HTTPException(404, { message: "unknown agent" });
@@ -161,22 +162,21 @@ export class Runtime {
     const submitOptions = (
       context: Context,
       sessionId: string,
-      onPreview?: (
-        preview: import("../model/defaults.js").ModelPreview,
-      ) => void,
+      onPreview?: (preview: import("../model/defaults.js").ModelPreview) => void
     ) => {
+      // Leave undefined on Node so defaultModel can use the installed piModel
+      // factory. Hono's Node adapter puts stream bindings on context.env; those
+      // must not be treated as Workers-style provider bindings.
       const explicitEnvironment =
         context.get("modelEnvironment") ??
         this.config.environment ??
-        (context.env && Object.keys(context.env).length
-          ? environment(context)
-          : undefined);
+        bindingsEnvironment(context);
       return {
         info: { ...((context.get("info") as object) ?? {}), sessionId },
         onEvent: (event: CanonicalEvent) => {
           try {
             void Promise.resolve(
-              this.config.observer?.({ type: event.type, ...event.payload }),
+              this.config.observer?.({ type: event.type, ...event.payload })
             ).catch(() => {});
           } catch {
             /* Observation cannot acknowledge persistence. */
@@ -201,24 +201,24 @@ export class Runtime {
           manifestUrl: path(
             context,
             "/v1/agents",
-            `/${agent.id}/manifest.json`,
+            `/${agent.id}/manifest.json`
           ),
         })),
-      }),
+      })
     );
     app.get("/:agentId/manifest.json", (context) =>
       context.json(
         manifest(agentFor(context), media !== undefined, (suffix) =>
-          path(context, "/:agentId/manifest.json", suffix),
-        ),
-      ),
+          path(context, "/:agentId/manifest.json", suffix)
+        )
+      )
     );
     app.get("/:agentId/v1/media/:session/:assetId", async (context) => {
       const agent = agentFor(context);
       const asset = await media?.read(
         agent.id,
         context.req.param("session"),
-        context.req.param("assetId"),
+        context.req.param("assetId")
       );
       if (!asset) return context.json({ error: "unknown media asset" }, 404);
       return context.body(asset.bytes as Uint8Array<ArrayBuffer>, 200, {
@@ -227,19 +227,19 @@ export class Runtime {
       });
     });
     app.get("/:agentId/v1/sessions", async (context) =>
-      context.json({ sessions: await this.host.list(agentFor(context).id) }),
+      context.json({ sessions: await this.host.list(agentFor(context).id) })
     );
     app.get("/:agentId/v1/sessions/:session", async (context) => {
       const document = await this.host.read(
         agentFor(context).id,
-        context.req.param("session"),
+        context.req.param("session")
       );
       if (!document) return context.json({ error: "unknown session" }, 404);
       return context.json({
         id: document.id,
         state: document.status,
         pending_interaction: document.state?.plan?.calls.find(
-          (call) => call.status === "interaction",
+          (call) => call.status === "interaction"
         )?.interaction,
       });
     });
@@ -258,14 +258,14 @@ export class Runtime {
           agent,
           sessionId,
           payload.input,
-          submitOptions(context, sessionId),
+          submitOptions(context, sessionId)
         );
         return context.json(
           {
             session_id: sessionId,
             state: result.status === "paused" ? "waiting" : result.status,
           },
-          202,
+          202
         );
       }
       if (payload.settlement) input = { kind: "settle", ...payload.settlement };
@@ -292,7 +292,7 @@ export class Runtime {
       else
         return context.json(
           { error: "expected a correlated interaction or settlement" },
-          400,
+          400
         );
       const document = await this.host.read(agent.id, sessionId);
       if (!document || document.status !== "waiting")
@@ -301,20 +301,20 @@ export class Runtime {
         agent,
         sessionId,
         input,
-        submitOptions(context, sessionId),
+        submitOptions(context, sessionId)
       );
       return context.json(
         {
           session_id: sessionId,
           state: result.status === "paused" ? "waiting" : result.status,
         },
-        202,
+        202
       );
     });
     app.get("/:agentId/v1/sessions/:session/events", async (context) => {
       const document = await this.host.read(
         agentFor(context).id,
-        context.req.param("session"),
+        context.req.param("session")
       );
       const after = Number(context.req.query("after") ?? "0");
       if (!Number.isSafeInteger(after) || after < 0)
@@ -331,7 +331,7 @@ export class Runtime {
         messages: messages(
           agent.id,
           (await this.host.read(agent.id, context.req.param("session")))
-            ?.events ?? [],
+            ?.events ?? []
         ),
       });
     });
@@ -353,7 +353,7 @@ export class Runtime {
         media,
         agent.id,
         threadId,
-        await options.getRequestMetadata?.(context),
+        await options.getRequestMetadata?.(context)
       );
       const controller = new AbortController();
       const abort = () => controller.abort(context.req.raw.signal.reason);
@@ -362,7 +362,7 @@ export class Runtime {
       const delivery = new EventDelivery(
         () => controller.abort(new Error("Delivery connection ended")),
         this.config.delivery,
-        context.res.headers,
+        context.res.headers
       );
       delivery.push({ type: "RUN_STARTED", threadId, runId });
       const modelOptions = submitOptions(
@@ -376,9 +376,9 @@ export class Runtime {
                   name: "nylorun.preview",
                   value: { ...preview, runId },
                 },
-                preview.invocationId,
+                preview.invocationId
               )
-          : undefined,
+          : undefined
       );
       const task = this.host.submit(agent, threadId, message.input, {
         ...modelOptions,
@@ -422,11 +422,11 @@ export class Runtime {
               message: String(
                 scrub(
                   error instanceof Error ? error.message : String(error),
-                  modelOptions.secrets,
-                ),
+                  modelOptions.secrets
+                )
               ),
             });
-          },
+          }
         )
         .finally(() => {
           context.req.raw.signal.removeEventListener("abort", abort);
@@ -441,19 +441,30 @@ export function serveAgents(options: ServeAgentsOptions): Hono<any> {
   const { runtime, ...rest } = options;
   return runtime[kServe](rest);
 }
+/** Workers-style provider bindings on context.env; ignore Hono Node stream slots. */
+function bindingsEnvironment(context: Context): ModelEnvironment | undefined {
+  const env = context.env as ModelEnvironment | null | undefined;
+  if (!env || typeof env !== "object") return undefined;
+  const keys = Object.keys(env);
+  if (!keys.length) return undefined;
+  if (keys.every((key) => key === "incoming" || key === "outgoing"))
+    return undefined;
+  return env;
+}
+
 function secretValues(environment: ModelEnvironment): readonly string[] {
   return Object.entries(environment).flatMap(([key, value]) =>
     /key|token|secret|password|credential/i.test(key) &&
     typeof value === "string" &&
     value
       ? [value]
-      : [],
+      : []
   );
 }
 function manifest(
   agent: RuntimeAgent,
   media: boolean,
-  publicPath: (path: string) => string,
+  publicPath: (path: string) => string
 ) {
   return {
     protocolVersion: 2,
@@ -484,7 +495,7 @@ async function latestMessage(
   media: RuntimeMedia | undefined,
   agentId: string,
   sessionId: string,
-  metadata: Record<string, JsonValue> | undefined,
+  metadata: Record<string, JsonValue> | undefined
 ): Promise<IncomingMessage> {
   if (!Array.isArray(value))
     throw new HTTPException(400, { message: "AG-UI requires a user message." });
@@ -496,7 +507,7 @@ async function latestMessage(
       media,
       agentId,
       sessionId,
-      metadata,
+      metadata
     );
     if (content) return content;
   }
@@ -518,13 +529,13 @@ function status(events: readonly CanonicalEvent[]): string {
   return pending(events)
     ? "waiting"
     : events.some((event) => event.type === "final")
-      ? "completed"
-      : "incomplete";
+    ? "completed"
+    : "incomplete";
 }
 
 function messages(
   agentId: string,
-  events: readonly CanonicalEvent[],
+  events: readonly CanonicalEvent[]
 ): ChatMessage[] {
   return events.flatMap((event) =>
     event.type === "final" && "output" in event.payload
@@ -536,16 +547,16 @@ function messages(
           },
         ]
       : event.type === "session.run.started" &&
-          isChatMessage(event.payload.message)
-        ? [
-            {
-              ...event.payload.message,
-              id: String(event.seq),
-            },
-          ]
-        : generatedImageFromEvent(event, agentId)
-          ? [generatedImageFromEvent(event, agentId)!]
-          : [],
+        isChatMessage(event.payload.message)
+      ? [
+          {
+            ...event.payload.message,
+            id: String(event.seq),
+          },
+        ]
+      : generatedImageFromEvent(event, agentId)
+      ? [generatedImageFromEvent(event, agentId)!]
+      : []
   );
 }
 
@@ -554,7 +565,7 @@ async function incomingContent(
   media: RuntimeMedia | undefined,
   agentId: string,
   sessionId: string,
-  metadata: Record<string, JsonValue> | undefined,
+  metadata: Record<string, JsonValue> | undefined
 ): Promise<IncomingMessage | undefined> {
   const parts: UserContentPart[] = [];
   const chat: ChatContent[] = [];
@@ -608,7 +619,7 @@ async function incomingContent(
         agentId,
         sessionId,
         source.mimeType,
-        source.value,
+        source.value
       );
       parts.push({
         type: "media",
@@ -639,7 +650,7 @@ function chatFromInput(
     readonly content?: readonly UserContentPart[];
   },
   agentId: string,
-  sessionId: string,
+  sessionId: string
 ): ChatMessage | undefined {
   if (event.kind !== "user-message") return undefined;
   if (typeof event.text === "string")
@@ -676,7 +687,7 @@ function finalContent(output: JsonValue): readonly ChatContent[] {
 function generatedImageMessage(
   event: { readonly type: string; readonly attributes?: unknown },
   agentId: string,
-  sessionId: string,
+  sessionId: string
 ): ChatMessage | undefined {
   if (event.type !== "tool.completed") return undefined;
   const image = imageFromToolResult(event.attributes);
@@ -697,7 +708,7 @@ function generatedImageMessage(
 
 function generatedImageFromEvent(
   event: CanonicalEvent,
-  agentId: string,
+  agentId: string
 ): ChatMessage | undefined {
   if (event.type !== "tool.completed") return undefined;
   const image = imageFromToolResult(event.payload.attributes);
@@ -726,7 +737,8 @@ function imageFromToolResult(value: unknown): MediaAsset | undefined {
   )
     return undefined;
   const image = (result.output as { image?: unknown }).image as
-    Partial<MediaAsset> | undefined;
+    | Partial<MediaAsset>
+    | undefined;
   return image &&
     typeof image.id === "string" &&
     typeof image.mediaType === "string" &&
@@ -748,7 +760,7 @@ function isChatMessage(value: unknown): value is ChatMessage {
 function firstText(message: ChatMessage): string | undefined {
   return message.content.find(
     (part): part is Extract<ChatContent, { type: "text" }> =>
-      part.type === "text",
+      part.type === "text"
   )?.text;
 }
 
@@ -759,7 +771,7 @@ function isSessionId(value: string): boolean {
 
 function mediaUrl(agentId: string, sessionId: string, assetId: string): string {
   return `media/${encodeURIComponent(sessionId)}/${encodeURIComponent(
-    assetId,
+    assetId
   )}`;
 }
 
@@ -777,7 +789,7 @@ function inferMountPath(context: Context, routePath: string): string {
     const value = context.req.param(key);
     if (value === undefined)
       throw new Error(
-        `Unable to infer Runtime mount path from ${pathname}. Pass basePath matching the Hono mount.`,
+        `Unable to infer Runtime mount path from ${pathname}. Pass basePath matching the Hono mount.`
       );
     return value;
   });
@@ -787,6 +799,6 @@ function inferMountPath(context: Context, routePath: string): string {
   }
   if (pathname === suffix || `${pathname}/` === suffix) return "/";
   throw new Error(
-    `Unable to infer Runtime mount path from ${pathname}. Pass basePath matching the Hono mount.`,
+    `Unable to infer Runtime mount path from ${pathname}. Pass basePath matching the Hono mount.`
   );
 }
