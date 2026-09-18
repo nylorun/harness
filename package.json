@@ -35,7 +35,7 @@
   },
   "packageManager": "npm@11.15.0",
   "devDependencies": {
-    "@changesets/apply-release-plan": "^7.1.1",
+    "@changesets/apply-release-plan": "^8.1.1",
     "@changesets/cli": "^2.29.8",
     "@changesets/config": "^4.0.0",
     "@changesets/read": "^1.0.1",
