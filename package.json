@@ -37,7 +37,7 @@
   "devDependencies": {
     "@changesets/apply-release-plan": "^7.1.1",
     "@changesets/cli": "^2.29.8",
-    "@changesets/config": "^4.0.0",
+    "@changesets/config": "^4.0.1",
     "@changesets/read": "^1.0.1",
     "@manypkg/get-packages": "^3.1.0",
     "chokidar": "^5.0.0",
