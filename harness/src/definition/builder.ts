@@ -2,28 +2,34 @@ import type { BoundMiddleware } from "./bound.js";
 import type { CapabilityDeclaration, StepMiddleware } from "../types/middleware.js";
 import type { BuildDiagnostic } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
-import type { ToolSchemaSource, SchemaOutput } from "../types/tool.js";
+import type { ToolDefinition, ToolSchemaSource, SchemaOutput } from "../types/tool.js";
 import type { BuiltAgent } from "../types/agent.js";
+import type { AgentManifest } from "../types/manifest.js";
+import type { AfterModelCallFn, BeforeModelCallFn } from "../types/dynamics.js";
+import type { Implementations } from "./implementations.js";
 import { execute } from "../execution/run.js";
-import { assembleAgent } from "./assemble.js";
+import { assembleAgent, type CapabilityDynamics } from "./assemble.js";
 import { compileDeclaration } from "./declaration.js";
+import { agentFrom } from "./from.js";
 
 export interface AgentOptions<Schema extends ToolSchemaSource | undefined = undefined> {
   readonly outputSchema?: Schema;
   readonly id: string;
   readonly name: string;
   readonly instructions?: string | readonly string[];
+  /** Top-level tools (H2). Composed as capability id `"agent"`. */
+  readonly tools?: readonly ToolDefinition<any, any, any>[];
+  // model is intentionally absent — Runtime owns model resolution via onModelCall.
 }
 
-interface BuilderState {
+interface BuilderSnapshot {
   readonly id: string;
   readonly name: string;
-  readonly middleware: BoundMiddleware[];
   readonly outputSchema?: ToolSchemaSource;
-  sealed: boolean;
-  agent?: BuiltAgent<any, any>;
-  error?: AgentBuildError;
-  middlewareSeq: number;
+  readonly entries: readonly BoundMiddleware[];
+  readonly dynamics: ReadonlyMap<string, CapabilityDynamics>;
+  readonly agentBefore?: BeforeModelCallFn;
+  readonly agentAfter?: AfterModelCallFn;
 }
 
 export class AgentBuildError extends HarnessError {
@@ -46,94 +52,237 @@ export class AgentLifecycleError extends HarnessError {
 export function Agent<Info = unknown, Schema extends ToolSchemaSource | undefined = undefined>(
   options: AgentOptions<Schema>,
 ): AgentBuilder<Info, Schema> {
-  return new AgentBuilder(options);
+  return AgentBuilder.create(options);
 }
 
-export class AgentBuilder<Info = unknown, Schema extends ToolSchemaSource | undefined = undefined> {
-  readonly #state: BuilderState;
+export namespace Agent {
+  export function from<Info = unknown>(
+    json: AgentManifest | import("../types/shared.js").JsonObject,
+    implementations: Implementations<Info>,
+  ): BuiltAgent<Info> {
+    return agentFrom(json, implementations);
+  }
+}
 
-  constructor(options: AgentOptions<Schema>) {
-    this.#state = createState(options);
+const SNAPSHOT = Symbol("AgentBuilder.snapshot");
+
+export class AgentBuilder<Info = unknown, Schema extends ToolSchemaSource | undefined = undefined> {
+  readonly #snapshot: BuilderSnapshot;
+  #agent?: BuiltAgent<Info, Schema extends ToolSchemaSource ? SchemaOutput<Schema> : string>;
+  #error?: AgentBuildError;
+
+  constructor(options: AgentOptions<Schema>);
+  /** @internal */
+  constructor(snapshot: BuilderSnapshot, brand: typeof SNAPSHOT);
+  constructor(optionsOrSnapshot: AgentOptions<Schema> | BuilderSnapshot, brand?: typeof SNAPSHOT) {
+    this.#snapshot =
+      brand === SNAPSHOT
+        ? (optionsOrSnapshot as BuilderSnapshot)
+        : createSnapshot(optionsOrSnapshot as AgentOptions<Schema>);
   }
 
-  use(middleware: StepMiddleware<Info>): this;
-  use(id: string, middleware: StepMiddleware<Info>): this;
-  use(declaration: CapabilityDeclaration<Info>): this;
+  static create<Info, Schema extends ToolSchemaSource | undefined>(
+    options: AgentOptions<Schema>,
+  ): AgentBuilder<Info, Schema> {
+    return new AgentBuilder(options);
+  }
+
+  private static withSnapshot<Info, Schema extends ToolSchemaSource | undefined>(
+    snapshot: BuilderSnapshot,
+  ): AgentBuilder<Info, Schema> {
+    return new AgentBuilder(snapshot, SNAPSHOT);
+  }
+
+  /** Compose-time identity — available before `.build()`. */
+  get id(): string {
+    return this.#snapshot.id;
+  }
+
+  get name(): string {
+    return this.#snapshot.name;
+  }
+
+  get manifest(): AgentManifest {
+    return this.ensure().manifest;
+  }
+
+  get hash(): string {
+    return this.ensure().hash;
+  }
+
+  toJSON(): AgentManifest {
+    return this.ensure().toJSON();
+  }
+
+  /** @deprecated Prefer `@nylorun/harness/engine`. Alias through 1.0. */
+  run(
+    options: Parameters<
+      BuiltAgent<Info, Schema extends ToolSchemaSource ? SchemaOutput<Schema> : string>["run"]
+    >[0],
+  ) {
+    return this.ensure().run(options);
+  }
+
+  use(middleware: StepMiddleware<Info>): AgentBuilder<Info, Schema>;
+  use(id: string, middleware: StepMiddleware<Info>): AgentBuilder<Info, Schema>;
+  use(declaration: CapabilityDeclaration<Info>): AgentBuilder<Info, Schema>;
   use(
     idOrMiddleware: string | StepMiddleware<Info> | CapabilityDeclaration<Info>,
     middleware?: StepMiddleware<Info>,
-  ): this {
+  ): AgentBuilder<Info, Schema> {
+    let compiled: ReturnType<typeof compileDeclaration>;
     if (typeof idOrMiddleware === "function") {
-      return this.push({
-        id: this.nextMiddlewareId(),
-        handle: idOrMiddleware as StepMiddleware,
-        hasMiddleware: true,
-      });
+      compiled = {
+        bound: {
+          id: nextMiddlewareId(this.#snapshot.entries),
+          handle: idOrMiddleware as StepMiddleware,
+          hasMiddleware: true,
+        },
+        middleware: idOrMiddleware as StepMiddleware,
+      };
+    } else if (typeof idOrMiddleware === "object") {
+      compiled = compileDeclaration(idOrMiddleware);
+    } else {
+      compiled = {
+        bound: {
+          id: idOrMiddleware,
+          handle: middleware! as StepMiddleware,
+          hasMiddleware: true,
+        },
+        middleware: middleware as StepMiddleware,
+      };
     }
-    if (typeof idOrMiddleware === "object") return this.push(compileDeclaration(idOrMiddleware));
-    return this.push({
-      id: idOrMiddleware,
-      handle: middleware! as StepMiddleware,
-      hasMiddleware: true,
+    const dynamics = new Map(this.#snapshot.dynamics);
+    dynamics.set(compiled.bound.id, {
+      ...(compiled.beforeModelCall ? { beforeModelCall: compiled.beforeModelCall } : {}),
+      ...(compiled.afterModelCall ? { afterModelCall: compiled.afterModelCall } : {}),
+      ...(compiled.middleware ? { middleware: compiled.middleware } : {}),
+    });
+    return AgentBuilder.withSnapshot({
+      ...this.#snapshot,
+      entries: Object.freeze([...this.#snapshot.entries, compiled.bound]),
+      dynamics,
     });
   }
 
+  beforeModelCall(fn: BeforeModelCallFn<Info>): AgentBuilder<Info, Schema> {
+    const dynamics = new Map(this.#snapshot.dynamics);
+    const existing = dynamics.get("agent") ?? {};
+    dynamics.set("agent", { ...existing, beforeModelCall: fn as BeforeModelCallFn });
+    const entries = ensureAgentCapabilityFlag(this.#snapshot.entries, "beforeModelCall");
+    return AgentBuilder.withSnapshot({
+      ...this.#snapshot,
+      entries,
+      dynamics,
+      agentBefore: fn as BeforeModelCallFn,
+    });
+  }
+
+  afterModelCall(fn: AfterModelCallFn<Info>): AgentBuilder<Info, Schema> {
+    const dynamics = new Map(this.#snapshot.dynamics);
+    const existing = dynamics.get("agent") ?? {};
+    dynamics.set("agent", { ...existing, afterModelCall: fn as AfterModelCallFn });
+    const entries = ensureAgentCapabilityFlag(this.#snapshot.entries, "afterModelCall");
+    return AgentBuilder.withSnapshot({
+      ...this.#snapshot,
+      entries,
+      dynamics,
+      agentAfter: fn as AfterModelCallFn,
+    });
+  }
+
+  /** Optional no-op: returns the assembled agent facade. */
   build(): BuiltAgent<Info, Schema extends ToolSchemaSource ? SchemaOutput<Schema> : string> {
-    if (this.#state.agent) return this.#state.agent;
-    if (this.#state.error) throw this.#state.error;
-    this.#state.sealed = true;
+    return this.ensure();
+  }
+
+  private ensure(): BuiltAgent<
+    Info,
+    Schema extends ToolSchemaSource ? SchemaOutput<Schema> : string
+  > {
+    if (this.#agent) return this.#agent;
+    if (this.#error) throw this.#error;
     const result = assembleAgent(
-      this.#state.middleware,
+      this.#snapshot.entries,
       {
-        id: this.#state.id,
-        name: this.#state.name,
-        outputSchema: this.#state.outputSchema,
+        id: this.#snapshot.id,
+        name: this.#snapshot.name,
+        outputSchema: this.#snapshot.outputSchema,
       },
       execute,
+      this.#snapshot.dynamics,
     );
     if (!result.ok) {
-      this.#state.error = new AgentBuildError(result.diagnostics);
-      throw this.#state.error;
+      this.#error = new AgentBuildError(result.diagnostics);
+      throw this.#error;
     }
-    this.#state.agent = result.agent;
-    return this.#state.agent;
-  }
-
-  private nextMiddlewareId(): string {
-    const taken = new Set(this.#state.middleware.map((item) => item.id));
-    let id: string;
-    do {
-      this.#state.middlewareSeq += 1;
-      id = `middleware-${this.#state.middlewareSeq}`;
-    } while (taken.has(id));
-    return id;
-  }
-
-  private push(entry: BoundMiddleware): this {
-    this.assertOpen();
-    this.#state.middleware.push(entry);
-    return this;
-  }
-
-  private assertOpen(): void {
-    if (this.#state.sealed)
-      throw new AgentLifecycleError("AgentBuilder cannot be changed after build()");
+    this.#agent = result.agent as BuiltAgent<
+      Info,
+      Schema extends ToolSchemaSource ? SchemaOutput<Schema> : string
+    >;
+    return this.#agent;
   }
 }
 
-function createState(options: AgentOptions<ToolSchemaSource | undefined>): BuilderState {
-  const middleware: BoundMiddleware[] = [];
-  if (options.instructions !== undefined) {
-    const instructions =
-      typeof options.instructions === "string" ? [options.instructions] : options.instructions;
-    middleware.push(compileDeclaration({ id: "agent", instructions }));
+function createSnapshot(options: AgentOptions<ToolSchemaSource | undefined>): BuilderSnapshot {
+  const entries: BoundMiddleware[] = [];
+  const dynamics = new Map<string, CapabilityDynamics>();
+  const instructions =
+    options.instructions === undefined
+      ? undefined
+      : typeof options.instructions === "string"
+        ? [options.instructions]
+        : options.instructions;
+  if (instructions !== undefined || options.tools !== undefined) {
+    const compiled = compileDeclaration({
+      id: "agent",
+      ...(instructions === undefined ? {} : { instructions }),
+      ...(options.tools === undefined ? {} : { tools: options.tools }),
+    });
+    entries.push(compiled.bound);
+    dynamics.set("agent", {});
   }
   return {
     id: options.id,
-    outputSchema: options.outputSchema,
     name: options.name,
-    middleware,
-    sealed: false,
-    middlewareSeq: 0,
+    outputSchema: options.outputSchema,
+    entries: Object.freeze(entries),
+    dynamics,
   };
 }
+
+function nextMiddlewareId(entries: readonly BoundMiddleware[]): string {
+  const taken = new Set(entries.map((item) => item.id));
+  let seq = 0;
+  let id: string;
+  do {
+    seq += 1;
+    id = `middleware-${seq}`;
+  } while (taken.has(id));
+  return id;
+}
+
+function ensureAgentCapabilityFlag(
+  entries: readonly BoundMiddleware[],
+  flag: "beforeModelCall" | "afterModelCall",
+): readonly BoundMiddleware[] {
+  const index = entries.findIndex((item) => item.id === "agent");
+  if (index >= 0) {
+    const current = entries[index]!;
+    if (current[flag]) return entries;
+    const next = Object.freeze({ ...current, [flag]: true });
+    return Object.freeze([...entries.slice(0, index), next, ...entries.slice(index + 1)]);
+  }
+  return Object.freeze([
+    ...entries,
+    Object.freeze({
+      id: "agent",
+      handle: async (_request: unknown, next: () => Promise<unknown>) => next(),
+      hasMiddleware: false,
+      contributions: Object.freeze({}),
+      [flag]: true,
+    } as BoundMiddleware),
+  ]);
+}
+
+export type { Implementations };

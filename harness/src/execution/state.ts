@@ -77,12 +77,21 @@ const call = z
       ])
       .optional(),
     token: json.optional(),
+    wait: z
+      .object({
+        kind: z.enum(["ask", "approve", "sleep", "waitFor"]),
+        waitId: id,
+        name: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 const schema = z
   .object({
     version: z.literal(1),
     agentId: id,
+    manifestHash: id.optional(),
     executionId: id,
     outputContract: z.record(z.string(), json).optional(),
     revision: z.number().int().nonnegative(),
@@ -90,6 +99,7 @@ const schema = z
     transcript: z.array(json),
     status: z.enum(["ready", "active", "completed", "paused", "cancelled", "failed"]),
     cancelledCalls: z.array(call).optional(),
+    state: z.record(z.string(), json).optional(),
     plan: z
       .object({
         turnId: id,

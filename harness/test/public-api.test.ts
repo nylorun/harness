@@ -11,9 +11,13 @@ describe("public API", () => {
         "AgentBuildError",
         "AgentLifecycleError",
         "tool",
+        "capability",
+        "ToolError",
         "defineSchema",
         "model",
         "middleware",
+        "checkCompatibility",
+        "hashManifest",
       ]),
     );
     expect(api).not.toHaveProperty("bindAgent");
@@ -21,7 +25,8 @@ describe("public API", () => {
     expect(api).not.toHaveProperty("defineToolFamily");
     expect(manifest.exports).toHaveProperty(".");
     expect(manifest.exports).toHaveProperty("./model/adapters");
-    expect(Object.keys(manifest.exports)).toEqual([".", "./model/adapters"]);
+    expect(manifest.exports).toHaveProperty("./engine");
+    expect(Object.keys(manifest.exports).sort()).toEqual([".", "./engine", "./model/adapters"]);
     expect(manifest.dependencies).toBeUndefined();
   });
 });

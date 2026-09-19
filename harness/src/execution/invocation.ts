@@ -2,6 +2,7 @@ import type { AgentDefinition } from "../definition/agent-definition.js";
 import type { BoundToolDefinition } from "../definition/bound.js";
 import type { ExecutionState, RunOptions } from "../types/execution.js";
 import type { ObserveEvent } from "../types/observe.js";
+import type { JsonValue } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
 import { copyJson } from "../utils/immutable.js";
 import { createId } from "../utils/ids.js";
@@ -13,6 +14,8 @@ export interface Invocation {
   readonly signal: AbortSignal;
   readonly definitions: Map<string, BoundToolDefinition>;
   state: ExecutionState;
+  /** Mutable durable session memory for this invocation. */
+  sessionBag: Record<string, JsonValue>;
   observe: ObserveEmit;
   emit(event: ObserveEvent | ExecutionOutcomeEvent): void;
   record(): Promise<void>;
@@ -30,6 +33,7 @@ export function createInvocation(input: {
     signal: input.options.signal ?? new AbortController().signal,
     definitions: input.definitions,
     state: input.state,
+    sessionBag: { ...((input.state.state ?? {}) as Record<string, JsonValue>) },
   } as Invocation;
   const sink = createObservationSink({
     listener: input.options.onEvent,
@@ -39,7 +43,11 @@ export function createInvocation(input: {
   invocation.observe = sink.observe;
   invocation.emit = sink.emit;
   invocation.record = async () => {
-    invocation.state = copyJson({ ...invocation.state, revision: invocation.state.revision + 1 });
+    invocation.state = copyJson({
+      ...invocation.state,
+      state: { ...invocation.sessionBag },
+      revision: invocation.state.revision + 1,
+    });
     if (!input.options.record) return;
     try {
       await input.options.record(copyJson(invocation.state));

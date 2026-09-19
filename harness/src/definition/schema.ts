@@ -33,21 +33,65 @@ export function defineSchema<T>(value: ToolSchema<T>): ToolSchema<T> {
 
 /** Eagerly prepares a definition authored through Harness's tool() helper. */
 export function prepareTool<T extends ToolDefinition>(definition: T): T {
-  normalizedSchemasFor(definition);
-  return definition;
+  const normalized = normalizeToolDefinition(definition);
+  normalizedSchemasFor(normalized);
+  return normalized as T;
+}
+
+/** Resolves `input`/`output`/`run` aliases onto the legacy field names. */
+export function normalizeToolDefinition(definition: ToolDefinition): ToolDefinition {
+  const alreadyCanonical =
+    definition.inputSchema !== undefined &&
+    typeof definition.execute === "function" &&
+    definition.input === undefined &&
+    definition.output === undefined &&
+    definition.run === undefined;
+  if (alreadyCanonical) return definition;
+
+  const inputSchema = definition.inputSchema ?? definition.input;
+  const outputSchema = definition.outputSchema ?? definition.output;
+  const execute = definition.execute ?? definition.run;
+  if (!inputSchema)
+    throw new HarnessError(
+      "tool.invalid-schema",
+      `Tool '${definition.name}' must provide input or inputSchema`,
+    );
+  if (typeof execute !== "function")
+    throw new HarnessError(
+      "tool.invalid",
+      `Tool '${definition.name}' must provide run() or execute()`,
+    );
+  return {
+    name: definition.name,
+    ...(definition.description === undefined ? {} : { description: definition.description }),
+    inputSchema,
+    ...(outputSchema === undefined ? {} : { outputSchema }),
+    execute,
+    ...(definition.approval === undefined ? {} : { approval: definition.approval }),
+    ...(definition.effects === undefined ? {} : { effects: definition.effects }),
+  } as ToolDefinition;
 }
 
 /** Returns cached normalized contracts, preparing raw definitions on first bind. */
 export function normalizedSchemasFor(definition: ToolDefinition): NormalizedToolSchemas {
   const cached = preparedSchemas.get(definition);
   if (cached) return cached;
+  const prepared = normalizeToolDefinition(definition);
+  const cachedPrepared = prepared !== definition ? preparedSchemas.get(prepared) : undefined;
+  if (cachedPrepared) {
+    preparedSchemas.set(definition, cachedPrepared);
+    return cachedPrepared;
+  }
+  if (!prepared.inputSchema)
+    throw new HarnessError("tool.invalid-schema", `Tool '${prepared.name}' is missing inputSchema`);
   const normalized = Object.freeze({
-    inputSchema: normalizeSchema(definition.inputSchema, "input"),
-    ...(definition.outputSchema === undefined
+    inputSchema: normalizeSchema(prepared.inputSchema, "input"),
+    ...(prepared.outputSchema === undefined
       ? {}
-      : { outputSchema: normalizeSchema(definition.outputSchema, "output") }),
+      : { outputSchema: normalizeSchema(prepared.outputSchema, "output") }),
   });
-  preparedSchemas.set(definition, normalized);
+  preparedSchemas.set(prepared, normalized);
+  if (definition !== prepared) preparedSchemas.set(definition, normalized);
   return normalized;
 }
 

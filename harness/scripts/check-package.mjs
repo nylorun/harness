@@ -88,6 +88,8 @@ try {
     "dist/index.d.ts",
     "dist/execution/model/adapters.js",
     "dist/execution/model/adapters.d.ts",
+    "dist/engine/index.js",
+    "dist/engine/index.d.ts",
   ]) {
     if (!files.includes(required)) throw new Error(`Missing tarball file: ${required}`);
   }
@@ -125,10 +127,18 @@ try {
     "isHarnessError",
     "Agent",
     "tool",
+    "capability",
+    "ToolError",
     "model",
     "middleware",
+    "checkCompatibility",
+    "hashManifest",
   ]) {
     if (!(name in entry)) throw new Error(`Missing public export: ${name}`);
+  }
+  const engine = await import(new URL("../dist/engine/index.js", import.meta.url));
+  for (const name of ["run", "createEngineState", "bindingFromAgent", "checkCompatibility"]) {
+    if (!(name in engine)) throw new Error(`Missing engine export: ${name}`);
   }
   for (const name of [
     "toChatCompletions",

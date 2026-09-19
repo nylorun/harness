@@ -4,6 +4,8 @@ import type { AgentManifest } from "../types/manifest.js";
 import type { BuildDiagnostic } from "../types/shared.js";
 import type { RunOptions, RunResult } from "../types/execution.js";
 import type { ToolSchemaSource } from "../types/tool.js";
+import type { AfterModelCallFn, BeforeModelCallFn } from "../types/dynamics.js";
+import type { StepMiddleware } from "../types/middleware.js";
 import { bindAgent } from "./bind-agent.js";
 import type { AgentDefinition } from "./agent-definition.js";
 import { createManifest } from "./manifest.js";
@@ -13,6 +15,12 @@ type BuildResult<Agent> =
   | { readonly ok: false; readonly diagnostics: readonly BuildDiagnostic[] };
 
 type AgentRun = (definition: AgentDefinition, options: RunOptions<any>) => Promise<RunResult<any>>;
+
+export interface CapabilityDynamics {
+  readonly beforeModelCall?: BeforeModelCallFn<any>;
+  readonly afterModelCall?: AfterModelCallFn<any>;
+  readonly middleware?: StepMiddleware<any>;
+}
 
 const diagnostic = (
   code: string,
@@ -28,6 +36,7 @@ export function assembleAgent(
     outputSchema?: ToolSchemaSource;
   }>,
   run: AgentRun,
+  dynamics: ReadonlyMap<string, CapabilityDynamics> = new Map(),
 ): BuildResult<BuiltAgent> {
   const diagnostics: BuildDiagnostic[] = [];
 
@@ -60,6 +69,8 @@ export function assembleAgent(
           hasMiddleware: item.hasMiddleware,
           ...(item.tools === undefined ? {} : { tools: item.tools }),
           ...(item.contributions === undefined ? {} : { contributions: item.contributions }),
+          ...(item.beforeModelCall ? { beforeModelCall: true } : {}),
+          ...(item.afterModelCall ? { afterModelCall: true } : {}),
         }),
       );
     }
@@ -74,6 +85,6 @@ export function assembleAgent(
     outputSchema: identity.outputSchema,
     middleware: frozenMiddleware,
   });
-  const agent = bindAgent(frozenMiddleware, manifest, identity, run);
+  const agent = bindAgent(frozenMiddleware, manifest, identity, run, dynamics);
   return Object.freeze({ ok: true, agent, manifest });
 }

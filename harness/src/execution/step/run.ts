@@ -4,6 +4,7 @@ import type { ModelCandidate, ModelConfigurationSnapshot } from "../../types/mod
 import type { ObserveEvent, ObserveModelConfigurationSnapshot } from "../../types/observe.js";
 import type { InputEvent } from "../../types/transcript.js";
 import type { ToolResult } from "../../types/tool.js";
+import type { JsonValue } from "../../types/shared.js";
 import { normalizeCandidate } from "../model/normalize.js";
 import { HarnessError, isHarnessError } from "../../errors.js";
 import { copyJson } from "../../utils/immutable.js";
@@ -16,6 +17,12 @@ import { resolveModelRequest } from "./resolve.js";
 import { sealStep, type SealedStepOutput } from "./seal.js";
 import { ModelConfigurationDraft } from "./model-configuration.js";
 import { createId } from "../../utils/ids.js";
+import {
+  applyAfterModelCall,
+  applyBeforeModelCall,
+  hasDynamics,
+  type DynamicsContext,
+} from "./dynamics.js";
 
 export interface StepRunResult {
   readonly stepId: string;
@@ -23,6 +30,7 @@ export interface StepRunResult {
   readonly output: SealedStepOutput;
   readonly requestedModelId?: string;
   readonly modelInvocationId?: string;
+  readonly retry?: string;
 }
 
 export async function runStep(input: {
@@ -42,6 +50,7 @@ export async function runStep(input: {
 }): Promise<StepRunResult> {
   let requestedModelId: string | undefined;
   let modelInvocationId: string | undefined;
+  let retryFeedback: string | undefined;
   const stepInput = Object.freeze({
     executionId: input.executionId,
     turnId: input.turnId,
@@ -70,6 +79,41 @@ export async function runStep(input: {
     async () => {
       input.signal.throwIfAborted();
       if (context.currentTripwire) return context.tripwire(context.currentTripwire);
+
+      const definition = input.agent.definition;
+      const dynamicsCtx: DynamicsContext | undefined =
+        definition && hasDynamics(definition)
+          ? {
+              agent: definition,
+              info: input.info,
+              step: input.stepNumber - 1,
+              arrivals: input.arrivals,
+              messages: [],
+              sessionState: input.agent.sessionState ?? {},
+            }
+          : undefined;
+
+      if (dynamicsCtx) {
+        try {
+          const before = await applyBeforeModelCall(dynamicsCtx, configuration);
+          if (input.agent.sessionState) {
+            Object.assign(input.agent.sessionState, dynamicsCtx.sessionState);
+          }
+          if (input.agent.recordAfterDynamics) await input.agent.recordAfterDynamics();
+          if (before.blocked) {
+            return context.tripwire({
+              code: "dynamics.blocked",
+              message: before.blocked,
+            });
+          }
+        } catch (error) {
+          return context.tripwire({
+            code: isHarnessError(error) ? error.code : "configuration.invalid",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
       try {
         const selected = configuration.snapshot();
         for (const tool of selected.tools) input.agent.registry.reference(tool);
@@ -138,6 +182,48 @@ export async function runStep(input: {
         const candidate = context.currentCandidate;
         if (!candidate)
           throw new HarnessError("model.candidate-missing", "Model candidate missing after mint");
+
+        if (dynamicsCtx) {
+          const text = candidate.output
+            ?.filter((block): block is { type: "text"; text: string } => block.type === "text")
+            .map((block) => block.text)
+            .join("");
+          const toolCalls = (candidate.output ?? [])
+            .filter((block) => block.type === "tool-call")
+            .map((block) => {
+              const call = block as {
+                readonly type: "tool-call";
+                readonly id: string;
+                readonly name: string;
+                readonly args: JsonValue;
+              };
+              return { id: call.id, name: call.name, args: call.args };
+            });
+          const decision = await applyAfterModelCall(dynamicsCtx, {
+            ...(text ? { text } : {}),
+            toolCalls,
+          });
+          if (input.agent.recordAfterDynamics) await input.agent.recordAfterDynamics();
+          if (decision.block) {
+            return context.tripwire({ code: "dynamics.blocked", message: decision.block });
+          }
+          if (decision.retry) {
+            retryFeedback = decision.retry;
+            return context.tripwire({ code: "dynamics.retry", message: decision.retry });
+          }
+          if (decision.text !== undefined) {
+            minted.replace({
+              output: [{ type: "text", text: decision.text }],
+            });
+          }
+          for (const item of decision.deny ?? []) minted.deny(item.id, item.reason);
+          for (const item of decision.approve ?? [])
+            minted.requireInteraction(item.id, {
+              kind: "approval",
+              prompt: item.prompt,
+            });
+        }
+
         return minted;
       } catch (error) {
         if (input.signal.aborted) throw input.signal.reason;
@@ -157,6 +243,7 @@ export async function runStep(input: {
     ...(requestedModelId === undefined ? {} : { requestedModelId }),
     output,
     ...(modelInvocationId ? { modelInvocationId } : {}),
+    ...(retryFeedback ? { retry: retryFeedback } : {}),
   });
 }
 

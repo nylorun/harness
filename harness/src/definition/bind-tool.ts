@@ -1,24 +1,28 @@
 import type { BoundToolDefinition } from "./bound.js";
 import type { ToolDefinition } from "../types/tool.js";
 import { HarnessError } from "../errors.js";
-import { normalizedSchemasFor } from "./schema.js";
+import { normalizeToolDefinition, normalizedSchemasFor } from "./schema.js";
 
 /** Prepares an executable Tool and records its middleware slot provenance. */
 export function bindTool(
   item: ToolDefinition,
   owner: BoundToolDefinition["owner"],
 ): BoundToolDefinition {
-  if (!item.name) throw new HarnessError("tool.invalid-name", "Tool name must not be empty");
-  if (typeof item.execute !== "function")
-    throw new HarnessError("tool.invalid", `Tool '${item.name}' must provide execute()`);
-  const schemas = normalizedSchemasFor(item);
+  const prepared = normalizeToolDefinition(item);
+  if (!prepared.name) throw new HarnessError("tool.invalid-name", "Tool name must not be empty");
+  if (typeof prepared.execute !== "function")
+    throw new HarnessError("tool.invalid", `Tool '${prepared.name}' must provide execute()`);
+  const schemas = normalizedSchemasFor(prepared);
   return Object.freeze({
+    // Keep the original object identity so ToolRegistry WeakMap lookups succeed.
     source: item,
-    name: item.name,
-    ...(item.description ? { description: item.description } : {}),
+    name: prepared.name,
+    ...(prepared.description ? { description: prepared.description } : {}),
     inputSchema: schemas.inputSchema,
     ...(schemas.outputSchema === undefined ? {} : { outputSchema: schemas.outputSchema }),
-    execute: item.execute.bind(item) as BoundToolDefinition["execute"],
+    execute: prepared.execute!.bind(prepared) as BoundToolDefinition["execute"],
+    ...(prepared.approval === undefined ? {} : { approval: prepared.approval }),
+    ...(prepared.effects === undefined ? {} : { effects: prepared.effects }),
     owner: Object.freeze({ ...owner }),
   });
 }

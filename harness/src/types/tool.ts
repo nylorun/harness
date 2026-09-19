@@ -56,6 +56,23 @@ export type ToolOutputSchema = ToolSchemaSource;
 
 type OutputFor<Schema> = Schema extends ToolSchemaSource ? SchemaOutput<Schema> : ToolContent;
 
+/** Side-effect class for crash / redelivery semantics (code-only; never in the manifest). */
+export type ToolEffects = "read" | "idempotent" | "write";
+
+/**
+ * Declarative approval gate. Return a prompt string (or `true`) to pause;
+ * return `false` / `undefined` / empty string to proceed.
+ */
+export type ToolApproval<InputSchema extends ToolInputSchema> = (
+  args: SchemaOutput<InputSchema>,
+) => string | boolean | undefined | Promise<string | boolean | undefined>;
+
+export interface SessionStateBag {
+  get(key: string): JsonValue | undefined;
+  set(key: string, value: JsonValue): void;
+  entries(): Readonly<Record<string, JsonValue>>;
+}
+
 export interface ToolDefinition<
   InputSchema extends ToolInputSchema = ToolInputSchema,
   Info = unknown,
@@ -63,13 +80,29 @@ export interface ToolDefinition<
 > {
   readonly name: string;
   readonly description?: string;
-  readonly inputSchema: InputSchema;
+  /** Preferred alias for `inputSchema`. */
+  readonly input?: InputSchema;
+  readonly inputSchema?: InputSchema;
+  /** Preferred alias for `outputSchema`. */
+  readonly output?: OutputSchema;
   readonly outputSchema?: OutputSchema;
-  execute(
+  /** Preferred alias for `execute`. */
+  run?(
     args: SchemaOutput<InputSchema>,
     context: ToolExecutionContext<Info>,
-  ): Promise<ToolOutcome<OutputFor<OutputSchema>>>;
+  ): Promise<ToolRunResult<OutputFor<OutputSchema>>>;
+  execute?(
+    args: SchemaOutput<InputSchema>,
+    context: ToolExecutionContext<Info>,
+  ): Promise<ToolRunResult<OutputFor<OutputSchema>>>;
+  /** Code-only metadata — never serialized into the manifest. */
+  readonly approval?: ToolApproval<InputSchema>;
+  /** Code-only metadata — never serialized into the manifest. */
+  readonly effects?: ToolEffects;
 }
+
+/** A plain return value is treated as `{ kind: "completed", output }`. Legacy tagged outcomes remain valid. */
+export type ToolRunResult<Output = ToolContent> = Output | ToolOutcome<Output>;
 
 export interface ToolOwner {
   readonly middlewareId: string;
@@ -105,6 +138,29 @@ interface ToolExecutionContextBase {
   /** The invocation's model callable, for tools that explicitly run a child agent. */
   readonly onModelCall?: ModelAdapter;
   readonly resume?: ToolExecutionResume;
+  /** Stable per invocation across crash and replay. */
+  readonly idempotencyKey: string;
+  /** True when this invocation is being offered again after an interrupted active call. */
+  readonly redelivery?: boolean;
+  /** Durable session memory (tools write; beforeModelCall reads). */
+  readonly state: SessionStateBag;
+  /** Session identity stub — Runtime fills this later. */
+  readonly session: { readonly id: string };
+  /** Live progress stub — emits an observation when a listener is present. */
+  progress(message: string, data?: JsonObject): void;
+  /** Durable wait: park for a human/app response. */
+  ask(prompt: string, opts?: JsonObject): Promise<JsonValue>;
+  /** Durable wait: park for approval. */
+  approve(prompt: string): Promise<boolean>;
+  /** Durable wait: park until a timer fires (host settles). */
+  sleep(duration: string | number): Promise<void>;
+  /** Durable wait: park until a named event arrives. */
+  waitFor(
+    event: string,
+    opts?: { readonly match?: JsonValue; readonly timeout?: string | number },
+  ): Promise<JsonValue>;
+  /** Memoized sub-step so effects before a wait are not re-run on resume. */
+  step<T>(name: string, fn: () => Promise<T> | T): Promise<T>;
 }
 
 export type ToolExecutionContext<Info = unknown> = ToolExecutionContextBase & {
