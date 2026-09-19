@@ -48,8 +48,8 @@ function isToolDefinition(value: unknown): value is ToolDefinition {
     typeof value === "object" &&
     "name" in value &&
     typeof value.name === "string" &&
-    "inputSchema" in value &&
-    "execute" in value &&
-    typeof value.execute === "function"
+    ("inputSchema" in value || "input" in value) &&
+    (typeof (value as { execute?: unknown }).execute === "function" ||
+      typeof (value as { run?: unknown }).run === "function")
   );
 }
