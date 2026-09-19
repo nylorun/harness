@@ -94,13 +94,9 @@ describe("multi-agent Hono host", () => {
           name: "Interactions",
           capabilities: [
             { id: "agent", instructions: [exampleInstructions] },
-            {
-              id: "model",
-              model: {
-                id: "test/deterministic",
-                controls: { temperature: 0.1 },
-              },
-            },
+            // DX v5.6: capability model intent still registers locally but is not
+            // published on the harness manifest (Runtime owns model resolution).
+            { id: "model" },
             {
               id: "notes",
               instructions: [
@@ -135,6 +131,12 @@ describe("multi-agent Hono host", () => {
           ],
         },
       });
+      const published = body.manifest as {
+        capabilities: Array<Record<string, unknown>>;
+      };
+      expect(published.capabilities.find((item) => item.id === "model")).not.toHaveProperty(
+        "model",
+      );
       expect(body).not.toHaveProperty("description");
       expect(body).not.toHaveProperty("capabilities");
       expect(body).not.toHaveProperty("model");
