@@ -2,6 +2,7 @@ import type { ModelAdapter } from "@nylorun/harness";
 import type { SessionStore } from "./sessions/store.js";
 import type { RuntimeMedia } from "./media.js";
 import type { ModelEnvironment } from "./model/http-model.js";
+import type { CloudConfig } from "./cloud/config.js";
 
 export interface RuntimeConfig {
   readonly onModelCall?: ModelAdapter;
@@ -20,4 +21,10 @@ export interface RuntimeConfig {
     readonly eventBytes?: number;
     readonly eventCount?: number;
   };
+  /**
+   * Cloud Agents API destination. When set (or resolved from
+   * `NYLORUN_MODE=cloud` + URL + key), `openSession` uses HTTP/SSE instead of
+   * the local SessionHost. Local destination stays the default.
+   */
+  readonly cloud?: CloudConfig;
 }

@@ -42,3 +42,22 @@ export {
   type OpenSessionOptions,
   type SessionHandle,
 } from "./session/api.js";
+export {
+  AgentsApiClient,
+  AgentsApiError,
+  CURSOR_EXPIRED,
+  RUNTIME_RETIRED,
+  SESSION_BUSY,
+  createExecutorSurfaces,
+  createLazyCloudSessionHandle,
+  infoToWireUser,
+  isCloudDestination,
+  openCloudSession,
+  resolveCloudConfig,
+  shouldRerunOnRedelivery,
+  type CloudConfig,
+  type CloudSessionHandle,
+  type CommandOutcome,
+  type ExecutorSurfaces,
+  type HistoryResponse,
+} from "./cloud/index.js";
