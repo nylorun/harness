@@ -160,6 +160,24 @@ export function localSessions(options: { root: string }): ManagedSessionStore {
         .flatMap((session) => (session ? [sessionSummary(session)] : []))
         .sort((a, b) => b.startedAt - a.startedAt);
     },
+    async delete(agentId, sessionId) {
+      const operation = operations.then(async () => {
+        await check();
+        const target = pathFor(agentId, sessionId);
+        try {
+          await rm(target);
+          return true;
+        } catch (error) {
+          if (isMissing(error)) return false;
+          throw error;
+        }
+      });
+      operations = operation.then(
+        () => {},
+        () => {},
+      );
+      return operation;
+    },
     async close() {
       await operations;
       if (closed) return;

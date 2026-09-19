@@ -6,6 +6,9 @@ export {
   type AgentRouterOptions,
   type RuntimeActor,
   type ServeAgentsOptions,
+  type ServeAgentsCompatOptions,
+  type ServeAgentsFetchOptions,
+  type ServeAgentsFetch,
 } from "./server/host.js";
 export { SessionHost, type SubmitOptions } from "./sessions/host.js";
 export { memorySessions } from "./sessions/store.js";
@@ -30,3 +33,12 @@ export {
 } from "./model/http-model.js";
 export { agUiEvents } from "./server/ag-ui.js";
 export type { ModelFactoryOptions, ModelPreview } from "./model/defaults.js";
+export {
+  openSession,
+  listSessions,
+  getSession,
+  deleteSession,
+  setDefaultRuntime,
+  type OpenSessionOptions,
+  type SessionHandle,
+} from "./session/api.js";
