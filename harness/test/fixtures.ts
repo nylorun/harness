@@ -19,17 +19,22 @@ export const objectSchema = z.object({}).passthrough();
 
 /** Test-only convenience for existing pipeline assertions. All execution uses Promise run(). */
 export function testAgent(options: any = {}): any {
-  const builder = Agent({
+  let builder = Agent({
     id: options.id ?? "test",
     name: options.name ?? "Test",
     ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
     ...(options.outputSchema === undefined ? {} : { outputSchema: options.outputSchema }),
   });
-  const use = builder.use.bind(builder),
-    build = builder.build.bind(builder);
   let adapter: ModelAdapter;
   let built: any;
-  const fixture: any = builder;
+  const fixture: any = {
+    get id() {
+      return builder.id;
+    },
+    get name() {
+      return builder.name;
+    },
+  };
   fixture.with = (value: ModelAdapter) => {
     adapter = value;
     return fixture;
@@ -37,7 +42,7 @@ export function testAgent(options: any = {}): any {
   fixture.use = (id: any, handler?: any) => {
     const handle = handler ?? id;
     if (handle?.fixtureTools)
-      use({
+      builder = builder.use({
         id: typeof id === "string" ? id : "fixture",
         tools: { slot: "fixture-registration", items: handle.fixtureTools },
         middleware: async (request, next) => {
@@ -45,13 +50,13 @@ export function testAgent(options: any = {}): any {
           return handle(request, next);
         },
       });
-    else if (handler) use(id, handler);
-    else use(id);
+    else if (handler) builder = builder.use(id, handler);
+    else builder = builder.use(id);
     return fixture;
   };
   fixture.build = () => {
     if (built) return built;
-    const agent = build();
+    const agent = builder.build();
     return (built = {
       ...agent,
       run: (options: any = {}) => fixtureSession(agent, adapter, options),

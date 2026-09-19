@@ -13,6 +13,7 @@ describe("build", () => {
     expect(agent.id).toBe("test");
     expect(agent.name).toBe("Test");
     expect(agent.manifest).toEqual({
+      schemaVersion: 2,
       id: "test",
       name: "Test",
       capabilities: [
@@ -24,10 +25,12 @@ describe("build", () => {
     expect(Object.isFrozen(agent.manifest)).toBe(true);
   });
 
-  it("rejects middleware mutation after build()", () => {
-    const builder = testAgent();
+  it("allows .use() after build() to return a new agent (build is a no-op)", () => {
+    const builder = Agent({ id: "a", name: "A" });
     builder.build();
-    expect(() => builder.use("late", async (_request, next) => next())).toThrow(/after build/);
+    const next = builder.use("late", async (_request, nextFn) => nextFn());
+    expect(next).not.toBe(builder);
+    expect(next.build().manifest.capabilities.map((item) => item.id)).toContain("late");
   });
 
   it("rejects duplicate middleware ids", () => {
@@ -37,26 +40,27 @@ describe("build", () => {
     expect(() => builder.build()).toThrow(/Duplicate middleware id/);
   });
 
-  it("records a model declaration as middleware rather than manifest model state", () => {
+  it("does not project capability model into the published manifest (Runtime-owned)", () => {
     const agent = testAgent()
       .use({ id: "model", model: { id: "opus", controls: { temperature: 0.2 } } })
       .build();
     expect(agent.manifest).toEqual({
+      schemaVersion: 2,
       id: "test",
       name: "Test",
       capabilities: [
         {
           id: "model",
-          kind: "capability",
+          kind: "middleware",
           hasMiddleware: false,
-          model: { id: "opus", controls: { temperature: 0.2 } },
         },
       ],
     });
     expect(agent.manifest).not.toHaveProperty("model");
+    expect(agent.manifest.capabilities[0]).not.toHaveProperty("model");
   });
 
-  it("snapshots static declaration instructions, tools, and model onto middleware entries", () => {
+  it("snapshots static declaration instructions and tools without embedding model", () => {
     const agent = testAgent()
       .use({
         id: "notes",
@@ -72,12 +76,12 @@ describe("build", () => {
         hasMiddleware: false,
         instructions: ["Write notes."],
         tools: [{ name: "write_note", inputSchema: expect.any(Object) }],
-        model: { id: "opus", controls: { temperature: 0.2 } },
       },
     ]);
     expect(agent.manifest.capabilities[0]?.tools?.[0]?.inputSchema).toMatchObject({
       type: "object",
     });
+    expect(agent.manifest.capabilities[0]).not.toHaveProperty("model");
   });
 
   it("reports empty identity at build", () => {

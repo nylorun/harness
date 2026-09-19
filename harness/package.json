@@ -28,6 +28,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "import": "./dist/engine/index.js"
+    },
     "./model/adapters": {
       "types": "./dist/execution/model/adapters.d.ts",
       "import": "./dist/execution/model/adapters.js"

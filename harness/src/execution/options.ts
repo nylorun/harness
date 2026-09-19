@@ -1,5 +1,6 @@
 import type { AgentDefinition } from "../definition/agent-definition.js";
 import type { BoundToolDefinition } from "../definition/bound.js";
+import { checkCompatibility } from "../definition/compatibility.js";
 import { initializeExecutionState } from "./initial-state.js";
 import { canonical } from "../utils/canonical.js";
 import { HarnessError } from "../errors.js";
@@ -41,24 +42,43 @@ export function openExecution(
   readonly state: ExecutionState;
   readonly input: ReturnType<typeof normalizeInput>;
   readonly definitions: Map<string, BoundToolDefinition>;
+  readonly redelivery: boolean;
 } {
   const state =
     options.state === undefined
       ? initializeExecutionState(agent)
       : validateExecutionState(options.state);
-  if (
-    state.agentId !== agent.id ||
-    canonical(state.outputContract) !== canonical(agent.output?.schema.jsonSchema)
-  )
+  if (state.agentId !== agent.id)
     throw new HarnessError(
       "execution.incompatible",
       "Saved state requires the original compatible agent and outputSchema",
     );
-  if (
-    (state.status !== "paused" && state.plan !== undefined) ||
-    state.status === "active" ||
-    state.plan?.calls.some((call) => call.status === "active")
-  )
+  if (canonical(state.outputContract) !== canonical(agent.output?.schema.jsonSchema))
+    throw new HarnessError(
+      "execution.incompatible",
+      "Saved state requires the original compatible agent and outputSchema",
+    );
+  if (state.manifestHash) {
+    const compatibility = checkCompatibility(agent.manifest, state);
+    if (!compatibility.ok) throw compatibility.error;
+  }
+  const hasActive =
+    state.status === "active" || state.plan?.calls.some((call) => call.status === "active");
+  // Crash-continue: allow resume when a prior run left active work; mark redelivery.
+  if (hasActive && options.input && typeof options.input === "object" && "kind" in options.input) {
+    const kind = options.input.kind;
+    if (kind !== "continue" && kind !== "settle" && kind !== "approve" && kind !== "respond")
+      throw new HarnessError(
+        "execution.invalid-state",
+        "Execution was interrupted with possibly active effects. Resume with continue/settle/approve/respond; automatic replay is not supported.",
+      );
+  } else if (hasActive) {
+    throw new HarnessError(
+      "execution.invalid-state",
+      "Execution was interrupted with possibly active effects. Reconcile it before starting another run; automatic replay is not supported.",
+    );
+  }
+  if (state.status !== "paused" && state.plan !== undefined && !hasActive)
     throw new HarnessError(
       "execution.invalid-state",
       "Execution was interrupted with possibly active effects. Reconcile it before starting another run; automatic replay is not supported.",
@@ -74,5 +94,10 @@ export function openExecution(
       );
     definitions.set(call.invocationId, definition);
   }
-  return { state, input: normalizeInput(options.input), definitions };
+  return {
+    state,
+    input: normalizeInput(options.input),
+    definitions,
+    redelivery: Boolean(hasActive),
+  };
 }

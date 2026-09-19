@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Minor Changes
+
+- DX v5.6: Agent usable without `.build()`; `.use()` returns a new agent; top-level `tools` /
+  `instructions` (no `model` on `Agent({})`). `tool()` accepts `input` / `output` / `run`; plain
+  returns complete; export `ToolError`; tool `approval` / `effects`; `ctx.idempotencyKey`,
+  `redelivery`, `state`, `session`, `progress`, and durable waits (`ask` / `approve` / `sleep` /
+  `waitFor` / `step`).
+- Agent-as-JSON: versioned manifest (`schemaVersion: 2`), `toJSON` / `Agent.from`, `hashManifest`,
+  `checkCompatibility`; identity by manifest hash (not WeakMap-only). Session memory on
+  `ExecutionState.state`. Capability `model` is no longer projected into the published manifest.
+- Dynamics: `beforeModelCall` / `afterModelCall` with `Patch` / `Decision`; middleware deprecated
+  but kept through 1.0. Export `@nylorun/harness/engine` for run-from-checkpoint; `agent.run` is a
+  1.0 alias. Export type-only `Session` / `Turn` / `Event` / `Result`.
+
 ## 0.13.0-beta
 
 ### Minor Changes

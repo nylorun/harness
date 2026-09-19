@@ -20,7 +20,14 @@ describe("public interface boundaries", () => {
     const builder = Agent({ id: "a", name: "A" });
     const agent = builder.build();
     expect(builder.build()).toBe(agent);
-    expect(Reflect.ownKeys(agent).sort()).toEqual(["id", "manifest", "name", "run"]);
+    expect(Reflect.ownKeys(agent).sort()).toEqual([
+      "hash",
+      "id",
+      "manifest",
+      "name",
+      "run",
+      "toJSON",
+    ]);
     for (const field of ["registry", "middleware", "output"]) {
       expect(field in agent).toBe(false);
     }
@@ -60,7 +67,7 @@ describe("public interface boundaries", () => {
     });
     expect(result).toMatchObject({ status: "completed", output: { count: 2 } });
     expect(state.turnCount).toBe(0);
-    expect(() => createExecutionState({ ...agent })).toThrow(/original agent returned by Agent/);
+    expect(() => createExecutionState({ ...agent })).toThrow(/original agent/);
   });
 
   it("projects tool metadata before adapters run while keeping dispatch and events intact", async () => {

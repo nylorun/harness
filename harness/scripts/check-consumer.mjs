@@ -69,13 +69,17 @@ export function checkPackedConsumer(cache) {
     import { z } from 'zod';
     assert.equal('BuiltAgent' in api, false);
     const agent = api.Agent({ id: 'packed', name: 'Packed', outputSchema: z.object({ count: z.number() }) }).build();
-    assert.deepEqual(Object.keys(agent).sort(), ['id', 'manifest', 'name', 'run']);
+    assert.deepEqual(Object.keys(agent).sort(), ['hash', 'id', 'manifest', 'name', 'run', 'toJSON']);
+    assert.equal(typeof agent.hash, 'string');
+    assert.equal(agent.toJSON().schemaVersion, 2);
     const state = api.createExecutionState(agent);
     const result = await agent.run({ state, input: 'go', onModelCall: async () => ({ output: [{type: 'json', value: {count: 1}}] }) });
     assert.equal(result.status, 'completed');
     assert.deepEqual(result.output, {count: 1});
     assert.throws(() => api.createExecutionState({...agent}), /original agent/);
     await assert.rejects(import('@nylorun/harness/definition/agent-definition.js'), {code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'});
+    const engine = await import('@nylorun/harness/engine');
+    assert.equal(typeof engine.run, 'function');
   `,
   );
   execFileSync(process.execPath, [join(consumer, "check.mjs")], { cwd: consumer, stdio: "pipe" });

@@ -3,12 +3,21 @@ export type { AgentOptions } from "./definition/builder.js";
 export { HarnessError, isHarnessError } from "./errors.js";
 export type { HarnessErrorCode, HarnessErrorDetails, HarnessErrorOptions } from "./errors.js";
 export type { BuiltAgent } from "./types/agent.js";
-export { middleware, model, tool } from "./definition/helpers.js";
+export { capability, middleware, model, tool } from "./definition/helpers.js";
+export { ToolError, isToolError } from "./definition/tool-error.js";
 export { defineSchema } from "./definition/schema.js";
 export { preparedModel } from "./execution/model/prepared.js";
 export type { PreparedModelOptions } from "./execution/model/prepared.js";
+export { checkCompatibility } from "./definition/compatibility.js";
+export { hashManifest } from "./utils/hash.js";
+export type { Implementations } from "./definition/implementations.js";
 
-export type { AgentManifest, CapabilityManifest, ManifestTool } from "./types/manifest.js";
+export type {
+  AgentManifest,
+  CapabilityManifest,
+  ManifestTool,
+  ManifestSchemaVersion,
+} from "./types/manifest.js";
 export type {
   CapabilityDeclaration,
   CapabilityItems,
@@ -17,6 +26,7 @@ export type {
   StepRequest,
   StepResponse,
 } from "./types/middleware.js";
+export type { Patch, Decision, BeforeModelCallFn, AfterModelCallFn } from "./types/dynamics.js";
 export type {
   ModelCandidate,
   ModelControls,
@@ -100,4 +110,10 @@ export type {
   ToolOutcome,
   ToolResult,
   ToolValidationFailureDetails,
+  ToolEffects,
+  ToolApproval,
+  ToolRunResult,
+  SessionStateBag,
 } from "./types/tool.js";
+
+export type { Session, Turn, Event, Result, InputAccepted, AgentIdentity } from "./types/client.js";

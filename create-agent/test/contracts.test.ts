@@ -18,9 +18,9 @@ void adapter;
 agentContract(
   "Harness",
   (kind) => {
-    const builder = Agent({ id: "echo", name: "Echo" });
+    let builder = Agent({ id: "echo", name: "Echo" });
     if (kind)
-      builder.use({
+      builder = builder.use({
         id: "interaction",
         tools: [
           tool({

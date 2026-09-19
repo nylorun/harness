@@ -5,11 +5,19 @@ import type {
   MiddlewareContributions,
   StepMiddleware,
 } from "../types/middleware.js";
+import type { AfterModelCallFn, BeforeModelCallFn } from "../types/dynamics.js";
 import type { ModelDirective } from "../types/model.js";
+
+export interface CompiledCapability {
+  readonly bound: BoundMiddleware;
+  readonly beforeModelCall?: BeforeModelCallFn<any>;
+  readonly afterModelCall?: AfterModelCallFn<any>;
+  readonly middleware?: StepMiddleware<any>;
+}
 
 export function compileDeclaration<State>(
   declaration: CapabilityDeclaration<State>,
-): BoundMiddleware {
+): CompiledCapability {
   const tools = copyItems(declaration.tools, declaration.id);
   const instructions = copyItems(declaration.instructions, declaration.id);
   const model = declaration.model;
@@ -21,11 +29,18 @@ export function compileDeclaration<State>(
     return declaration.middleware ? declaration.middleware(request as never, next) : next();
   };
   return {
-    id: declaration.id,
-    handle,
-    hasMiddleware: declaration.middleware !== undefined,
-    tools: tools?.items,
-    ...(contributions === undefined ? {} : { contributions }),
+    bound: {
+      id: declaration.id,
+      handle,
+      hasMiddleware: declaration.middleware !== undefined,
+      tools: tools?.items,
+      ...(contributions === undefined ? {} : { contributions }),
+      ...(declaration.beforeModelCall ? { beforeModelCall: true } : {}),
+      ...(declaration.afterModelCall ? { afterModelCall: true } : {}),
+    },
+    ...(declaration.beforeModelCall ? { beforeModelCall: declaration.beforeModelCall } : {}),
+    ...(declaration.afterModelCall ? { afterModelCall: declaration.afterModelCall } : {}),
+    ...(declaration.middleware ? { middleware: declaration.middleware } : {}),
   };
 }
 
@@ -47,21 +62,14 @@ function snapshotContributions(
             }),
           ),
         );
-  const snapModel = model === undefined ? undefined : snapshotModel(model);
-  if (snapInstructions === undefined && snapTools === undefined && snapModel === undefined) {
+  // Model is Runtime-owned for the published manifest; still allow local middleware select().
+  void model;
+  if (snapInstructions === undefined && snapTools === undefined) {
     return undefined;
   }
   return Object.freeze({
     ...(snapInstructions === undefined ? {} : { instructions: snapInstructions }),
     ...(snapTools === undefined ? {} : { tools: snapTools }),
-    ...(snapModel === undefined ? {} : { model: snapModel }),
-  });
-}
-
-function snapshotModel(model: ModelDirective): Pick<ModelDirective, "id" | "controls"> {
-  return Object.freeze({
-    ...(model.id === undefined ? {} : { id: model.id }),
-    ...(model.controls === undefined ? {} : { controls: Object.freeze({ ...model.controls }) }),
   });
 }
 

@@ -84,6 +84,11 @@ export async function execute(
           middleware: agent.middleware,
           invoke: options.onModelCall,
           registry: agent.registry,
+          definition: agent,
+          sessionState: invocation.sessionBag,
+          recordAfterDynamics: async () => {
+            await record();
+          },
         },
         state: snapshot,
         executionId: invocation.state.executionId,

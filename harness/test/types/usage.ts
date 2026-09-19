@@ -10,13 +10,14 @@ import {
   type ExecutionState,
   type RunResult,
   type StepRequest,
+  type Session,
 } from "../../src/index.js";
-// @ts-expect-error Session objects are no longer exported.
-import type { Session } from "../../src/index.js";
 // @ts-expect-error Private binding implementation is not public.
 import { bindAgent } from "../../src/index.js";
 
 type Info = { tenantId: string };
+const _sessionTypeCheck: Session | undefined = undefined;
+void _sessionTypeCheck;
 const schema = z.object({ count: z.number() });
 const capability: CapabilityDeclaration<Info> = {
   id: "tools",

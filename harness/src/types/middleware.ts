@@ -7,6 +7,7 @@ import type {
 } from "./model.js";
 import type { InputEvent, TranscriptEntry } from "./transcript.js";
 import type { ContextItem, JsonObject, Tripwire } from "./shared.js";
+import type { AfterModelCallFn, BeforeModelCallFn } from "./dynamics.js";
 import type { Interaction, ToolDefinition, ToolResult } from "./tool.js";
 
 interface StepRequestBase {
@@ -78,8 +79,15 @@ export interface CapabilityDeclaration<Info = unknown> {
   readonly id: string;
   readonly tools?: CapabilityItems<ToolDefinition<any, Info, any>>;
   readonly instructions?: CapabilityItems<string>;
+  /**
+   * @deprecated Model resolution is Runtime-owned. Not projected into the harness manifest.
+   * Kept for local middleware composition through 1.0.
+   */
   readonly model?: ModelDirective;
+  /** @deprecated Prefer beforeModelCall / afterModelCall. Kept through 1.0. */
   readonly middleware?: StepMiddleware<Info>;
+  readonly beforeModelCall?: BeforeModelCallFn<Info>;
+  readonly afterModelCall?: AfterModelCallFn<Info>;
 }
 
 export interface MiddlewareContributions {

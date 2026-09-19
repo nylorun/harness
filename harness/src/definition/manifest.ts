@@ -14,6 +14,7 @@ export function createManifest(input: {
 }): AgentManifest {
   const capabilities = input.middleware.map((item) => projectCapability(item));
   return deepFreeze({
+    schemaVersion: 2 as const,
     id: input.id,
     name: input.name,
     ...(input.outputSchema === undefined
@@ -33,13 +34,16 @@ function projectCapability(item: BoundMiddleware): CapabilityManifest {
       ? {}
       : { instructions: contributions.instructions }),
     ...(item.tools === undefined ? {} : { tools: item.tools.map((tool) => projectTool(tool)) }),
-    ...(contributions?.model === undefined ? {} : { model: contributions.model }),
+    ...(item.beforeModelCall ? { beforeModelCall: true } : {}),
+    ...(item.afterModelCall ? { afterModelCall: true } : {}),
+    // Deliberately omit capability.model from new manifests (Runtime-owned).
   };
 }
 
 function capabilityKind(item: BoundMiddleware): CapabilityManifest["kind"] {
   if (item.id === "agent") return "agent";
-  if (item.contributions !== undefined) return "capability";
+  if (item.contributions !== undefined || item.beforeModelCall || item.afterModelCall)
+    return "capability";
   return "middleware";
 }
 
