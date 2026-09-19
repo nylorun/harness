@@ -41,6 +41,7 @@ export interface SessionStore {
     session: StoredSession,
   ): Promise<void>;
   list(agentId: string): Promise<readonly SessionSummary[]>;
+  delete?(agentId: string, sessionId: string): Promise<boolean>;
 }
 export interface ManagedSessionStore extends SessionStore {
   close(): Promise<void>;
@@ -75,6 +76,9 @@ export function memorySessions(): SessionStore {
         .filter((session) => session.agentId === agentId)
         .map(sessionSummary)
         .sort((a, b) => b.startedAt - a.startedAt);
+    },
+    async delete(agentId, sessionId) {
+      return documents.delete(key(agentId, sessionId));
     },
   };
 }

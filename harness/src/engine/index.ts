@@ -42,7 +42,10 @@ export async function run<Info = unknown, Output = string>(
 /** Create a fresh checkpoint bound to a manifest hash. */
 export function createEngineState(
   binding: EngineBinding,
-  options?: { readonly executionId?: string },
+  options?: {
+    readonly executionId?: string;
+    readonly state?: import("../types/shared.js").JsonObject;
+  },
 ): ExecutionState {
   const definition = resolveDefinition(binding);
   return initializeExecutionState(definition, options);

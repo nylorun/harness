@@ -116,6 +116,19 @@ export type ObserveEvent =
       readonly attributes: { readonly args: JsonValue };
     }
   | {
+      readonly type: "tool.progress";
+      readonly executionId: string;
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly inputId?: string;
+      readonly toolName: string;
+      readonly callId: string;
+      readonly invocationId: string;
+      readonly middlewareId: string;
+      readonly slot: string;
+      readonly attributes: { readonly message: string; readonly data?: JsonObject };
+    }
+  | {
       readonly type: "tool.completed";
       readonly executionId: string;
       readonly turnId: string;

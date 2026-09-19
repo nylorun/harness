@@ -113,7 +113,16 @@ export async function dispatchPlan(invocation: Invocation): Promise<"paused" | u
             ...(redelivering || call.status === "active" ? { redelivery: true } : {}),
             state: stateApi,
             session: { id: invocation.state.executionId },
-            progress(_message: string, _data?: import("../types/shared.js").JsonObject) {},
+            progress(message: string, data?: import("../types/shared.js").JsonObject) {
+              observe({
+                type: "tool.progress",
+                ...eventIds,
+                attributes: {
+                  message,
+                  ...(data === undefined ? {} : { data }),
+                },
+              });
+            },
             async ask(prompt, opts) {
               if (call.resume?.kind === "response") return call.resume.value as JsonValue;
               throw new WaitSignal({
