@@ -6,7 +6,7 @@ export type CloudCredentials = {
 };
 
 export type CloudConfig = {
-  /** Project regional base URL, e.g. https://acme.nylorun.app */
+  /** Project regional base URL, e.g. https://sandbox.nylorun.dev */
   readonly baseUrl: string;
   readonly credentials: CloudCredentials;
   /** Optional fetch override (tests / custom runtimes). */
@@ -28,6 +28,14 @@ export type CloudEnv = {
   readonly NYLORUN_QUIET?: string;
 };
 
+/**
+ * Resolve Cloud destination config.
+ *
+ * - Explicit `overrides.baseUrl` + `overrides.credentials` always win.
+ * - `NYLORUN_MODE=local` forces local (no cloud) unless overrides supply both URL and credentials.
+ * - Otherwise: URL (`NYLORUN_URL` / `NYLORUN_CLOUD_URL`) + credential enable cloud
+ *   (`NYLORUN_MODE=cloud` optional; DX default when URL+key are set).
+ */
 export function resolveCloudConfig(
   env: CloudEnv = typeof process === "undefined" ? {} : process.env,
   overrides: Partial<CloudConfig> = {},
@@ -42,16 +50,17 @@ export function resolveCloudConfig(
     };
 
   const mode = (env.NYLORUN_MODE ?? "").toLowerCase();
+  if (mode === "local") return undefined;
+
   const baseUrl = trimSlash(
     overrides.baseUrl ?? env.NYLORUN_URL ?? env.NYLORUN_CLOUD_URL ?? "",
   );
-  const credentials =
-    overrides.credentials ?? resolveCredentials(env);
+  const credentials = overrides.credentials ?? resolveCredentials(env);
   if (!baseUrl || !credentials) return undefined;
-  if (mode && mode !== "cloud" && !overrides.baseUrl) return undefined;
-  // Explicit URL+key without mode still enables cloud when caller passes config,
-  // or when NYLORUN_MODE=cloud.
-  if (mode !== "cloud" && !overrides.baseUrl) return undefined;
+
+  // MODE=cloud is sufficient signal; URL+key without MODE also enables cloud (DX R1).
+  if (mode && mode !== "cloud") return undefined;
+
   return {
     baseUrl,
     credentials,

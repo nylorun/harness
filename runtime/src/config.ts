@@ -22,9 +22,10 @@ export interface RuntimeConfig {
     readonly eventCount?: number;
   };
   /**
-   * Cloud Agents API destination. When set (or resolved from
-   * `NYLORUN_MODE=cloud` + URL + key), `openSession` uses HTTP/SSE instead of
-   * the local SessionHost. Local destination stays the default.
+   * Cloud Agents API destination. When set (or resolved from `NYLORUN_URL` /
+   * `NYLORUN_CLOUD_URL` + credential, optionally `NYLORUN_MODE=cloud`),
+   * `openSession` uses HTTP/SSE instead of the local SessionHost.
+   * `NYLORUN_MODE=local` forces local. Local stays the default when URL/key unset.
    */
   readonly cloud?: CloudConfig;
 }

@@ -2,6 +2,7 @@ import {
   CURSOR_EXPIRED,
   RUNTIME_RETIRED,
   SESSION_BUSY,
+  UNAUTHORIZED,
   type CommandRejected,
 } from "./types.js";
 
@@ -41,6 +42,10 @@ export class AgentsApiError extends Error {
 
   get isRuntimeRetired(): boolean {
     return this.code === RUNTIME_RETIRED;
+  }
+
+  get isUnauthorized(): boolean {
+    return this.code === UNAUTHORIZED || this.status === 401;
   }
 }
 

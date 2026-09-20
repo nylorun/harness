@@ -1,11 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { Agent } from "@nylorun/harness";
 import {
   AgentsApiClient,
   AgentsApiError,
   CURSOR_EXPIRED,
   RUNTIME_RETIRED,
+  SANDBOX_AGENTS_API_URL,
   SESSION_BUSY,
+  UNAUTHORIZED,
   createExecutorSurfaces,
   createLazyCloudSessionHandle,
   infoToWireUser,
@@ -57,7 +59,7 @@ const cloudBase = {
 };
 
 describe("Agents API cloud client contracts", () => {
-  it("resolveCloudConfig requires NYLORUN_MODE=cloud plus URL and key", () => {
+  it("resolveCloudConfig enables cloud from URL+key (MODE=cloud optional; MODE=local forces local)", () => {
     expect(
       resolveCloudConfig({
         NYLORUN_MODE: "cloud",
@@ -68,17 +70,26 @@ describe("Agents API cloud client contracts", () => {
       baseUrl: "https://acme.nylorun.app",
       credentials: { mode: "server_key", token: "nyl_sk_x" },
     });
+    // DX: URL + secret key alone selects Cloud destination.
     expect(
       resolveCloudConfig({
+        NYLORUN_URL: SANDBOX_AGENTS_API_URL,
+        NYLORUN_SECRET_KEY: "nyl_sk_x",
+      }),
+    ).toMatchObject({
+      baseUrl: SANDBOX_AGENTS_API_URL,
+      credentials: { mode: "server_key", token: "nyl_sk_x" },
+    });
+    expect(
+      resolveCloudConfig({
+        NYLORUN_MODE: "local",
         NYLORUN_URL: "https://acme.nylorun.app",
         NYLORUN_SECRET_KEY: "nyl_sk_x",
       }),
     ).toBeUndefined();
     expect(
       resolveCloudConfig({
-        NYLORUN_MODE: "local",
-        NYLORUN_URL: "https://acme.nylorun.app",
-        NYLORUN_SECRET_KEY: "nyl_sk_x",
+        NYLORUN_URL: SANDBOX_AGENTS_API_URL,
       }),
     ).toBeUndefined();
   });
@@ -117,6 +128,38 @@ describe("Agents API cloud client contracts", () => {
       user: { id: "u_1", tenantId: "acme" },
       state: { customer: { name: "Ada" } },
     });
+  });
+
+  it("throws unauthorized on sandbox-shaped 401 auth rejection", async () => {
+    const { fetchImpl } = mockFetch(() =>
+      Response.json(
+        {
+          status: "rejected",
+          code: UNAUTHORIZED,
+          message: "Invalid or missing server key",
+        },
+        { status: 401 },
+      ),
+    );
+    const client = new AgentsApiClient({ ...cloudBase, fetch: fetchImpl });
+    await expect(
+      client.registerAgent("probe", { id: "probe" }),
+    ).rejects.toMatchObject({
+      code: UNAUTHORIZED,
+      status: 401,
+      message: "Invalid or missing server key",
+    });
+    await expect(
+      client.postMessage("s1", "hi"),
+    ).rejects.toMatchObject({
+      code: UNAUTHORIZED,
+      status: 401,
+    });
+    const err = new AgentsApiError("Invalid or missing server key", {
+      code: UNAUTHORIZED,
+      status: 401,
+    });
+    expect(err.isUnauthorized).toBe(true);
   });
 
   it("accepts message commands and surfaces session_busy without steering", async () => {
@@ -404,7 +447,7 @@ describe("Agents API cloud client contracts", () => {
     expect(rejected.error?.code).toBe(RUNTIME_RETIRED);
   });
 
-  it("AgentsApiError classifies busy and cursor codes", () => {
+  it("AgentsApiError classifies busy, cursor, and unauthorized codes", () => {
     const busy = new AgentsApiError("busy", {
       code: SESSION_BUSY,
       status: 409,
@@ -415,5 +458,10 @@ describe("Agents API cloud client contracts", () => {
       status: 410,
     });
     expect(expired.isCursorExpired).toBe(true);
+    const unauthorized = new AgentsApiError("nope", {
+      code: UNAUTHORIZED,
+      status: 401,
+    });
+    expect(unauthorized.isUnauthorized).toBe(true);
   });
 });

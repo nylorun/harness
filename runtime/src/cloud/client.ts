@@ -19,7 +19,7 @@ import type {
   RegisterAgentRequest,
   SessionCommand,
 } from "./types.js";
-import { CURSOR_EXPIRED } from "./types.js";
+import { CURSOR_EXPIRED, UNAUTHORIZED } from "./types.js";
 
 export type AgentsApiClientOptions = CloudConfig;
 
@@ -84,6 +84,19 @@ export class AgentsApiClient {
       command,
     );
     const body = (await readJson(response)) as CommandOutcome | CommandRejected;
+    // Auth failures throw (sandbox: 401 + code unauthorized). Busy/retired return.
+    if (response.status === 401 || response.status === 403) {
+      throw rejectedFromBody(
+        (isRejected(body)
+          ? body
+          : {
+              status: "rejected",
+              code: UNAUTHORIZED,
+              message: response.statusText || "Unauthorized",
+            }) as CommandRejected,
+        response.status,
+      );
+    }
     if (
       response.status === 409 ||
       (body &&
@@ -347,13 +360,14 @@ export class AgentsApiClient {
     body?: unknown,
     options?: { readonly accept?: string; readonly signal?: AbortSignal },
   ): Promise<Response> {
+    // Canonical header names (HTTP is case-insensitive; sandbox expects Bearer).
     const headers: Record<string, string> = {
-      authorization: `Bearer ${this.token}`,
-      accept: options?.accept ?? "application/json",
+      Authorization: `Bearer ${this.token}`,
+      Accept: options?.accept ?? "application/json",
     };
     let payload: string | undefined;
     if (body !== undefined) {
-      headers["content-type"] = "application/json";
+      headers["Content-Type"] = "application/json";
       payload = JSON.stringify(body);
     }
     return this.fetchImpl(`${this.baseUrl}${path}`, {

@@ -19,7 +19,9 @@ export type {
 export {
   CURSOR_EXPIRED,
   RUNTIME_RETIRED,
+  SANDBOX_AGENTS_API_URL,
   SESSION_BUSY,
+  UNAUTHORIZED,
 } from "./types.js";
 export { AgentsApiError, rejectedFromBody } from "./errors.js";
 export {

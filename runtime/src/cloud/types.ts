@@ -1,7 +1,11 @@
 /**
  * Proposed Agents API wire types (Cloud v1.0).
- * Source: docs/agents-api.openapi.yaml — freeze with Runtime in phase 0.
+ * Source: live sandbox OpenAPI (https://sandbox.nylorun.dev/openapi.json)
+ * + docs/agents-api.openapi.yaml — freeze with Runtime in phase 0.
  */
+
+/** Mumbai sandbox Agents API host (spike). */
+export const SANDBOX_AGENTS_API_URL = "https://sandbox.nylorun.dev";
 
 export type AgentsApiAuthMode = "server_key" | "end_user_jwt" | "executor";
 
@@ -129,3 +133,5 @@ export type AgentsApiSseEvent = {
 export const SESSION_BUSY = "session_busy";
 export const RUNTIME_RETIRED = "runtime_retired";
 export const CURSOR_EXPIRED = "cursor_expired";
+/** Live sandbox auth rejection (`401` + CommandRejected). */
+export const UNAUTHORIZED = "unauthorized";

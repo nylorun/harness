@@ -1,3 +1,4 @@
+import { resolveCloudConfig } from "../cloud/config.js";
 import type { Runtime } from "../server/host.js";
 
 let defaultRuntime: Runtime | undefined;
@@ -26,12 +27,10 @@ function maybeBanner(): void {
   if (bannerShown || typeof process === "undefined") return;
   if (process.env.NYLORUN_QUIET === "1") return;
   bannerShown = true;
-  const mode = (process.env.NYLORUN_MODE ?? "").toLowerCase();
-  if (mode === "cloud") {
-    const url =
-      process.env.NYLORUN_URL ?? process.env.NYLORUN_CLOUD_URL ?? "unset";
+  const cloud = resolveCloudConfig(process.env);
+  if (cloud) {
     console.info(
-      `nylorun ▸ cloud runtime · Agents API ${url} · loop runs in Nylorun Cloud (proposed wire)`,
+      `nylorun ▸ cloud runtime · Agents API ${cloud.baseUrl} · loop runs in Nylorun Cloud (proposed wire)`,
     );
     return;
   }
