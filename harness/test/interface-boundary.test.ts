@@ -1,3 +1,4 @@
+import { runAgent } from "./run-agent.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -20,14 +21,7 @@ describe("public interface boundaries", () => {
     const builder = Agent({ id: "a", name: "A" });
     const agent = builder.build();
     expect(builder.build()).toBe(agent);
-    expect(Reflect.ownKeys(agent).sort()).toEqual([
-      "hash",
-      "id",
-      "manifest",
-      "name",
-      "run",
-      "toJSON",
-    ]);
+    expect(Reflect.ownKeys(agent).sort()).toEqual(["hash", "id", "manifest", "name", "toJSON"]);
     for (const field of ["registry", "middleware", "output"]) {
       expect(field in agent).toBe(false);
     }
@@ -36,7 +30,9 @@ describe("public interface boundaries", () => {
     const decorated = Object.assign(agent, { close });
     const state = createExecutionState(decorated);
     // Extracted run does not depend on a public receiver holding definitions.
-    const run = agent.run;
+    expect("run" in agent).toBe(false);
+    const run = (options: import("../src/types/execution.js").RunOptions) =>
+      runAgent(agent, options);
     expect((await run({ state, input: "go", onModelCall: async () => "ok" })).status).toBe(
       "completed",
     );
@@ -60,7 +56,7 @@ describe("public interface boundaries", () => {
     expect(state).not.toHaveProperty("executionVersion");
     expectDataOnly(state);
     expect(createExecutionState(agent).executionId).not.toBe(state.executionId);
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       state,
       input: "go",
       onModelCall: async () => ({ output: [{ type: "json", value: { count: 2 } }] }),
@@ -91,7 +87,7 @@ describe("public interface boundaries", () => {
       .build();
     const requests: ModelRequest[] = [];
     const events: ExecutionEvent[] = [];
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       input: "double 3",
       onEvent: (event) => {
         events.push(event);

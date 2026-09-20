@@ -1,3 +1,4 @@
+import { runAgent } from "./run-agent.js";
 import { z } from "zod";
 import {
   createExecutionState,
@@ -96,46 +97,44 @@ function fixtureSession(agent: BuiltAgent, adapter: ModelAdapter, options: any):
     },
     input(input: any, controls: any = {}) {
       const before = state?.transcript.length ?? 0;
-      const completed = agent
-        .run({
-          state,
-          input,
-          info: options.info ?? {
-            userId: options.userId,
-            ...(options.context === undefined ? {} : { context: options.context }),
-          },
-          signal: controls.signal ?? controller.signal,
-          onModelCall: options.onModelCall ?? adapter,
-          onEvent: (event) => {
-            options.observer?.(event);
-            for (const listener of observers) listener(event);
-          },
-        })
-        .then((result) => {
-          state = result.state;
-          const events: any[] = result.state.transcript.slice(before).flatMap((entry: any) =>
-            entry.kind === "input"
-              ? [{ type: "input", event: entry.event, turnId: entry.turnId }]
-              : entry.kind === "candidate"
-                ? [
-                    {
-                      type: "candidate",
-                      candidate: entry.candidate,
-                      turnId: entry.turnId,
-                      stepId: entry.stepId,
-                    },
-                  ]
-                : entry.kind === "final"
-                  ? [{ type: "final", output: entry.output, turnId: entry.turnId }]
-                  : [],
-          );
-          if (result.status === "failed") events.push({ type: "tripwire", tripwire: result.error });
-          if (result.status === "paused")
-            for (const call of result.pending)
-              if (call.interaction)
-                events.push({ type: "interaction.required", interaction: call.interaction });
-          return { status: result.status === "paused" ? "waiting" : result.status, events };
-        });
+      const completed = runAgent(agent, {
+        state,
+        input,
+        info: options.info ?? {
+          userId: options.userId,
+          ...(options.context === undefined ? {} : { context: options.context }),
+        },
+        signal: controls.signal ?? controller.signal,
+        onModelCall: options.onModelCall ?? adapter,
+        onEvent: (event) => {
+          options.observer?.(event);
+          for (const listener of observers) listener(event);
+        },
+      }).then((result) => {
+        state = result.state;
+        const events: any[] = result.state.transcript.slice(before).flatMap((entry: any) =>
+          entry.kind === "input"
+            ? [{ type: "input", event: entry.event, turnId: entry.turnId }]
+            : entry.kind === "candidate"
+              ? [
+                  {
+                    type: "candidate",
+                    candidate: entry.candidate,
+                    turnId: entry.turnId,
+                    stepId: entry.stepId,
+                  },
+                ]
+              : entry.kind === "final"
+                ? [{ type: "final", output: entry.output, turnId: entry.turnId }]
+                : [],
+        );
+        if (result.status === "failed") events.push({ type: "tripwire", tripwire: result.error });
+        if (result.status === "paused")
+          for (const call of result.pending)
+            if (call.interaction)
+              events.push({ type: "interaction.required", interaction: call.interaction });
+        return { status: result.status === "paused" ? "waiting" : result.status, events };
+      });
       last = completed;
       return { completed };
     },

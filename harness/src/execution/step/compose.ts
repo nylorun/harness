@@ -1,3 +1,4 @@
+import { HostSuspension } from "../host-suspension.js";
 import type { BoundMiddleware } from "../../definition/bound.js";
 import type { StepResponse } from "../../types/middleware.js";
 import type { ObserveEmit } from "../observe.js";
@@ -64,6 +65,7 @@ export async function runMiddleware(
         }
       }
 
+      if (handlerError instanceof HostSuspension) throw handlerError;
       if (handlerError) {
         if (
           nextCalledTwice ||

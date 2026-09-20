@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/harness",
-  "version": "0.13.0-beta",
+  "version": "0.14.0-beta.3",
   "description": "Nylorun's TypeScript agent runtime. See github.com/nylorun/harness.",
   "type": "module",
   "license": "Apache-2.0",
@@ -35,13 +35,26 @@
     "./model/adapters": {
       "types": "./dist/execution/model/adapters.d.ts",
       "import": "./dist/execution/model/adapters.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "import": "./dist/contracts/index.js"
+    },
+    "./define": {
+      "types": "./dist/define/index.d.ts",
+      "import": "./dist/define/index.js"
+    },
+    "./compatibility": {
+      "types": "./dist/compatibility/index.d.ts",
+      "import": "./dist/compatibility/index.js"
     }
   },
   "files": [
     "dist",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "HOST_CONTRACT.md"
   ],
   "sideEffects": false,
   "publishConfig": {
@@ -71,6 +84,9 @@
     "zod": "^4.1.12"
   },
   "peerDependencies": {
-    "zod": "^4.1.12"
+    "zod": "^4.5.4"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.8.0"
   }
 }

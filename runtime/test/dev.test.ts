@@ -12,7 +12,7 @@ const processes: ChildProcess[] = [];
 afterEach(async () => {
   for (const child of processes.splice(0)) child.kill("SIGKILL");
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
 });
 async function fixture(app = true, studio = true) {
@@ -23,19 +23,20 @@ async function fixture(app = true, studio = true) {
     await mkdir(join(root, "node_modules/tsx"), { recursive: true });
     await writeFile(
       join(root, "node_modules/tsx/package.json"),
-      '{"type":"module","exports":{"./cli":"./cli.js"}}'
+      '{"type":"module","exports":{"./cli":"./cli.js"}}',
     );
     await writeFile(
       join(root, "node_modules/tsx/cli.js"),
       `
-import {createServer} from 'node:http';
 import {writeFileSync} from 'node:fs';
-writeFileSync('app.json', JSON.stringify({args:process.argv.slice(2),dev:process.env.NYLORUN_DEV}));
-const server=createServer((req,res)=>{res.end('ok');});
-server.listen(Number(process.env.PORT));
-process.on('SIGTERM',()=>{writeFileSync('app-stopped','yes');server.close(()=>process.exit(0));});
-process.on('SIGINT',()=>{server.close(()=>process.exit(0));});
-`
+import {pathToFileURL} from 'node:url';
+writeFileSync('app.json', JSON.stringify({args:process.argv.slice(2)}));
+process.on('SIGTERM',()=>writeFileSync('app-stopped','yes'));
+try { await import(pathToFileURL(process.argv[4]).href); }
+catch(error) { console.error(error.message); process.exitCode=1; }
+finally { writeFileSync('app-stopped','yes'); }
+
+`,
     );
   }
   if (studio) {
@@ -44,7 +45,7 @@ process.on('SIGINT',()=>{server.close(()=>process.exit(0));});
     });
     await writeFile(
       join(root, "node_modules/@nylorun/studio/package.json"),
-      '{"type":"module","exports":"./index.js"}'
+      '{"type":"module","exports":"./index.js"}',
     );
     await writeFile(
       join(root, "node_modules/@nylorun/studio/index.js"),
@@ -54,9 +55,14 @@ export async function startStudio(options) {
   writeFileSync('studio.json',JSON.stringify(options));
   const timer=setInterval(()=>{},1000);
   return {address:'http://localhost:4161',close:async()=>{clearInterval(timer);writeFileSync('studio-stopped','yes');}};
-}`
+}`,
     );
   }
+  await mkdir(join(root, "agents"), { recursive: true });
+  await writeFile(
+    join(root, "agents/index.ts"),
+    `import { Agent } from ${JSON.stringify(new URL("../../harness/dist/index.js", import.meta.url).href)}; export const agents=[Agent({id:"test",name:"Test"}).build()];`,
+  );
   return root;
 }
 async function port() {
@@ -74,11 +80,11 @@ function run(
   root: string,
   args: string[],
   env: NodeJS.ProcessEnv = {},
-  command = "dev"
+  command = "dev",
 ) {
   const child = spawn(process.execPath, [cli, command, ...args], {
     cwd: root,
-    env: { ...process.env, ...env },
+    env: { ...process.env, NYLORUN_DEV_MODEL: "fixture", ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   processes.push(child);
@@ -86,7 +92,7 @@ function run(
   child.stdout?.on("data", (chunk) => (output += String(chunk)));
   child.stderr?.on("data", (chunk) => (output += String(chunk)));
   const closed = new Promise<number | null>((resolve) =>
-    child.once("close", (code) => resolve(code))
+    child.once("close", (code) => resolve(code)),
   );
   return { child, closed, output: () => output };
 }
@@ -110,22 +116,23 @@ it("runs local tsx with development enabled, waits for readiness, and closes bot
   const task = run(root, ["--no-open"], { PORT: String(appPort) });
   await wait(async () => {
     expect(
-      JSON.parse(await readFile(join(root, "studio.json"), "utf8"))
+      JSON.parse(await readFile(join(root, "studio.json"), "utf8")),
     ).toEqual({
-      agentServerUrl: `http://localhost:${appPort}/agents`,
+      runtimeUrl: `http://127.0.0.1:${appPort}`,
+      serverKey: expect.any(String),
       open: false,
     });
     expect(JSON.parse(await readFile(join(root, "app.json"), "utf8"))).toEqual({
       args: [
         "watch",
+        "--clear-screen=false",
         fileURLToPath(new URL("../dist/dev-entry.js", import.meta.url)),
-        "src/index.ts",
+        "--no-open",
       ],
-      dev: "1",
     });
   });
   task.child.kill("SIGTERM");
-  expect(await task.closed).toBe(143);
+  expect(await task.closed).toBe(0);
   expect(await readFile(join(root, "app-stopped"), "utf8")).toBe("yes");
   expect(await readFile(join(root, "studio-stopped"), "utf8")).toBe("yes");
 });
@@ -135,12 +142,13 @@ it("runs without a Studio dependency and accepts both flags", async () => {
     PORT: String(await port()),
   });
   await wait(async () => {
-    expect(JSON.parse(await readFile(join(root, "app.json"), "utf8")).dev).toBe(
-      "1"
-    );
+    expect(
+      JSON.parse(await readFile(join(root, "app.json"), "utf8")).args,
+    ).toContain("--no-studio");
+    expect(task.output()).toContain("Local project ready");
   });
   task.child.kill("SIGINT");
-  expect(await task.closed).toBe(130);
+  expect(await task.closed).toBe(0);
   await expect(readFile(join(root, "studio.json"))).rejects.toThrow();
 });
 it.each([
@@ -157,7 +165,7 @@ it.each([
     expect(await task.closed).toBe(1);
     expect(task.output()).toContain(message);
     await expect(readFile(join(root, "app.json"))).rejects.toThrow();
-  }
+  },
 );
 it("propagates an application failure without waiting for readiness timeout", async () => {
   const root = await fixture();
@@ -170,55 +178,67 @@ it("stops the application when Studio fails", async () => {
   const root = await fixture();
   await writeFile(
     join(root, "node_modules/@nylorun/studio/index.js"),
-    "export async function startStudio(){throw new Error('fixture Studio failure')}"
+    "export async function startStudio(){throw new Error('fixture Studio failure')}",
   );
   const task = run(root, [], { PORT: String(await port()) });
   expect(await task.closed).toBe(1);
   expect(task.output()).toContain("fixture Studio failure");
   expect(await readFile(join(root, "app-stopped"), "utf8")).toBe("yes");
 });
-it("times out an unready application and shuts it down", async () => {
+it("rejects an occupied Runtime port and shuts down", async () => {
   const root = await fixture();
-  await writeFile(
-    join(root, "node_modules/tsx/cli.js"),
-    "setInterval(()=>{},1000)"
+  const occupied = createServer();
+  await new Promise<void>((resolve) =>
+    occupied.listen(0, "127.0.0.1", resolve),
   );
-  const task = run(root, [], { PORT: String(await port()) });
-  expect(await task.closed).toBe(1);
-  expect(task.output()).toContain("within 20 seconds");
-}, 25_000);
+  try {
+    const address = occupied.address() as { port: number };
+    const task = run(root, [], { PORT: String(address.port) });
+    expect(await task.closed).toBe(1);
+    expect(task.output()).toContain("EADDRINUSE");
+    await expect(readFile(join(root, "studio.json"))).rejects.toThrow();
+  } finally {
+    await new Promise<void>((resolve) => occupied.close(() => resolve()));
+  }
+});
 
 it.each([undefined, "custom.js"])(
-  "starts an exported app with .env loaded before import (%s)",
+  "starts an exported registry with .env loaded before import (%s)",
   async (entry) => {
     const root = await fixture(false, false);
     const appPort = await port();
-    await mkdir(join(root, "dist/src"), { recursive: true });
+    await mkdir(join(root, "dist/agents"), { recursive: true });
     await writeFile(
-      join(root, entry ?? "dist/src/index.js"),
+      join(root, entry ?? "dist/agents/index.js"),
       `
-const model = process.env.MODEL;
-export default { fetch() { return Response.json({ model, development: process.env.NYLORUN_DEV ?? null }); } };
-`
+import { Agent } from ${JSON.stringify(new URL("../../harness/dist/index.js", import.meta.url).href)};
+export const agents = [Agent({id:"test",name:process.env.MODEL}).build()];
+`,
     );
     await writeFile(
       join(root, ".env"),
-      `PORT=${appPort}\nMODEL=dotenv-model\nNYLORUN_DEV=1\n`
+      `PORT=${appPort}\nMODEL=dotenv-model\nNYLORUN_DEV=1\n`,
     );
     const task = run(
       root,
       entry ? [entry] : [],
       { PORT: String(appPort), MODEL: "host-model" },
-      "start"
+      "start",
     );
     await wait(async () => {
-      expect(await (await fetch(`http://127.0.0.1:${appPort}`)).json()).toEqual(
-        { model: "host-model", development: null }
+      const { serverKey } = JSON.parse(
+        await readFile(join(root, ".nylorun/local-credentials.json"), "utf8"),
       );
+      const discovery = await (
+        await fetch(`http://127.0.0.1:${appPort}/v1/agents`, {
+          headers: { authorization: `Bearer ${serverKey}` },
+        })
+      ).json();
+      expect(discovery.agents[0].manifest.name).toBe("host-model");
     });
     task.child.kill("SIGTERM");
     expect(await task.closed).toBe(0);
-  }
+  },
 );
 
 it("reports an invalid application export without opening a socket", async () => {
@@ -226,5 +246,5 @@ it("reports an invalid application export without opening a socket", async () =>
   await writeFile(join(root, "invalid.js"), "export default {};");
   const task = run(root, ["invalid.js"], {}, "start");
   expect(await task.closed).toBe(1);
-  expect(task.output()).toContain("export default app");
+  expect(task.output()).toContain("must export a non-empty agents array");
 });

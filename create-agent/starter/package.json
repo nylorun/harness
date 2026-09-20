@@ -4,21 +4,20 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "configure": "nylorun configure",
     "dev": "nylorun dev",
-    "studio": "nylorun studio --agent-url http://localhost:3000/agents",
+    "studio": "nylorun studio --runtime-url http://127.0.0.1:8787",
     "build": "node -e \"import('node:fs/promises').then(async ({rm,cp}) => { await rm('dist', { recursive: true, force: true }); await cp('agents', 'dist/agents', { recursive: true, filter: (source) => !source.endsWith('.ts') }); })\" && tsc -p tsconfig.json",
     "start": "nylorun start",
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@nylorun/harness": "{{HARNESS_VERSION}}",
     "@nylorun/runtime": "{{RUNTIME_VERSION}}",
-    "hono": "^4.13.7",
-    "zod": "^4.1.12"
+    "zod": "^4.5.4",
+    "@nylorun/agents": "{{AGENTS_VERSION}}"
   },
   "devDependencies": {
     "@nylorun/studio": "{{STUDIO_VERSION}}",

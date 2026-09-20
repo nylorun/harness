@@ -7,8 +7,7 @@ import type { StepMiddleware } from "../types/middleware.js";
 import type { Implementations } from "./implementations.js";
 import { assembleAgent } from "./assemble.js";
 import type { CapabilityDynamics } from "./assemble.js";
-import { execute } from "../execution/run.js";
-import { defineSchema } from "./schema.js";
+import { schemaFromJSON } from "./schema-json.js";
 import { deepFreeze } from "../utils/immutable.js";
 import type { BoundMiddleware } from "./bound.js";
 
@@ -51,17 +50,18 @@ export function agentFrom<Info = unknown>(
         id: capability.id,
         handle,
         hasMiddleware: impl.middleware !== undefined || capability.hasMiddleware,
-        tools: tools.length
-          ? tools.map((tool) => {
-              const live = impl.tools?.[tool.name];
-              if (!live)
-                throw new HarnessError(
-                  "agent.build-failed",
-                  `Missing tool implementation '${tool.name}' for capability '${capability.id}'`,
-                );
-              return live;
-            })
-          : undefined,
+        tools:
+          capability.tools !== undefined
+            ? tools.map((tool) => {
+                const live = impl.tools?.[tool.name];
+                if (!live)
+                  throw new HarnessError(
+                    "agent.build-failed",
+                    `Missing tool implementation '${tool.name}' for capability '${capability.id}'`,
+                  );
+                return live;
+              })
+            : undefined,
         contributions: Object.freeze({
           ...(capability.instructions ? { instructions: capability.instructions } : {}),
           ...(capability.tools
@@ -86,17 +86,11 @@ export function agentFrom<Info = unknown>(
     });
   }
 
-  const outputSchema = manifest.outputSchema
-    ? defineSchema({
-        jsonSchema: manifest.outputSchema,
-        validate: (value) => ({ ok: true as const, value }),
-      })
-    : undefined;
+  const outputSchema = manifest.outputSchema ? schemaFromJSON(manifest.outputSchema) : undefined;
 
   const result = assembleAgent(
     entries,
     { id: manifest.id, name: manifest.name, outputSchema },
-    execute,
     dynamics,
   );
   if (!result.ok)

@@ -26,7 +26,8 @@ jobs:
       - run: npm run setup
       - run: npm run check -- --built
       - run: npm run check:stack -- --built
-      - run: npm run test:workers
+      # Worker deployment belongs to the deferred hosting profile.
+      - run: npx playwright-core install --with-deps chromium
       - run: node create-agent/scripts/smoke-starter.mjs
       - run: npm run test:dev
       - run: npm run test:setup
@@ -63,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [22.14.0, 22.19.0, 26.x]
+        node: [24.15.0, 26.x]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -72,13 +73,12 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - run: npm run build
       - run: npm run check --workspace @nylorun/harness
-      - if: matrix.node != '22.14.0'
-        run: npm run check --workspace @nylorun/runtime
-      - if: matrix.node != '22.14.0'
-        run: npm run check --workspace @nylorun/studio
-      - if: matrix.node != '22.14.0'
-        run: npm run check --workspace @nylorun/create-agent
+      - run: npm run check --workspace @nylorun/agents
+      - run: npm run check --workspace @nylorun/runtime
+      - run: npm run check --workspace @nylorun/studio
+      - run: npm run check --workspace @nylorun/create-agent
   ci:
     if: always()
     needs: [check, supervisor, consumers]

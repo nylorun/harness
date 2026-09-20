@@ -4,12 +4,14 @@ import { planVersions } from "../release/version-policy.mjs";
 
 const versions = {
   harness: "0.10.0-beta.1",
+  agents: "0.1.0-beta.1",
   runtime: "0.1.0-beta.1",
   studio: "0.3.0-beta.1",
   "create-agent": "0.1.0-beta.1",
 };
 const pins = {
   harness: versions.harness,
+  agents: versions.agents,
   runtime: versions.runtime,
   studio: versions.studio,
 };
@@ -19,7 +21,7 @@ const intent = (name, type = "patch") => ({
   releases: [{ name: `@nylorun/${name}`, type }],
 });
 
-test("the migration computes the approved four-package targets and exact pins", () => {
+test("the migration computes the approved five-package targets and exact pins", () => {
   const { plan, releases } = planVersions(
     versions,
     pins,
@@ -33,11 +35,12 @@ test("the migration computes the approved four-package targets and exact pins", 
   );
   assert.deepEqual(plan.packages, {
     harness: "0.11.0-beta",
+    agents: "0.1.1-beta",
     runtime: "0.1.1-beta",
     studio: "0.4.0-beta",
     "create-agent": "0.2.0-beta",
   });
-  for (const name of ["harness", "runtime", "studio"])
+  for (const name of ["harness", "agents", "runtime", "studio"])
     assert.equal(plan.compatibility[name], plan.packages[name]);
   for (const release of releases)
     assert.equal(release.newVersion, plan.packages[release.name.slice(9)]);
@@ -66,6 +69,7 @@ for (const [before, type, expected] of [
 test("pre-1.0 latest promotion keeps *-beta versions for dist-tag moves", () => {
   const current = {
     harness: "0.10.0-beta",
+    agents: "0.1.0-beta",
     runtime: "0.1.0-beta",
     studio: "0.3.0-beta",
     "create-agent": "0.1.0-beta",
@@ -74,6 +78,7 @@ test("pre-1.0 latest promotion keeps *-beta versions for dist-tag moves", () => 
     current,
     {
       harness: current.harness,
+      agents: current.agents,
       runtime: current.runtime,
       studio: current.studio,
     },
@@ -101,6 +106,7 @@ test("pending latest changes before 1.0 bump the core and keep -beta", () => {
 test("post-1.0 latest promotion strips -beta from the promoted package", () => {
   const before = {
     harness: "1.0.0",
+    agents: "1.0.0",
     runtime: "1.1.0-beta",
     studio: "1.0.0",
     "create-agent": "1.0.0",
@@ -108,7 +114,7 @@ test("post-1.0 latest promotion strips -beta from the promoted package", () => {
   assert.deepEqual(
     planVersions(
       before,
-      { harness: "1.0.0", runtime: "1.1.0-beta", studio: "1.0.0" },
+      { harness: "1.0.0", agents: "1.0.0", runtime: "1.1.0-beta", studio: "1.0.0" },
       [],
       "latest"
     ).plan.packages,

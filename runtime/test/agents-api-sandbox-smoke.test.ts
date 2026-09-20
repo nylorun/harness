@@ -1,3 +1,4 @@
+import { Runtime } from "../src/server/host.js";
 /**
  * Optional live sandbox smoke against https://sandbox.nylorun.dev.
  *
@@ -20,7 +21,7 @@ import {
   SANDBOX_AGENTS_API_URL,
   openCloudSession,
   resolveCloudConfig,
-} from "../src/index.js";
+} from "../src/cloud/index.js";
 
 const smokeEnabled = process.env.NYLORUN_SMOKE === "1";
 const config = resolveCloudConfig({

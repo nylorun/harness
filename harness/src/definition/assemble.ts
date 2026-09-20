@@ -2,7 +2,6 @@ import type { BoundMiddleware } from "./bound.js";
 import type { BuiltAgent } from "../types/agent.js";
 import type { AgentManifest } from "../types/manifest.js";
 import type { BuildDiagnostic } from "../types/shared.js";
-import type { RunOptions, RunResult } from "../types/execution.js";
 import type { ToolSchemaSource } from "../types/tool.js";
 import type { AfterModelCallFn, BeforeModelCallFn } from "../types/dynamics.js";
 import type { StepMiddleware } from "../types/middleware.js";
@@ -13,8 +12,6 @@ import { createManifest } from "./manifest.js";
 type BuildResult<Agent> =
   | { readonly ok: true; readonly agent: Agent; readonly manifest: AgentManifest }
   | { readonly ok: false; readonly diagnostics: readonly BuildDiagnostic[] };
-
-type AgentRun = (definition: AgentDefinition, options: RunOptions<any>) => Promise<RunResult<any>>;
 
 export interface CapabilityDynamics {
   readonly beforeModelCall?: BeforeModelCallFn<any>;
@@ -35,7 +32,6 @@ export function assembleAgent(
     name: string;
     outputSchema?: ToolSchemaSource;
   }>,
-  run: AgentRun,
   dynamics: ReadonlyMap<string, CapabilityDynamics> = new Map(),
 ): BuildResult<BuiltAgent> {
   const diagnostics: BuildDiagnostic[] = [];
@@ -85,6 +81,6 @@ export function assembleAgent(
     outputSchema: identity.outputSchema,
     middleware: frozenMiddleware,
   });
-  const agent = bindAgent(frozenMiddleware, manifest, identity, run, dynamics);
+  const agent = bindAgent(frozenMiddleware, manifest, identity, dynamics);
   return Object.freeze({ ok: true, agent, manifest });
 }

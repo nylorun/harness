@@ -1,3 +1,4 @@
+import { HostSuspension } from "../host-suspension.js";
 import type { ExecutionSnapshot, StepInput, StepRuntime } from "./runtime.js";
 import type { TurnOutputContract } from "../../definition/output-contract.js";
 import type { ModelCandidate, ModelConfigurationSnapshot } from "../../types/model.js";
@@ -88,7 +89,14 @@ export async function runStep(input: {
               info: input.info,
               step: input.stepNumber - 1,
               arrivals: input.arrivals,
-              messages: [],
+              messages: projectModelCall(
+                resolveModelRequest({
+                  context,
+                  arrivals: input.arrivals,
+                  toolResults: input.toolResults,
+                  output: input.output,
+                }),
+              ).prompt,
               sessionState: input.agent.sessionState ?? {},
             }
           : undefined;
@@ -107,6 +115,7 @@ export async function runStep(input: {
             });
           }
         } catch (error) {
+          if (error instanceof HostSuspension) throw error;
           return context.tripwire({
             code: isHarnessError(error) ? error.code : "configuration.invalid",
             message: error instanceof Error ? error.message : String(error),
@@ -120,6 +129,7 @@ export async function runStep(input: {
         context.sealConfiguration(selected);
         context.sealContext(runtimeContext.snapshot());
       } catch (error) {
+        if (error instanceof HostSuspension) throw error;
         const message = error instanceof Error ? error.message : String(error);
         return context.tripwire({
           code: isHarnessError(error) ? error.code : "configuration.invalid",
@@ -226,6 +236,7 @@ export async function runStep(input: {
 
         return minted;
       } catch (error) {
+        if (error instanceof HostSuspension) throw error;
         if (input.signal.aborted) throw input.signal.reason;
         return context.tripwire({
           code: isHarnessError(error) ? error.code : "model.failed",

@@ -1,3 +1,4 @@
+import { run, bindingFromAgent } from "../../src/engine/index.js";
 import { z } from "zod";
 import {
   Agent,
@@ -40,7 +41,8 @@ const capability: CapabilityDeclaration<Info> = {
   },
 };
 const scoped = Agent<Info>({ id: "a", name: "A" }).use(capability).build();
-const promise: Promise<RunResult<string>> = scoped.run({
+const promise: Promise<RunResult<string>> = run<Info>({
+  binding: bindingFromAgent(scoped),
   input: "hi",
   info: { tenantId: "t" },
   onModelCall: async () => "hello",
@@ -51,17 +53,33 @@ promise.completed;
 scoped.step;
 // @ts-expect-error Cancellation belongs to an AbortController.
 scoped.cancel;
-// @ts-expect-error Info is typed.
-scoped.run({ input: "hi", info: { tenantId: 2 }, onModelCall: async () => "hello" });
+run<Info>({
+  binding: bindingFromAgent(scoped),
+  input: "hi",
+  // @ts-expect-error Info is typed.
+  info: { tenantId: 2 },
+  onModelCall: async () => "hello",
+});
 // @ts-expect-error Every invocation specifies input.
-scoped.run({ onModelCall: async () => "hello" });
-// @ts-expect-error Per-run final schemas were removed.
-scoped.run({ input: "hi", outputSchema: schema, onModelCall: async () => "hello" });
-// @ts-expect-error No run-time tool resolver.
-scoped.run({ input: "hi", resolveTool: () => null, onModelCall: async () => "hello" });
+run<Info>({ binding: bindingFromAgent(scoped), onModelCall: async () => "hello" });
+run<Info>({
+  binding: bindingFromAgent(scoped),
+  input: "hi",
+  // @ts-expect-error Per-run final schemas were removed.
+  outputSchema: schema,
+  onModelCall: async () => "hello",
+});
+run<Info>({
+  binding: bindingFromAgent(scoped),
+  input: "hi",
+  // @ts-expect-error No run-time tool resolver.
+  resolveTool: () => null,
+  onModelCall: async () => "hello",
+});
 
 const typed = Agent({ id: "structured", name: "Structured", outputSchema: schema }).build();
-const typedResult = await typed.run({
+const typedResult = await run<unknown, { count: number }>({
+  binding: bindingFromAgent(typed),
   input: "go",
   onModelCall: async () => ({ output: [{ type: "json", value: { count: 1 } }] }),
 });
@@ -79,7 +97,8 @@ const scopedTyped = Agent<Info, typeof schema>({
   .build();
 void scopedTyped;
 declare const state: ExecutionState;
-await scoped.run({
+await run<Info>({
+  binding: bindingFromAgent(scoped),
   state,
   input: "again",
   onModelCall: async () => "done",

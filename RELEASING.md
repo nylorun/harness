@@ -1,13 +1,13 @@
 # Releasing npm packages
 
-Packages have independent versions. Every Harness, Runtime, or Studio release
+Packages have independent versions. Every Harness, SDK, Runtime, or Studio release
 also releases creator with updated compatibility pins. A creator-only release
-preserves its existing pins. A Harness version change also releases Runtime and updates its exact Harness dependency. Nothing publishes on merge or tag push.
+preserves its existing pins. A Harness version change also releases its SDK and Runtime consumers; an SDK change advances Runtime and Studio. Dependency versions are pinned to the tested combination. Nothing publishes on merge or tag push.
 
 ## Administrator setup
 
 - Use the toolchain and setup in [CONTRIBUTING.md](./CONTRIBUTING.md).
-- Confirm npm organization access for all four `@nylorun` packages.
+- Confirm npm organization access for all five `@nylorun` packages.
 - Configure each package's npm trusted publisher for this repository,
   workflow `publish.yml`, and GitHub environment `npm`, allowing publication.
 - Protect the `npm` environment with administrator reviewers and restrict its
@@ -121,3 +121,5 @@ release. Keep credentials and access tokens out of release notes and logs.
 After npm accepts a publication, the workflow polls visibility every five seconds
 for up to ten minutes. A registry timeout does not mean the publication failed:
 confirm the version's integrity before retrying the same reviewed release.
+
+The local browser gate requires Chromium: run `npx playwright-core install chromium` on Linux, or set `NYLORUN_CHROME_PATH` to an installed Chrome executable. CI installs Chromium before testing packed artifacts.

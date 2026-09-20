@@ -14,7 +14,7 @@ const usage = `nylorun <configure|dev|start|studio>
   dev [--no-studio] [--no-open]
   start [entry]
   configure
-  studio --agent-url <http(s)-url> [--port <n>] [--no-open]`;
+  studio --runtime-url <http(s)-url> [--port <n>] [--no-open]`;
 
 async function startStudio(
   agentServerUrl: string,
@@ -31,7 +31,8 @@ async function startStudio(
   }
   const studio = await import(pathToFileURL(entry).href);
   return studio.startStudio({
-    agentServerUrl,
+    runtimeUrl: agentServerUrl,
+    serverKey: process.env.NYLORUN_SERVER_KEY ?? (await (await import("./project-runner.js")).localCredentials()).serverKey,
     open,
     ...(port === undefined ? {} : { port }),
   });
@@ -75,12 +76,12 @@ async function main() {
   let open = true;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
-    if (arg === "--agent-url") {
+    if (arg === "--runtime-url") {
       if (agentUrl !== undefined)
-        throw new Error("--agent-url may only be supplied once.");
+        throw new Error("--runtime-url may only be supplied once.");
       agentUrl = args[++index];
       if (!agentUrl || agentUrl.startsWith("--"))
-        throw new Error("--agent-url requires a value.");
+        throw new Error("--runtime-url requires a value.");
     } else if (arg === "--port") {
       if (port !== undefined)
         throw new Error("--port may only be supplied once.");
@@ -88,7 +89,7 @@ async function main() {
     } else if (arg === "--no-open" && open) open = false;
     else throw new Error(usage);
   }
-  if (!agentUrl) throw new Error("--agent-url is required.");
+  if (!agentUrl) throw new Error("--runtime-url is required.");
   const dashboard = await startStudio(agentUrl, open, port);
   console.log(`Studio on ${dashboard.address}`);
   await new Promise<void>((resolve, reject) => {

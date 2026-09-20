@@ -4,7 +4,7 @@ import { starterFiles } from "../dist/scaffold.js";
 import type { Compatibility, CreatorDependencies } from "../src/contracts.js";
 
 const compatibility: Compatibility = {
-  harness: "1.2.3",
+  harness: "1.2.3", agents: "2.3.4",
   studio: "4.5.6",
   runtime: "7.8.9",
 };
@@ -13,7 +13,7 @@ describe("starter template", () => {
   it("installs the known-good stack and contains no hosting implementation", async () => {
     const files = await starterFiles(compatibility, true);
     const manifest = JSON.parse(files["package.json"]!);
-    expect(manifest.dependencies["@nylorun/harness"]).toBe("1.2.3");
+    expect(manifest.dependencies["@nylorun/agents"]).toBe("2.3.4");
     expect(manifest.dependencies["@nylorun/runtime"]).toBe("7.8.9");
     expect(manifest.devDependencies["@nylorun/studio"]).toBe("4.5.6");
     expect(manifest.scripts.dev).toBe("nylorun dev");
@@ -32,18 +32,15 @@ describe("starter template", () => {
       Object.keys(files)
         .filter((path) => path.endsWith(".ts"))
         .sort()
-    ).toEqual(["agents/assistant/agent.ts", "agents/index.ts", "src/index.ts"]);
+    ).toEqual(["agents/assistant/agent.ts", "agents/index.ts"]);
     expect(files[".env/auth.json"]).toBeUndefined();
-    expect(files["src/index.ts"]).toContain("serveAgents({ agents, runtime })");
-    expect(files["src/index.ts"]).toContain("new Runtime()");
-    expect(files["src/index.ts"]).toContain("openSession");
-    expect(files["src/index.ts"]).toContain("{ fetch }");
+    expect(files["src/index.ts"]).toBeUndefined();
+    expect(files["agents/assistant/agent.ts"]).toContain("lookup_order");
+    expect(files["agents/assistant/agent.ts"]).toContain("@nylorun/agents");
     expect(files["agents/assistant/agent.ts"]).not.toMatch(/\bmodel\s*:/);
-    expect(files["README.md"]).toContain("openSession");
-    expect(files["README.md"]).toContain("NYLORUN_URL");
-    expect(files["README.md"]).toContain("`info`");
+    expect(files["README.md"]).toContain("8787");
     expect(JSON.parse(files["package.json"]!).name).toBe("my-nylorun-agent");
-    expect(files["README.md"]).toMatch(/^# My agent\n/u);
+    expect(files["README.md"]).toMatch(/^# My Nylorun agent\n/u);
   });
   it("creates a functional headless shell", async () => {
     const files = await starterFiles(compatibility, false);
@@ -54,18 +51,18 @@ describe("starter template", () => {
     expect(manifest.scripts["dev:app"]).toBeUndefined();
     expect(files["scripts/dev.mjs"]).toBeUndefined();
     expect(files["README.md"]).toContain(
-      "`npm run dev` starts your app on port 3000."
+      "8787"
     );
-    expect(files["README.md"]).not.toContain("starts Studio");
+    expect(manifest.scripts.dev).toContain("--no-studio");
     expect(manifest.scripts.start).toBe("nylorun start");
   });
   it("renders ignore files under their real names so npm cannot drop them", async () => {
     const files = await starterFiles(compatibility, true);
     expect(files[".gitignore"]).toContain("node_modules/");
     expect(files[".env.example"]).toContain("MODEL_PROVIDER=");
-    expect(files[".env.example"]).toContain("NYLORUN_URL=");
-    expect(files[".env.example"]).toContain("NYLORUN_SECRET_KEY=");
-    expect(files[".env.example"]).toContain("NYLORUN_MODE=");
+    expect(files[".env.example"]).toContain("MODEL=");
+    expect(files[".env.example"]).toContain("MODEL_PROVIDER_API_KEY=");
+    expect(files[".env.example"]).toContain("PORT=8787");
     expect(files[".gitignore"]).toContain(".nylorun/");
     expect(Object.keys(files).some((path) => path.includes("_gitignore"))).toBe(
       false
@@ -144,7 +141,7 @@ it("renders a fresh project before installation and forwards browser choices", a
       },
     }
   );
-  expect([...files.keys()].some((path) => path.endsWith("/src/index.ts"))).toBe(
+  expect([...files.keys()].some((path) => path.endsWith("/agents/index.ts"))).toBe(
     true
   );
   const packageJson = [...files.entries()].find(([path]) =>

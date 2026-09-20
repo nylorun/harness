@@ -1,50 +1,14 @@
-import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-const root = fileURLToPath(new URL("../../", import.meta.url));
-const temporary = await mkdtemp(join(tmpdir(), "nylorun-hono-stack-"));
-try {
-  const { starterFiles } = await import(
-    pathToFileURL(join(root, "create-agent/dist/scaffold.js")).href
-  );
-  const compatibility = (await import("node:fs/promises")).readFile;
-  const versions = JSON.parse(
-    await compatibility(join(root, "create-agent/compatibility.json"), "utf8")
-  );
-  const files = await starterFiles(versions, true);
-  for (const [path, content] of Object.entries(files)) {
-    const target = join(temporary, path);
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, content);
-  }
-  assert.ok(
-    files["src/index.ts"]?.includes(
-      'serveAgents({ agents, runtime })'
-    )
-  );
-  assert.ok(files["src/index.ts"]?.includes("openSession"));
-  assert.ok(files["src/index.ts"]?.includes("{ fetch }"));
-  assert.ok(files["src/index.ts"]?.includes("export default app"));
-  assert.ok(!files["src/index.ts"]?.includes("@hono/node-server"));
-  assert.ok(!files["agents/assistant/agent.ts"]?.match(/\bmodel\s*:/));
-  assert.ok(files[".env.example"]?.includes("MODEL_PROVIDER_API_KEY="));
-  assert.ok(files[".env.example"]?.includes("NYLORUN_URL="));
-  assert.ok(files[".env.example"]?.includes("NYLORUN_SECRET_KEY="));
-  assert.ok(files["README.md"]?.includes("openSession"));
-  assert.ok(!Object.keys(files).some((path) => path.startsWith(".env/")));
-  assert.equal(files["nylorun.config.ts"], undefined);
-  const manifest = JSON.parse(files["package.json"]);
-  assert.equal(manifest.scripts.dev, "nylorun dev");
-  assert.equal(manifest.scripts["dev:app"], undefined);
-  assert.equal(files["scripts/dev.mjs"], undefined);
-  assert.equal(files["tsconfig.build.json"], undefined);
-  assert.equal(manifest.scripts.start, "nylorun start");
-  assert.ok(manifest.dependencies.hono);
-  assert.equal(manifest.dependencies["@hono/node-server"], undefined);
-  console.log("Hono-first starter stack contract passed.");
-} finally {
-  await rm(temporary, { recursive: true, force: true });
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {starterFiles} from '../dist/scaffold.js';
+const pins=JSON.parse(await readFile(new URL('../compatibility.json',import.meta.url),'utf8'));
+for(const enabled of [true,false]){
+ const files=await starterFiles(pins,enabled);const p=JSON.parse(files['package.json']);
+ assert.equal(p.dependencies['@nylorun/agents'],pins.agents);assert.equal(p.dependencies['@nylorun/runtime'],pins.runtime);
+ assert.equal(p.dependencies.hono,undefined);assert.equal(p.dependencies['@nylorun/harness'],undefined);
+ assert.equal(files['src/index.ts'],undefined);assert.match(files['agents/assistant/agent.ts'],/lookup_order/);
+ assert.equal(p.scripts.dev,enabled?'nylorun dev':'nylorun dev --no-studio');
+ assert.equal(Boolean(p.devDependencies['@nylorun/studio']),enabled);assert.match(files['.gitignore'],/\.nylorun\//);
+ assert.equal(p.scripts.start,'nylorun start');assert.ok(!files['agents/assistant/agent.ts'].match(/\bmodel\s*:/));
 }
+console.log('SDK registry starter contract passed, with and without Studio.');

@@ -4,7 +4,8 @@
     "@nylorun/harness": "file:../harness",
     "@nylorun/runtime": "file:../runtime",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "zod-from-json-schema": "^0.5.6"
+    "zod-from-json-schema": "^0.5.6",
+    "@nylorun/agents": "file:../agents"
   },
   "devDependencies": {
     "@nylorun/studio": "file:../studio",
@@ -15,5 +16,5 @@
     "codex:preflight": "node scripts/codex-preflight.mjs",
     "docker:preflight": "node scripts/docker-preflight.mjs"
   },
-  "index": "import { Hono } from \"hono\";\nimport { Runtime, serveAgents } from \"@nylorun/runtime\";\nimport { localSessions } from \"@nylorun/runtime/node\";\nimport { agents, media } from \"../agents/index.js\";\n\nconst runtime = new Runtime({ media, sessions: localSessions({ root: \".data/sessions\" }) });\nconst app = new Hono();\n\napp.get(\"/\", (c) =>\n  c.json({\n    agents: agents.map((agent) => ({\n      id: agent.id,\n      name: agent.name,\n      manifest: agent.manifest,\n    })),\n  }),\n);\napp.route(\n  \"/agents\",\n  serveAgents({ agents, runtime })\n);\n\n// Application resources have their own lifecycle; drain execution before closing them.\nlet closing: Promise<void> | undefined;\nconst close = () => closing ??= runtime.close().then(async () => {\n  await Promise.all(agents.map(agent => agent.close?.()));\n});\nprocess.once(\"SIGINT\", () => { void close(); });\nprocess.once(\"SIGTERM\", () => { void close(); });\n\nexport default app;\n"
+  "index": "// CLI loads the supported registry directly.\nexport { agents } from \"../agents/index.js\";\n"
 }

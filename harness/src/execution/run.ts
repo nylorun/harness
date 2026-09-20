@@ -1,3 +1,4 @@
+import { HostSuspension } from "./host-suspension.js";
 import type { AgentDefinition } from "../definition/agent-definition.js";
 import type { ExecutionSnapshot } from "./step/runtime.js";
 import { HarnessError, isHarnessError } from "../errors.js";
@@ -201,6 +202,7 @@ export async function execute(
       arrivals = [];
     }
   } catch (error) {
+    if (error instanceof HostSuspension) throw error;
     if (isHarnessError(error) && error.code === "execution.record-failed") throw error;
     if (signal.aborted) return finish({ status: "cancelled" });
     return finish({

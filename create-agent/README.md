@@ -4,56 +4,24 @@
 npm create @nylorun/agent@beta my-agent
 ```
 
-Creates a project that directly installs Harness and Runtime, with Studio as a development dependency. The project owns its Hono application in `src/index.ts`; Runtime supplies the agent router and lifecycle only.
+Creates a Node 24 project with `@nylorun/agents`, `@nylorun/runtime`, Zod, and optional Studio. The registry in `agents/index.ts` exports agent definitions. The starter includes one ordinary `lookup_order` tool; ask “Look up order demo-123”.
 
-Creation installs dependencies, runs Runtime’s provider/model configuration wizard in the same terminal, then starts the application and Studio. Pass `-- --no-studio` for a headless project or `-- --no-open` to start Studio without opening a browser. `nylorun configure` connects a provider without importing the agent graph.
-
-## Configuration and recovery
-
-Use `-- --skip-config` to start development without configuring a provider:
-
-```sh
-npm create @nylorun/agent@beta my-agent -- --skip-config
-```
-
-Without interactive stdin and stdout, creation requires `--skip-config` and fails
-before creating files when it is missing. `--yes` only affects installation; it
-does not skip configuration. After skipping, run `npm run configure` inside the
-project in another terminal before sending a message. Development and Studio
-start immediately; provider configuration takes effect without restarting them.
-
-If configuration fails or is cancelled, development does not start and the
-created project is retained. Resume from its directory:
+Creation installs dependencies, runs provider configuration, and starts development. Use `-- --no-studio` for headless development or `-- --no-open` to suppress browser opening. Noninteractive creation requires `-- --skip-config`; configure the retained project before running it. Without provider settings startup reports `nylorun configure`. `--yes` affects installation only.
 
 ```sh
 cd my-agent
 npm run configure
 npm run dev
+npm run build
+npm start
 ```
 
-If installation failed, run `npm install` first. Ctrl-C exits with status 130;
-SIGTERM exits with status 143. Cancelling setup also cancels pending authentication.
-Configuration saves the provider selection and credentials; it does not make a
-model request to validate connectivity.
+Development restarts the Runtime and connected executor on source changes. Compiled start uses `dist/agents/index.js` and runs headless. Studio can attach separately. Local Runtime credentials and SQLite are stored in gitignored `.nylorun/`. Model selection remains Runtime configuration in `.env`; definitions have no model provider or `agent.run()`.
 
-## Maintaining examples
+`starter/` is the canonical template. `compatibility.json` pins harness, SDK, Runtime and Studio. The examples recipe adds local package dependencies. Run `npm run examples:sync` after template changes, then `npm install --prefix examples`. Sync preserves authored agents, tests, credentials, and local state; it rejects conflicting edits to generated files.
 
-`starter/` is the canonical project template. `compatibility.json` pins tested Harness, Runtime, and Studio versions. `examples.recipe.json` explicitly adds local package references and test dependencies. Persistence and media stay in the authored examples catalog.
+The default examples registry contains the release starter. Advanced examples remain outside that registry for later migration.
 
-From the repository root:
+After building, `node create-agent/scripts/smoke-starter.mjs` installs packed packages outside the workspace and checks the actual Studio/tool workflow, history, reload, source restart, compiled start, headless mode, and shutdown. It uses a deterministic fixture without live provider calls. Browser checks require Chrome (or `NYLORUN_CHROME_PATH`).
 
-```sh
-npm run examples:sync
-npm install --prefix examples
-npm run examples:check
-```
-
-The renderer is shared by project creation, the isolated starter development runner, and examples synchronization. Sync owns shell files listed in `examples/.scaffold-manifest.json`, including `src/index.ts`, `package.json`, and TypeScript configuration; it never edits `agents/`, tests, other scripts, local model selection, credentials, or `.data/`. Edit generated configuration in the recipe or template. Conflicts with manual generated-file edits fail before any writes. CI checks the rendered shell and runs examples against the current stack. Package changes can require explicit adaptations in authored code; sync does not rewrite TypeScript imports.
-
-`npm run dev:starter` from the repository root previews a fresh project using local packages, including unpublished changes. Each preview has its own retained directory and provider configuration.
-
-Repository development: [contributing](../CONTRIBUTING.md). Package publication: [releasing](../RELEASING.md).
-
-Generated projects use `nylorun dev`, with `--no-studio` and `--no-open` options, rather than a copied supervisor script. They contain one `tsconfig.json`; `npm run check` checks without emitting and `npm run build` emits to `dist/`. Repository examples add their own build configuration to exclude tests. Provider/model selection and API keys use a conventional `.env` file (`MODEL_PROVIDER`, `MODEL`, `MODEL_PROVIDER_API_KEY`, and optional `MODEL_PROVIDER_BASE_URL`). Optional Cloud Agents API vars: `NYLORUN_URL`, `NYLORUN_SECRET_KEY`, and `NYLORUN_MODE` (see starter `.env.example`). The starter exports its Hono app mounted at `/agents` for Studio; `serveAgents({ agents })` without a Runtime returns `{ fetch }` for serverless. Prefer `openSession(agent, { info })` for the session SDK — keep **`info`**, never rename to `user`, and do not put `model` on `Agent({})`. `nylorun start` supplies the production Node launcher. OAuth state is optional in `.nylorun/auth.json`. See [Runtime migration instructions](../runtime/README.md#upgrading-an-existing-starter).
-
-To verify the packed starter after building all packages, run `node create-agent/scripts/smoke-starter.mjs` from the repository root. It installs candidate tarballs into a disposable project and checks type checking, production output, agent assets, development CORS, streaming, watch reload, and shutdown. Add `--serve` to keep the fixture Studio running for browser verification; stop it with Ctrl-C. It uses a deterministic model adapter and makes no provider calls.
+See [RELEASING](../RELEASING.md) for the Changesets beta workflow. Nothing is published by the smoke check.

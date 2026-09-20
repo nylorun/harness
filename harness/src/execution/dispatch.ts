@@ -1,3 +1,4 @@
+import { HostSuspension } from "./host-suspension.js";
 import { HarnessError, isHarnessError } from "../errors.js";
 import { isToolError } from "../definition/tool-error.js";
 import type { ToolOutcome, ToolResult, ToolRunResult } from "../types/tool.js";
@@ -54,7 +55,7 @@ export async function dispatchPlan(invocation: Invocation): Promise<"paused" | u
     signal.throwIfAborted();
     const sessionBag = invocation.sessionBag;
     const stateApi = createSessionStateBag(sessionBag);
-    const settled = await Promise.all(
+    const settled = await settleDispatch(
       pending.map(async (call) => {
         const definition = definitions.get(call.invocationId)!;
         const eventIds = {
@@ -211,6 +212,7 @@ export async function dispatchPlan(invocation: Invocation): Promise<"paused" | u
           });
           return copyJson({ ...call, status: "settled" as const, result });
         } catch (cause) {
+          if (cause instanceof HostSuspension) throw cause;
           if (isWaitSignal(cause)) {
             if (cause.outcome.kind === "interaction-required") {
               return copyJson({
@@ -333,4 +335,12 @@ function normalizeOutcome(raw: ToolRunResult): ToolOutcome {
       return raw as ToolOutcome;
   }
   return { kind: "completed", output: raw as JsonValue };
+}
+
+// Persist all parallel action intents before handing control back to a durable host.
+async function settleDispatch<T>(promises: readonly Promise<T>[]): Promise<T[]> {
+  const results = await Promise.allSettled(promises);
+  const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (failure) throw failure.reason;
+  return results.map((r) => (r as PromiseFulfilledResult<T>).value);
 }

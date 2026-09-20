@@ -1,3 +1,4 @@
+import { runAgent } from "./run-agent.js";
 import { expect, it } from "vitest";
 import { Agent } from "../src/index.js";
 
@@ -12,7 +13,7 @@ it("isolates state, info, and execution identities in concurrent calls", async (
     .build();
   const results = await Promise.all(
     ["a", "b", "c"].map((name) =>
-      agent.run({
+      runAgent(agent, {
         input: name,
         info: { name },
         onModelCall: async (_, { request }) => {

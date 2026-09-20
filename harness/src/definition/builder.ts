@@ -7,7 +7,6 @@ import type { BuiltAgent } from "../types/agent.js";
 import type { AgentManifest } from "../types/manifest.js";
 import type { AfterModelCallFn, BeforeModelCallFn } from "../types/dynamics.js";
 import type { Implementations } from "./implementations.js";
-import { execute } from "../execution/run.js";
 import { assembleAgent, type CapabilityDynamics } from "./assemble.js";
 import { compileDeclaration } from "./declaration.js";
 import { agentFrom } from "./from.js";
@@ -114,15 +113,6 @@ export class AgentBuilder<Info = unknown, Schema extends ToolSchemaSource | unde
     return this.ensure().toJSON();
   }
 
-  /** @deprecated Prefer `@nylorun/harness/engine`. Alias through 1.0. */
-  run(
-    options: Parameters<
-      BuiltAgent<Info, Schema extends ToolSchemaSource ? SchemaOutput<Schema> : string>["run"]
-    >[0],
-  ) {
-    return this.ensure().run(options);
-  }
-
   use(middleware: StepMiddleware<Info>): AgentBuilder<Info, Schema>;
   use(id: string, middleware: StepMiddleware<Info>): AgentBuilder<Info, Schema>;
   use(declaration: CapabilityDeclaration<Info>): AgentBuilder<Info, Schema>;
@@ -209,7 +199,6 @@ export class AgentBuilder<Info = unknown, Schema extends ToolSchemaSource | unde
         name: this.#snapshot.name,
         outputSchema: this.#snapshot.outputSchema,
       },
-      execute,
       this.#snapshot.dynamics,
     );
     if (!result.ok) {

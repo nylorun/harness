@@ -1,7 +1,6 @@
 import type { AgentManifest } from "../types/manifest.js";
 import type { BoundMiddleware } from "./bound.js";
 import type { BuiltAgent } from "../types/agent.js";
-import type { RunOptions, RunResult } from "../types/execution.js";
 import type { ToolSchemaSource } from "../types/tool.js";
 import { bindOutputContract } from "./output-contract.js";
 import { registerDefinition, type AgentDefinition } from "./agent-definition.js";
@@ -14,7 +13,6 @@ export function bindAgent(
   middleware: readonly BoundMiddleware[],
   manifest: AgentManifest,
   options: { outputSchema?: ToolSchemaSource } = {},
-  run: (definition: AgentDefinition, options: RunOptions<any>) => Promise<RunResult<any>>,
   dynamics: ReadonlyMap<string, CapabilityDynamics> = new Map(),
 ): BuiltAgent {
   const implementations = buildImplementations(middleware, dynamics);
@@ -35,7 +33,6 @@ export function bindAgent(
     manifest,
     hash: definition.hash,
     toJSON: () => manifest,
-    run: (options) => run(definition, options) as ReturnType<BuiltAgent["run"]>,
   };
   registerDefinition(agent, definition);
   return agent;

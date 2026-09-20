@@ -1,5 +1,6 @@
 export type Compatibility = Readonly<{
   harness: string;
+  agents: string;
   studio: string;
   runtime: string;
 }>;

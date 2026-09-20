@@ -7,7 +7,7 @@ try {
   await node("scripts/validate.mjs", ["build"]);
   await npm(["ci"], { cwd: join(root, "examples") });
   console.log(
-    "Ready. Run npm run dev; run npm run configure before your first conversation.",
+    "Ready. Run npm run configure, then npm run dev.",
   );
 } catch (error) {
   console.error(error.message);

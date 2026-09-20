@@ -28,7 +28,6 @@ try {
     "dist/starter/package.json",
     "dist/starter/.env.example",
     "dist/starter/_gitignore",
-    "dist/starter/src/index.ts",
     "dist/starter/agents/index.ts",
     "dist/starter/agents/assistant/agent.ts",
   ])

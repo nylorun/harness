@@ -1,3 +1,4 @@
+import { Runtime } from "../src/server/host.js";
 import { describe, expect, it } from "vitest";
 import { Agent } from "@nylorun/harness";
 import {
@@ -14,8 +15,7 @@ import {
   openCloudSession,
   resolveCloudConfig,
   shouldRerunOnRedelivery,
-  Runtime,
-} from "../src/index.js";
+} from "../src/cloud/index.js";
 
 type MockCall = {
   method: string;

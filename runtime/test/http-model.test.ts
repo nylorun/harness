@@ -1,3 +1,5 @@
+import { run, bindingFromAgent } from "@nylorun/harness/engine";
+const runAgent = (agent: Parameters<typeof bindingFromAgent>[0], options: Omit<Parameters<typeof run>[0], "binding">) => run({ binding: bindingFromAgent(agent), ...options });
 import { Agent, type ModelAdapter } from "@nylorun/harness";
 import { z } from "zod";
 import { expect, it, vi } from "vitest";
@@ -25,7 +27,7 @@ it("uses isolated request environment and explicit credentials without files or 
   };
   await Promise.all(
     ["first", "second"].map((key) =>
-      agent.run({
+      runAgent(agent, {
         input: "go",
         onModelCall: httpModel({
           environment: { ...env, MODEL_PROVIDER_API_KEY: key },
@@ -46,7 +48,7 @@ it("accepts native credentials and explicit option precedence", async () => {
     expect(JSON.parse(String(init?.body)).model).toBe("override");
     return answer();
   });
-  const result = await agent.run({
+  const result = await runAgent(agent, {
     input: "go",
     onModelCall: httpModel({
       environment: env,
@@ -57,7 +59,7 @@ it("accepts native credentials and explicit option precedence", async () => {
     }),
   });
   expect(result.status).toBe("completed");
-  await agent.run({
+  await runAgent(agent, {
     input: "go",
     onModelCall: httpModel({
       environment: { ...env, MODEL_PROVIDER_API_KEY: undefined },
@@ -78,7 +80,7 @@ it.each([
   "fails incomplete configuration before HTTP dispatch",
   async (environment) => {
     const mock = vi.fn<typeof fetch>();
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       input: "go",
       onModelCall: httpModel({ environment, fetch: mock }),
     });
@@ -96,7 +98,7 @@ it("assembles streamed results while isolating preview errors", async () => {
       'data: {"choices":[{"delta":{"content":"hel"}}]}\n\ndata: {"choices":[{"delta":{"content":"lo"}}]}\n\ndata: [DONE]\n\n',
     );
   };
-  const result = await agent.run({
+  const result = await runAgent(agent, {
     input: "go",
     onModelCall: httpModel({
       environment: env,
@@ -108,7 +110,7 @@ it("assembles streamed results while isolating preview errors", async () => {
   expect(preview).toHaveBeenCalledTimes(2);
 });
 it("rejects truncated streams instead of accepting partial output", async () => {
-  const result = await agent.run({
+  const result = await runAgent(agent, {
     input: "go",
     onModelCall: httpModel({
       environment: env,
@@ -144,7 +146,7 @@ it.each(["openai", "anthropic"] as const)(
       },
     });
     expect(
-      await structured.run({ input: "go", onModelCall: model }),
+      await runAgent(structured, { input: "go", onModelCall: model }),
     ).toMatchObject({ status: "completed", output: { value: 3 } });
   },
 );

@@ -1,13 +1,15 @@
 # `@nylorun/harness`
 
-Observable, portable, composable **agent definition** package. Compose agents as JSON plus your functions; run the loop via `@nylorun/harness/engine` (or the 1.0 `agent.run()` alias). An application or optional Runtime owns sessions, model resolution, and durability.
+Shared definitions, session/action contracts, execution engine, and compatibility metadata. Author applications through `@nylorun/agents`; hosts consume this package directly. The OSS and Cloud runtimes are independent and share the same engine.
+
+Use `/define` for execution-free authoring, `/contracts` for wire schemas, `/engine` for explicit execution and the durable host interface, and `/compatibility` for compatibility/version metadata. See [HOST_CONTRACT.md](HOST_CONTRACT.md). Cloud consumes a locally packed artifact directly; it does not depend on the OSS Runtime.
 
 > **DX v5.6:** definition ⊥ engine. `model` is not on `Agent({})` — Runtime injects `onModelCall`. Host data stays `info` (not `user`); session memory is `state`.
 
 ## Compose an agent
 
 ```ts
-import { Agent, tool, ToolError, capability } from "@nylorun/harness";
+import { Agent, tool, ToolError, capability } from "@nylorun/harness/define";
 import { z } from "zod";
 
 const lookup = tool({
@@ -47,7 +49,7 @@ Taught path for hosts/Runtime:
 import { run, bindingFromAgent } from "@nylorun/harness/engine";
 
 const result = await run({
-  binding: bindingFromAgent(supportAgent),
+  binding: bindingFromAgent(supportAgent.build()),
   input: "Hello",
   onModelCall: async () => "Hello back!",
   info: { tenantId: "acme" },
@@ -55,7 +57,7 @@ const result = await run({
 });
 ```
 
-Through 1.0, `agent.run({...})` remains an alias for the same engine.
+This is a breaking beta: `agent.run()` has been removed. Application execution uses SDK sessions. Hosted execution uses `createHostedCheckpoint` and `runHosted` with individually persisted model/tool/hook effects; a suspended checkpoint requires its effect journal.
 
 ## Tools
 
@@ -72,7 +74,7 @@ Definitions must not import `@nylorun/runtime`.
 
 `beforeModelCall` → `Patch` (capabilities/tools/instructions/state/block — no `model`).
 `afterModelCall` → `Decision` (text/deny/approve/retry/block).
-Middleware remains through 1.0; map before `next()` → beforeModelCall, after → afterModelCall.
+Local explicit engine execution retains middleware. Hosted manifests reject arbitrary middleware closures; use before/after hooks.
 
 ## Checkpoint / durability
 
@@ -80,4 +82,4 @@ Middleware remains through 1.0; map before `next()` → beforeModelCall, after �
 
 ## Client types
 
-Type-only `Session` / `Turn` / `Event` / `Result` are exported for Runtime clients — harness does not implement sessions.
+The authoritative session/action wire schemas live in `/contracts` and do not import engine checkpoint types. Use `@nylorun/agents` for the session client and SSE executor. Historical root client types remain for deferred local tooling; they are not the new wire contract.

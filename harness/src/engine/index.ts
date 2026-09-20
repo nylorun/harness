@@ -75,3 +75,13 @@ export function bindingFromAgent(agent: BuiltAgent): EngineBinding {
 export { checkCompatibility, createExecutionState, validateExecutionState, hashManifest, execute };
 
 export type { AgentDefinition, Implementations, ExecutionState, RunResult, RunOptions };
+
+export { createHostedCheckpoint, runHosted } from "./hosted.js";
+export type {
+  HostedCheckpoint,
+  HostEffect,
+  EffectResolution,
+  EngineHost,
+  HostedResult,
+} from "./hosted.js";
+export type { ModelAdapter, ModelCandidate, ModelCall, ModelRequest } from "../types/model.js";

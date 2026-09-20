@@ -1,3 +1,4 @@
+import { runAgent } from "./run-agent.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -34,7 +35,7 @@ describe("DX v5.6 ergonomics", () => {
     expect(extended).not.toBe(agent);
     expect(agent.build()).toBe(agent.build());
     let calls = 0;
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       input: "hi",
       onModelCall: async () => {
         calls += 1;
@@ -70,7 +71,7 @@ describe("DX v5.6 ergonomics", () => {
       })
       .build();
     let calls = 0;
-    const ok = await agent.run({
+    const ok = await runAgent(agent, {
       input: "go",
       onModelCall: async () => {
         calls += 1;
@@ -81,7 +82,7 @@ describe("DX v5.6 ergonomics", () => {
     expect(ok.status).toBe("completed");
 
     calls = 0;
-    const bad = await agent.run({
+    const bad = await runAgent(agent, {
       input: "go",
       onModelCall: async () => {
         calls += 1;
@@ -111,7 +112,7 @@ describe("DX v5.6 ergonomics", () => {
         ],
       })
       .build();
-    const first = await agent.run({
+    const first = await runAgent(agent, {
       input: "go",
       onModelCall: async () => ({
         output: [{ type: "tool-call", id: "r", name: "refund", args: { amount: 50 } }],
@@ -120,7 +121,7 @@ describe("DX v5.6 ergonomics", () => {
     expect(first.status).toBe("paused");
     if (first.status !== "paused") throw new Error("expected pause");
     const interactionId = first.pending[0]!.interaction!.id;
-    const second = await agent.run({
+    const second = await runAgent(agent, {
       state: first.state,
       input: { kind: "approve", interactionId, approved: true },
       onModelCall: async () => "done",
@@ -151,7 +152,7 @@ describe("DX v5.6 agent-as-JSON", () => {
     const restored = Agent.from(json, implementations);
     expect(restored.hash).toBe(agent.hash);
     let calls = 0;
-    const result = await restored.run({
+    const result = await runAgent(restored, {
       input: "go",
       onModelCall: async () => {
         calls += 1;
@@ -293,7 +294,7 @@ describe("DX v5.6 durable acceptance", () => {
         ],
       })
       .build();
-    const first = await agent.run({
+    const first = await runAgent(agent, {
       input: "go",
       onModelCall: async () => ({
         output: [{ type: "tool-call", id: "1", name: "confirm", args: {} }],
@@ -302,7 +303,7 @@ describe("DX v5.6 durable acceptance", () => {
     expect(first.status).toBe("paused");
     if (first.status !== "paused") throw new Error("pause");
     const interactionId = first.pending[0]!.interaction!.id;
-    const second = await agent.run({
+    const second = await runAgent(agent, {
       state: first.state,
       input: { kind: "respond", interactionId, value: "yes" },
       onModelCall: async () => "done",
@@ -343,7 +344,7 @@ describe("DX v5.6 dynamics", () => {
       .build();
 
     let calls = 0;
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       input: "go",
       onModelCall: async () => {
         calls += 1;
@@ -379,7 +380,7 @@ describe("DX v5.6 dynamics", () => {
       })
       .build();
     let calls = 0;
-    await agent.run({
+    await runAgent(agent, {
       input: "go",
       onModelCall: async () => {
         calls += 1;

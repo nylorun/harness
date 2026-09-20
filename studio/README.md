@@ -1,11 +1,13 @@
-# `@nylorun/studio`
+# @nylorun/studio
 
-Local developer Studio for Nylorun agents.
+Local session dashboard for the OSS Runtime. Requires Node 24.
 
-See [docs.nylorun.com](https://docs.nylorun.com) for installation, configuration, and usage.
+The starter's `npm run dev` starts Studio automatically. To attach to an already running local project, use `npm run studio`, or `nylorun studio --runtime-url http://127.0.0.1:8787`.
 
-## Package independence
+Studio lists registered agents and sessions, sends text, displays completed assistant responses and tool inputs/results, restores history, observes canonical SSE events, and cancels a turn. Responses appear when complete; token streaming, media, approvals UI, and remote deployment are deferred.
 
-Studio exposes `startStudio()` and has no engine or Runtime dependency. The `nylorun` executable is supplied by `@nylorun/runtime`; Studio no longer publishes `nylo`. Runtime loads the application-installed Studio for development or dashboard attachment. Studio accepts neutral version-2 manifests as well as legacy `harness.manifest` documents.
+The local Node host proxies a small allowlist of Runtime HTTP/SSE routes. It holds the server credential, stamps local ownership, and excludes executor claims/results. The browser never receives Runtime or executor credentials. Studio binds loopback and accepts only a loopback Runtime destination.
 
-Repository development: [contributing](../CONTRIBUTING.md). Package publication: [releasing](../RELEASING.md).
+Programmatic hosts use `startStudio({ runtimeUrl, serverKey, open: false })` and await the returned handle's `close()`. Studio uses the SDK; its browser bundle contains no harness engine. The CLI belongs to `@nylorun/runtime`.
+
+For repository development and publication, see [CONTRIBUTING](../CONTRIBUTING.md) and [RELEASING](../RELEASING.md).

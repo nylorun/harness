@@ -1,3 +1,4 @@
+import { runAgent } from "./run-agent.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { Agent, validateExecutionState, type ExecutionState } from "../src/index.js";
@@ -10,10 +11,10 @@ const roundtrip = (state: ExecutionState): ExecutionState => JSON.parse(JSON.str
 describe("stateless execution", () => {
   it("supports minimal calls, independent runs and serializable immutable continuation", async () => {
     const agent = Agent({ id: "a", name: "A" }).build();
-    const one = await agent.run({ input: "one", onModelCall: async () => "hello" });
+    const one = await runAgent(agent, { input: "one", onModelCall: async () => "hello" });
     expect(one.status).toBe("completed");
     const saved = JSON.stringify(one.state);
-    const two = await agent.run({
+    const two = await runAgent(agent, {
       state: roundtrip(one.state),
       input: "two",
       onModelCall: async (call) => {
@@ -25,18 +26,19 @@ describe("stateless execution", () => {
     expect(JSON.stringify(one.state)).toBe(saved);
     expect(validateExecutionState(two.state)).toEqual(two.state);
     expect(
-      (await agent.run({ input: "independent", onModelCall: async () => "ok" })).state.turnCount,
+      (await runAgent(agent, { input: "independent", onModelCall: async () => "ok" })).state
+        .turnCount,
     ).toBe(1);
   });
 
   it("ignores a leftover executionVersion on saved state", async () => {
     const agent = Agent({ id: "a", name: "A" }).build();
-    const result = await agent.run({ input: "go", onModelCall: async () => "ok" });
+    const result = await runAgent(agent, { input: "go", onModelCall: async () => "ok" });
     const legacy = { ...result.state, executionVersion: "1" };
     const checked = validateExecutionState(legacy);
     expect(checked).not.toHaveProperty("executionVersion");
     expect(checked.agentId).toBe("a");
-    const continued = await agent.run({
+    const continued = await runAgent(agent, {
       state: legacy,
       input: "again",
       onModelCall: async () => "next",
@@ -68,7 +70,7 @@ describe("stateless execution", () => {
       })
       .build();
     let n = 0;
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       input: "go",
       info: { tenantId: "private-principal" },
       onEvent: (event) => {
@@ -125,7 +127,7 @@ describe("stateless execution", () => {
         })
         .build();
     const firstSeen = vi.fn();
-    const first = await make(firstSeen).run({
+    const first = await runAgent(make(firstSeen), {
       input: "purge",
       info: { role: "admin" },
       onModelCall: async () => candidate("purge"),
@@ -133,7 +135,7 @@ describe("stateless execution", () => {
     expect(first.status).toBe("paused");
     if (first.status !== "paused") throw new Error("Expected pause");
     const seen = vi.fn();
-    const second = await make(seen).run({
+    const second = await runAgent(make(seen), {
       state: roundtrip(first.state),
       input: { kind: "approve", interactionId: first.pending[0]!.interaction!.id, approved: true },
       info: { role: "user" },
@@ -157,7 +159,7 @@ describe("stateless execution", () => {
           ],
         })
         .build();
-    const first = await make().run({
+    const first = await runAgent(make(), {
       input: "go",
       onModelCall: async () => ({
         output: [...candidate("done", "d").output, ...candidate("job", "j").output],
@@ -165,7 +167,7 @@ describe("stateless execution", () => {
     });
     expect(first.status).toBe("paused");
     if (first.status !== "paused") throw new Error("Expected pause");
-    const second = await make().run({
+    const second = await runAgent(make(), {
       state: roundtrip(first.state),
       input: {
         kind: "settle",
@@ -178,7 +180,7 @@ describe("stateless execution", () => {
     expect(done).toHaveBeenCalledTimes(1);
     expect(deferred).toHaveBeenCalledTimes(1);
     await expect(
-      make().run({
+      runAgent(make(), {
         state: second.state,
         input: {
           kind: "settle",
@@ -217,7 +219,7 @@ describe("stateless execution", () => {
       .build();
     const run = (table: string) => {
       let n = 0;
-      return agent.run({
+      return runAgent(agent, {
         input: "query",
         info: { table },
         onModelCall: async () => (n++ === 0 ? candidate("query") : "done"),
@@ -238,7 +240,7 @@ describe("stateless execution", () => {
       .use({ id: "c", tools: [{ name: "t", inputSchema: z.object({}), execute }] })
       .build();
     await expect(
-      agent.run({
+      runAgent(agent, {
         input: "go",
         onModelCall: async () => candidate("t"),
         record: async (state) => {
@@ -268,7 +270,11 @@ describe("stateless execution", () => {
       })
       .build();
     const model = vi.fn(async () => candidate("t"));
-    const result = await agent.run({ input: "go", signal: controller.signal, onModelCall: model });
+    const result = await runAgent(agent, {
+      input: "go",
+      signal: controller.signal,
+      onModelCall: model,
+    });
     expect(result.status).toBe("cancelled");
     expect(JSON.stringify(result.state)).toContain("effect completed");
     expect(model).toHaveBeenCalledTimes(1);
@@ -280,7 +286,7 @@ describe("stateless execution", () => {
       name: "A",
       outputSchema: z.object({ count: z.number() }),
     }).build();
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       input: "go",
       onModelCall: async (call) => {
         expect(call.outputSchema).toBeDefined();
@@ -290,9 +296,11 @@ describe("stateless execution", () => {
     expect(result).toMatchObject({ status: "completed", output: { count: 3 } });
     const invoke = vi.fn(async () => "bad");
     await expect(
-      Agent({ id: "a", name: "A" })
-        .build()
-        .run({ state: result.state, input: "again", onModelCall: invoke }),
+      runAgent(Agent({ id: "a", name: "A" }).build(), {
+        state: result.state,
+        input: "again",
+        onModelCall: invoke,
+      }),
     ).rejects.toMatchObject({ code: "execution.incompatible" });
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -308,7 +316,7 @@ it("rejects obsolete or malformed run controls before effects", async () => {
     { signal: null },
   ]) {
     await expect(
-      agent.run(Object.assign({ input: "go", onModelCall }, invalid) as never),
+      runAgent(agent, Object.assign({ input: "go", onModelCall }, invalid) as never),
     ).rejects.toMatchObject({ code: "execution.invalid-input" });
   }
   expect(onModelCall).not.toHaveBeenCalled();
@@ -328,10 +336,10 @@ it("cancels a saved pause without accepting or dispatching its pending actions",
       },
     })
     .build();
-  const first = await agent.run({ input: "go", onModelCall: async () => candidate("t") });
+  const first = await runAgent(agent, { input: "go", onModelCall: async () => candidate("t") });
   expect(first.status).toBe("paused");
   const model = vi.fn(async () => "unexpected");
-  const result = await agent.run({
+  const result = await runAgent(agent, {
     state: roundtrip(first.state),
     input: { kind: "continue" },
     signal: AbortSignal.abort(),

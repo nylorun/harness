@@ -1,35 +1,32 @@
+import { createHash } from 'node:crypto';
 import assert from "node:assert/strict";
 import {
   mkdir,
   mkdtemp,
   readFile,
   writeFile,
-  access,
   rm,
+  stat,
 } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
+import { chromium } from "playwright-core";
 import { root, npmCli, run } from "../../scripts/lib/repo.mjs";
 import { ProcessGroup } from "../../scripts/lib/processes.mjs";
 import { availablePort } from "../../scripts/lib/development.mjs";
-
-// Run after building all packages. --serve retains Studio for manual browser verification.
-const keepServing = process.argv.includes("--serve");
-await mkdir(join(root, ".tmp"), { recursive: true });
-const temporary = await mkdtemp(join(root, ".tmp/starter-smoke-"));
+const temporary = await mkdtemp(join(tmpdir(), "nylorun-release-"));
 const group = new ProcessGroup();
+let browser;
+const tarballs = process.env.NYLORUN_STACK_TARBALLS
+  ? JSON.parse(await readFile(process.env.NYLORUN_STACK_TARBALLS, "utf8"))
+  : {};
+const names = ["harness", "agents", "runtime", "studio", "create-agent"];
 try {
   const artifacts = join(temporary, "artifacts");
   await mkdir(artifacts);
-  const tarballs = process.env.NYLORUN_STACK_TARBALLS
-    ? JSON.parse(await readFile(process.env.NYLORUN_STACK_TARBALLS, "utf8"))
-    : {};
-  for (const name of ["harness", "runtime", "studio", "create-agent"]) {
-    if (process.env.NYLORUN_STACK_TARBALLS) {
-      assert.equal(typeof tarballs[name], "string", `Missing ${name} release tarball`);
-      await access(tarballs[name]);
-      continue;
-    }
+  for (const name of names) {
+    if (tarballs[name]) continue;
     const packed = JSON.parse(
       await run(
         process.execPath,
@@ -41,164 +38,213 @@ try {
           "--pack-destination",
           artifacts,
         ],
-        { cwd: join(root, name), capture: true }
-      )
+        { cwd: join(root, name), capture: true },
+      ),
     );
     tarballs[name] = join(artifacts, packed[0].filename);
   }
-  // Read the actual packed creator template, not the source checkout.
+  await mkdir(join(root, ".tmp/release-local"), { recursive: true });
+  const identities = {};
+  for (const name of names) identities[name] = { file: tarballs[name].split("/").at(-1), sha256: createHash("sha256").update(await readFile(tarballs[name])).digest("hex") };
+  await writeFile(join(root, ".tmp/release-local/artifacts.json"), JSON.stringify(identities, null, 2) + "\n");
   const creator = join(temporary, "creator");
   await mkdir(creator);
   await run("tar", ["-xzf", tarballs["create-agent"], "-C", creator]);
   const { starterFiles } = await import(
     pathToFileURL(join(creator, "package/dist/scaffold.js")).href
   );
-  const compatibility = JSON.parse(
-    await readFile(join(creator, "package/compatibility.json"), "utf8")
+  const pins = JSON.parse(
+    await readFile(join(creator, "package/compatibility.json"), "utf8"),
   );
-  const project = join(temporary, "my-agent");
-  await mkdir(project);
-  const files = await starterFiles(compatibility, true);
-  assert.equal(files["scripts/dev.mjs"], undefined);
-  assert.equal(files["tsconfig.build.json"], undefined);
-  for (const [path, content] of Object.entries(files)) {
-    await mkdir(dirname(join(project, path)), { recursive: true });
-    await writeFile(join(project, path), content);
-  }
-  const manifest = JSON.parse(files["package.json"]);
-  for (const name of ["harness", "runtime"])
-    manifest.dependencies[`@nylorun/${name}`] = `file:${tarballs[name]}`;
-  manifest.devDependencies["@nylorun/studio"] = `file:${tarballs.studio}`;
-  await writeFile(
-    join(project, "package.json"),
-    JSON.stringify(manifest, null, 2)
-  );
-  await run(
-    process.execPath,
-    [npmCli(), "install", "--no-audit", "--no-fund"],
-    { cwd: project }
-  );
-  await run(process.execPath, [npmCli(), "run", "check"], { cwd: project });
-  await assert.rejects(access(join(project, "dist")));
-  // Verify the existing asset-copy contract with a non-TypeScript agent asset.
-  await writeFile(join(project, "agents/assistant/fixture.txt"), "asset");
-  await run(process.execPath, [npmCli(), "run", "build"], { cwd: project });
-  await access(join(project, "dist/src/index.js"));
-  assert.equal(
-    await readFile(join(project, "dist/agents/assistant/fixture.txt"), "utf8"),
-    "asset"
-  );
-  // An imported application must be usable without starting a listening server.
-  await run(process.execPath, ["--input-type=module", "-e",
-    "import app from './dist/src/index.js'; const response = await app.request('/agents/v1/agents'); if (response.status !== 200) throw new Error('Exported app routes failed');"
-  ], { cwd: project, timeout: 5_000 });
-  const port = await availablePort();
-  const productionEnv = { ...process.env, PORT: String(port) };
-  delete productionEnv.NYLORUN_DEV;
-  const production = group.start(
-    "production",
-    process.execPath,
-    [join(project, "node_modules/@nylorun/runtime/dist/cli.js"), "start"],
-    { cwd: project, env: productionEnv }
-  );
-  const discoveryUrl = `http://127.0.0.1:${port}/agents/v1/agents`;
-  await production.ready(discoveryUrl);
-  const productionResponse = await fetch(discoveryUrl, {
-    headers: { origin: "http://localhost:4161" },
-  });
-  assert.equal(
-    productionResponse.headers.get("access-control-allow-origin"),
-    null
-  );
-  await production.stop();
-  // Keep the generated assistant; inject only a deterministic model adapter for this smoke test.
-  await writeFile(
-    join(project, "src/index.ts"),
-    files["src/index.ts"].replace(
-      "new Runtime()",
-      'new Runtime({ onModelCall: async () => ({ output: [{ type: "text", text: "Starter smoke response" }], finishReason: "stop" }) })'
-    )
-  );
-  const development = group.start(
-    "development",
-    process.execPath,
-    [
-      join(project, "node_modules/@nylorun/runtime/dist/cli.js"),
-      "dev",
-      "--no-open",
-    ],
-    { cwd: project, env: { ...process.env, PORT: String(port) } }
-  );
-  await development.ready(discoveryUrl);
-  const line = await development.line((line) => line.startsWith("Studio on "));
-  const studio = line.slice("Studio on ".length);
-  const response = await fetch(discoveryUrl, { headers: { origin: studio } });
-  assert.equal(response.headers.get("access-control-allow-origin"), studio);
-  const discovery = await response.json();
-  assert.equal(discovery.agents[0].id, "assistant");
-  const config = await (
-    await fetch(`${studio}/nylo-studio.config.json`)
-  ).json();
-  assert.equal(config.agentServerUrl, `http://localhost:${port}/agents`);
-  const agentManifest = await (
-    await fetch(`http://localhost:${port}${discovery.agents[0].manifestUrl}`)
-  ).json();
-  const streamed = await fetch(
-    `http://localhost:${port}${agentManifest.endpoints.agUi}`,
-    {
-      method: "POST",
-      headers: { origin: studio, "content-type": "application/json" },
-      body: JSON.stringify({
-        threadId: "smoke",
-        runId: "smoke",
-        messages: [{ id: "input", role: "user", content: "hello" }],
-        tools: [],
-        context: [],
-        forwardedProps: {},
-      }),
+  const projects = [];
+  for (const studio of [true, false]) {
+    const project = join(temporary, studio ? "with-studio" : "headless");
+    await mkdir(project);
+    const files = await starterFiles(pins, studio);
+    for (const [path, content] of Object.entries(files)) {
+      await mkdir(dirname(join(project, path)), { recursive: true });
+      await writeFile(join(project, path), content);
     }
-  );
-  assert.equal(streamed.headers.get("access-control-allow-origin"), studio);
-  const events = await streamed.text();
-  assert.ok(events.includes("Starter smoke response"), events);
-  assert.ok(events.includes("RUN_FINISHED"), events);
-  // Actual tsx reload should preserve Studio and serve the edited agent.
-  await writeFile(
-    join(project, "agents/assistant/agent.ts"),
-    files["agents/assistant/agent.ts"].replace(
-      'name: "Assistant"',
-      'name: "Assistant reloaded"'
-    )
-  );
-  const deadline = Date.now() + 10_000;
-  let reloaded = false;
-  while (Date.now() < deadline) {
-    try {
-      reloaded =
-        (
-          await (
-            await fetch(
-              `http://localhost:${port}/agents/assistant/manifest.json`
-            )
-          ).json()
-        ).name === "Assistant reloaded";
-    } catch {}
-    if (reloaded) break;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const manifest = JSON.parse(files["package.json"]);
+    // Pin the entire release combination, including the SDK's transitive harness, to exact packed artifacts.
+    for (const name of ["harness", "agents", "runtime"])
+      manifest.dependencies[`@nylorun/${name}`] = `file:${tarballs[name]}`;
+    if (studio)
+      manifest.devDependencies["@nylorun/studio"] = `file:${tarballs.studio}`;
+    await writeFile(
+      join(project, "package.json"),
+      JSON.stringify(manifest, null, 2),
+    );
+    await run(
+      process.execPath,
+      [npmCli(), "install", "--ignore-scripts", "--no-audit", "--no-fund"],
+      { cwd: project },
+    );
+    await run(process.execPath, [npmCli(), "run", "build"], { cwd: project });
+    projects.push(project);
   }
-  assert.ok(reloaded, "tsx did not reload the edited agent");
-  assert.equal((await fetch(`${studio}/nylo-studio.config.json`)).status, 200);
-  console.log(
-    `Packed starter passed: check/build/assets, production, CORS, discovery, streamed conversation, and watch reload.\nProject: ${project}\nBrowser verification: ${studio}`
+  const project = projects[0];
+  const port = await availablePort();
+  const url = `http://127.0.0.1:${port}`;
+  const env = {
+    ...process.env,
+    PORT: String(port),
+    NYLORUN_DEV_MODEL: "fixture",
+  };
+  const dev = group.start(
+    "generated-dev",
+    process.execPath,
+    [npmCli(), "run", "dev", "--", "--no-open"],
+    { cwd: project, env },
   );
-  if (keepServing)
-    await new Promise((resolve) => {
-      process.once("SIGINT", resolve);
-      process.once("SIGTERM", resolve);
-    });
-  await development.stop();
-  await availablePort(port);
+  const line = await dev.line((l) => l.startsWith("Studio on "));
+  const studioUrl = line.slice("Studio on ".length);
+  await dev.line((l) => l.startsWith("Local project ready"));
+  const credentials = JSON.parse(
+    await readFile(join(project, ".nylorun/local-credentials.json"), "utf8"),
+  );
+  assert.equal(
+    (await stat(join(project, ".nylorun/local-credentials.json"))).mode & 0o777,
+    0o600,
+  );
+  const configText = await (
+    await fetch(studioUrl + "/nylo-studio.config.json")
+  ).text();
+  assert.ok(!configText.includes(credentials.serverKey));
+  assert.ok(!configText.includes("executor"));
+  const forbidden = await fetch(studioUrl + "/_studio/runtime/v1/actions");
+  assert.equal(forbidden.status, 404);
+  const csrf = await fetch(studioUrl + "/_studio/runtime/v1/sessions/nope", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(csrf.status, 403);
+  browser = await chromium.launch({
+    executablePath:
+      process.env.NYLORUN_CHROME_PATH ??
+      (process.platform === "darwin"
+        ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        : undefined),
+    headless: true,
+  });
+  const page = await browser.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(studioUrl);
+  await page.getByRole("button", { name: "New session", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Message" })
+    .fill("Look up order demo-123");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page
+    .getByText("Tool · lookup_order · completed", { exact: true })
+    .waitFor({ timeout: 20000 });
+  await page.getByText("Assistant", { exact: true }).waitFor();
+  assert.match(await page.locator("main").innerText(), /shipped/);
+  await page
+    .getByRole("textbox", { name: "Message" })
+    .fill("What did I ask earlier?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByText(/I remember:/).waitFor();
+  const sessionUrl = page.url();
+  const sessionId = sessionUrl.split("/").at(-1);
+  await page.reload();
+  await page.getByText(/I remember:/).waitFor();
+  assert.match(await page.locator("main").innerText(), /demo-123/);
+  assert.deepEqual(errors, []);
+  await mkdir(join(root, ".tmp/release-local"), { recursive: true });
+  await page.screenshot({
+    path: join(root, ".tmp/release-local/studio.png"),
+    fullPage: true,
+  });
+  // One ordinary source edit must restart the stack and register the updated definition.
+  const source = join(project, "agents/assistant/agent.ts");
+  await writeFile(
+    source,
+    (await readFile(source, "utf8")).replace(
+      "Order assistant",
+      "Updated order assistant",
+    ),
+  );
+  let updated = false;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      const response = await fetch(url + "/v1/agents", {
+        headers: { authorization: `Bearer ${credentials.serverKey}` },
+      });
+      const body = await response.json();
+      if (body.agents?.[0]?.manifest.name === "Updated order assistant") {
+        updated = true;
+        break;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(updated, "source edit restarted registry");
+  await dev.stop();
+  await run(process.execPath, [npmCli(), "run", "build"], { cwd: project });
+  const started = group.start(
+    "compiled-start",
+    process.execPath,
+    [npmCli(), "start"],
+    { cwd: project, env },
+  );
+  await started.line((l) => l.startsWith("Local project ready"));
+  const sdk = await import(
+    pathToFileURL(join(project, "node_modules/@nylorun/agents/dist/index.js"))
+      .href
+  );
+  const client = sdk.createClient({ url, key: credentials.serverKey });
+  const restored = await client.session(sessionId).history();
+  assert.ok(restored.items.some((e) => e.type === "turn.completed"));
+  const session = await client.createSession({
+    agentId: "assistant",
+    ownerUserId: "local-developer",
+  });
+  await session.input("Look up order demo-123", {
+    idempotencyKey: crypto.randomUUID(),
+  });
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 20000);
+  let complete = false;
+  try {
+    for await (const event of session.observe({ signal: abort.signal })) {
+      if (event.type === "turn.failed")
+        throw new Error(JSON.stringify(event.payload));
+      if (event.type === "turn.completed") {
+        assert.match(JSON.stringify(event.payload), /shipped/);
+        complete = true;
+        break;
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+    abort.abort();
+  }
+  assert.ok(complete, "compiled start executes tool");
+  await started.stop();
+  const headless = group.start(
+    "headless-dev",
+    process.execPath,
+    [npmCli(), "run", "dev", "--", "--no-open"],
+    { cwd: projects[1], env: { ...env, PORT: String(await availablePort()) } },
+  );
+  await headless.line((l) => l.startsWith("Local project ready"));
+  await headless.stop();
+  const missing = group.start(
+    "missing-config",
+    process.execPath,
+    [npmCli(), "start"],
+    { cwd: projects[1], env: { ...process.env, NYLORUN_DEV_MODEL: "" } },
+  );
+  await missing.line((l) => l.includes("configure"));
+  assert.notEqual(await missing.exit, 0);
+  console.log(
+    "PASS: packed creator, both starters, browser tool/results/history, source restart, compiled tool execution, shutdown, credentials, and missing-configuration error.",
+  );
 } finally {
+  await browser?.close();
   await group.close();
-  if (!keepServing) await rm(temporary, { recursive: true, force: true });
+  await rm(temporary, { recursive: true, force: true });
 }

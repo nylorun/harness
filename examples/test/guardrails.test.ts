@@ -1,3 +1,4 @@
+import { run, bindingFromAgent, type RunOptions } from "@nylorun/harness/engine";
 import { Agent, model } from "@nylorun/harness";
 import { describe, expect, it } from "vitest";
 import {
@@ -22,9 +23,8 @@ function policyAgent(adapter: ReturnType<typeof model>) {
     .use("tool-input", toolInputGuardrail)
     .use("tool-output", toolOutputGuardrail)
     .build();
-  const run = agent.run.bind(agent);
-  agent.run = (options) => run({ ...options, onModelCall: adapter });
-  return agent;
+  // Test-only execution helper; production definitions remain execution-free.
+  return Object.assign(agent, { run: (options: RunOptions) => run({ binding: bindingFromAgent(agent), ...options, onModelCall: adapter }) });
 }
 
 describe("guardrails", () => {
@@ -157,9 +157,8 @@ describe("guardrails", () => {
 });
 
 it("blocks Studio text content through Runtime before invoking the model", async () => {
-  const { Runtime, memorySessions, serveAgents } = await import(
-    "@nylorun/runtime"
-  );
+  const { Runtime, serveAgents } = await import("../../runtime/dist/server/host.js");
+  const { memorySessions } = await import("../../runtime/dist/sessions/store.js");
   let calls = 0;
   const agent = policyAgent(
     model(async () => {

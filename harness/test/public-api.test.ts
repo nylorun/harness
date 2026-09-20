@@ -26,7 +26,14 @@ describe("public API", () => {
     expect(manifest.exports).toHaveProperty(".");
     expect(manifest.exports).toHaveProperty("./model/adapters");
     expect(manifest.exports).toHaveProperty("./engine");
-    expect(Object.keys(manifest.exports).sort()).toEqual([".", "./engine", "./model/adapters"]);
-    expect(manifest.dependencies).toBeUndefined();
+    expect(Object.keys(manifest.exports).sort()).toEqual([
+      ".",
+      "./compatibility",
+      "./contracts",
+      "./define",
+      "./engine",
+      "./model/adapters",
+    ]);
+    expect(manifest.dependencies).toEqual({ "@noble/hashes": "^1.8.0" });
   });
 });

@@ -17,7 +17,7 @@ test(
         packages.map((name) => [name, "1.0.0-beta"]),
       );
       const compatibility = {
-        harness: "1.0.0-beta",
+        harness: "1.0.0-beta", agents: "1.0.0-beta",
         runtime: "1.0.0-beta",
         studio: "1.0.0-beta",
       };

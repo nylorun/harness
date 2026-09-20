@@ -74,6 +74,7 @@ try {
   const allowed = (path) =>
     path === "package.json" ||
     path === "README.md" ||
+    path === "HOST_CONTRACT.md" ||
     path === "CHANGELOG.md" ||
     path === "LICENSE" ||
     /^dist\/.+\.(?:js|d\.ts)$/.test(path);

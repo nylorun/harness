@@ -24,7 +24,7 @@ test(
         type: "module",
         scripts: { dev: "node ../runtime/src/main.js" },
       });
-      for (const name of ["harness", "runtime"]) {
+      for (const name of ["harness", "agents", "runtime"]) {
         await mkdir(join(repo, name, "src"), { recursive: true });
         await writeJson(join(repo, name, "package.json"), {
           type: "module",
@@ -40,6 +40,7 @@ test(
           }.js');`
         );
       }
+      await writeFile(join(repo, "agents/src/main.js"), "export {};");
       const source = join(repo, "harness/src/main.js");
       await writeFile(source, 'export const name = "before";');
       await writeFile(

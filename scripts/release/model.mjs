@@ -79,6 +79,16 @@ export async function prepareVersions(repo, channel) {
         calculated.plan.compatibility.harness;
       await writeJson(runtimeManifestPath, runtimeManifest);
     }
+    for (const name of ["agents", "runtime", "studio"]) {
+      const path = join(repo, name, "package.json");
+      const manifest = await readJson(path);
+      for (const dependency of ["harness", "agents"]) {
+        if (manifest.dependencies?.[`@nylorun/${dependency}`])
+          manifest.dependencies[`@nylorun/${dependency}`] =
+            calculated.plan.compatibility[dependency];
+      }
+      await writeJson(path, manifest);
+    }
     // Numbered prerelease state is retired; already-applied changes must not replay.
     if (legacy) {
       for (const item of allChangesets.filter((item) => consumed.has(item.id)))
@@ -141,7 +151,7 @@ export async function validatePlan(plan, repo) {
       throw new Error(`Release version differs from ${name}/package.json.`);
   }
   const actual = await readJson(join(repo, "create-agent/compatibility.json"));
-  for (const name of ["harness", "runtime", "studio"]) {
+  for (const name of ["harness", "agents", "runtime", "studio"]) {
     const version = plan.compatibility?.[name];
     if (
       !semver.valid(version) ||
@@ -158,9 +168,9 @@ export async function validatePlan(plan, repo) {
     throw new Error(
       "Runtime's Harness dependency must match the creator compatibility pin.",
     );
-  if (Object.keys(plan.compatibility).length !== 3)
+  if (Object.keys(plan.compatibility).length !== 4)
     throw new Error(
-      "Compatibility must contain exactly Harness, Runtime, and Studio.",
+      "Compatibility must contain exactly Harness, Agents, Runtime, and Studio.",
     );
 }
 
@@ -199,7 +209,7 @@ export async function publishCandidates(
       report(`${name}@${version}: already published with matching integrity`);
     } else {
       if (name === "create-agent") {
-        for (const engine of ["harness", "runtime", "studio"]) {
+        for (const engine of ["harness", "agents", "runtime", "studio"]) {
           if (!(await registry.lookup(engine, plan.compatibility[engine])))
             throw new Error(
               `Creator pin is unavailable: ${engine}@${plan.compatibility[engine]}`,

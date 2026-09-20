@@ -1,17 +1,8 @@
-import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const root = fileURLToPath(new URL("../../", import.meta.url));
-const catalog = await readFile(join(root, "examples/agents/index.ts"), "utf8");
-const index = await readFile(join(root, "examples/src/index.ts"), "utf8");
-assert.ok(index.includes('localSessions({ root: ".data/sessions" })'));
-assert.ok(index.includes("runtime.close()"));
-assert.ok(index.includes("agent.close?.()"));
-assert.ok(
-  index.includes('serveAgents({ agents, runtime })')
-);assert.ok(catalog.includes("createRegistry"));
-await access(join(root, "examples/dist/src/index.js"));
-await access(join(root, "examples/dist/agents/skills/catalog/structured-summary/SKILL.md"));
-console.log("Compiled Hono example assets passed.");
+import assert from 'node:assert/strict';
+import {access,readFile} from 'node:fs/promises';
+const root=new URL('../../examples/',import.meta.url);
+assert.match(await readFile(new URL('agents/index.ts',root),'utf8'),/release\/index/);
+await access(new URL('dist/agents/release/agent.js',root));
+// Advanced examples remain preserved outside the supported default registry.
+await access(new URL('agents/skills/catalog/structured-summary/SKILL.md',root));
+console.log('Supported registry and preserved advanced assets passed.');

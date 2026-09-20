@@ -10,10 +10,10 @@ import {
 import {
   Runtime,
   serveAgents,
-  type RuntimeModelAdapter,
-} from "@nylorun/runtime";
+} from "../../runtime/dist/server/host.js";
+import type { RuntimeModelAdapter } from "../../runtime/dist/contracts.js";
 import { localSessions, localMedia } from "@nylorun/runtime/node";
-import { createRegistry } from "../agents/index.js";
+import { createRegistry } from "../agents/legacy-registry.js";
 import type { ImageEditor } from "../agents/interior-design/image-editor.js";
 
 /** Minimal ToolExecutionContext for unit tests under DX v5.6. */

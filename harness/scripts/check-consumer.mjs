@@ -23,6 +23,7 @@ export function checkPackedConsumer(cache) {
   const harness = pack(process.cwd());
   const require = createRequire(import.meta.url);
   const zod = pack(dirname(require.resolve("zod/package.json")));
+  const hashes = pack(dirname(require.resolve("@noble/hashes/sha256")));
   const consumer = join(cache, "consumer");
   mkdirSync(consumer);
   writeFileSync(
@@ -30,17 +31,18 @@ export function checkPackedConsumer(cache) {
     JSON.stringify({ name: "interface-consumer", private: true, type: "module" }),
   );
   run(
-    ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", harness, zod],
+    ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", harness, zod, hashes],
     consumer,
   );
   const usage = readFileSync("test/types/usage.ts", "utf8").replaceAll(
     "../../src/index.js",
     "@nylorun/harness",
   );
+  const migratedUsage = usage.replaceAll("../../src/engine/index.js", "@nylorun/harness/engine");
   const file = join(consumer, "usage.ts");
   writeFileSync(
     file,
-    usage +
+    migratedUsage +
       '\n// @ts-expect-error Compiled definition pieces are not exported.\nimport type { AgentDefinition } from "@nylorun/harness/definition/agent-definition.js";\n',
   );
   const program = ts.createProgram([file], {
@@ -69,16 +71,16 @@ export function checkPackedConsumer(cache) {
     import { z } from 'zod';
     assert.equal('BuiltAgent' in api, false);
     const agent = api.Agent({ id: 'packed', name: 'Packed', outputSchema: z.object({ count: z.number() }) }).build();
-    assert.deepEqual(Object.keys(agent).sort(), ['hash', 'id', 'manifest', 'name', 'run', 'toJSON']);
+    assert.deepEqual(Object.keys(agent).sort(), ['hash', 'id', 'manifest', 'name', 'toJSON']);
     assert.equal(typeof agent.hash, 'string');
     assert.equal(agent.toJSON().schemaVersion, 2);
     const state = api.createExecutionState(agent);
-    const result = await agent.run({ state, input: 'go', onModelCall: async () => ({ output: [{type: 'json', value: {count: 1}}] }) });
+    const engine = await import('@nylorun/harness/engine');
+    const result = await engine.run({ binding: engine.bindingFromAgent(agent), state, input: 'go', onModelCall: async () => ({ output: [{type: 'json', value: {count: 1}}] }) });
     assert.equal(result.status, 'completed');
     assert.deepEqual(result.output, {count: 1});
     assert.throws(() => api.createExecutionState({...agent}), /original agent/);
     await assert.rejects(import('@nylorun/harness/definition/agent-definition.js'), {code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'});
-    const engine = await import('@nylorun/harness/engine');
     assert.equal(typeof engine.run, 'function');
   `,
   );

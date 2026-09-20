@@ -1,3 +1,4 @@
+import { openSession, setDefaultRuntime, listSessions, getSession, deleteSession } from "../src/session/api.js";
 import { describe, expect, it, vi } from "vitest";
 import { Agent, tool } from "@nylorun/harness";
 import { z } from "zod";
@@ -5,13 +6,8 @@ import {
   Runtime,
   SessionHost,
   memorySessions,
-  openSession,
-  setDefaultRuntime,
   serveAgents,
-  listSessions,
-  getSession,
-  deleteSession,
-} from "../src/index.js";
+} from "./legacy-api.js";
 
 describe("Runtime DX v5.6", () => {
   it("seeds ExecutionState with manifestHash via engine createEngineState", async () => {

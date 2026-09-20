@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { npmCli } from "../lib/repo.mjs";
@@ -31,6 +31,7 @@ export function publicCreatorEnvironment(environment, npmrc, port) {
     NPM_CONFIG_USERCONFIG: npmrc,
     NPM_CONFIG_GLOBALCONFIG: npmrc + ".global",
     PORT: String(port),
+    NYLORUN_DEV_MODEL: "fixture",
   };
 }
 
@@ -48,9 +49,10 @@ export async function publicCreatorSmoke(version) {
       [npmCli(), ...publicCreatorArguments(version)],
       { cwd: temporary, env: publicCreatorEnvironment(process.env, npmrc, port) },
     );
-    await child.ready(`http://127.0.0.1:${port}/agents/v1/agents`, 120_000);
+    await child.ready(`http://127.0.0.1:${port}/ready`, 120_000);
+    const { serverKey } = JSON.parse(await readFile(join(temporary, "application/.nylorun/local-credentials.json"), "utf8"));
     const discovery = await (
-      await fetch(`http://127.0.0.1:${port}/agents/v1/agents`)
+      await fetch(`http://127.0.0.1:${port}/v1/agents`, { headers: { authorization: `Bearer ${serverKey}` } })
     ).json();
     if (!JSON.stringify(discovery).includes('"assistant"'))
       throw new Error("Public creator did not serve its seed agent.");

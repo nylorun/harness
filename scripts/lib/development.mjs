@@ -5,7 +5,7 @@ import { ProcessGroup } from "./processes.mjs";
 import { npmCli, root } from "./repo.mjs";
 
 export function developmentOptions(args) {
-  const options = { studio: true, open: true, port: 3000, studioPort: 4161 };
+  const options = { studio: true, open: true, port: 8787, studioPort: 4161 };
   const seen = new Set();
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
@@ -90,10 +90,10 @@ export async function develop(
   };
   async function build(name, initial = false) {
     const cwd = join(repo, name);
-    if (!initial) await command(`${name}:typecheck`, ["run", "typecheck"], cwd);
+    if (!initial) await command(`${name}:typecheck`, ["run", name === "agents" ? "check" : "typecheck"], cwd);
     await command(
       `${name}:build`,
-      ["run", name === "studio" && !initial ? "build:server" : "build"],
+      ["run", "build"],
       cwd,
     );
   }
@@ -105,7 +105,7 @@ export async function develop(
       [join(repo, "runtime/dist/cli.js"), "dev", "--no-studio"],
       { cwd: project, env: { ...process.env, PORT: String(options.port) } },
     );
-    await runtime.ready(`http://127.0.0.1:${options.port}/agents/v1/agents`);
+    await runtime.ready(`http://127.0.0.1:${options.port}/ready`);
   }
   async function startStudio(open) {
     if (stopping || !options.studio) return;
@@ -118,6 +118,7 @@ export async function develop(
         String(options.port),
         String(options.studioPort),
         String(open),
+        project,
       ],
       { cwd: repo },
     );
@@ -129,7 +130,7 @@ export async function develop(
     try {
       for (const name of names) await build(name);
       if (stopping) return;
-      if (names.some((name) => name === "harness" || name === "runtime")) {
+      if (names.some((name) => name === "harness" || name === "agents" || name === "runtime")) {
         log(
           "[dev] Restarting Runtime; active sessions end after package changes.",
         );
@@ -162,6 +163,7 @@ export async function develop(
     if (!built)
       for (const name of [
         "harness",
+        "agents",
         "runtime",
         ...(options.studio ? ["studio"] : []),
       ])
@@ -176,17 +178,17 @@ export async function develop(
     );
     if (stopping) throw new Error("Development stopped.");
     watcher = watch(
-      ["harness", "runtime", ...(options.studio ? ["studio"] : [])].map(
-        (name) => join(repo, name, "src"),
+      ["harness", "agents", "runtime", ...(options.studio ? ["studio"] : [])].map(
+        (name) => join(repo, name, name === "studio" ? "" : "src"),
       ),
       { ignoreInitial: true },
     );
     watcher.on("all", (_event, path) => {
       if (stopping) return;
-      const name = ["harness", "runtime", "studio"].find((name) =>
-        path.startsWith(join(repo, name, "src")),
+      const name = ["harness", "agents", "runtime", "studio"].find((name) =>
+        path.startsWith(join(repo, name, name === "studio" ? "" : "src")),
       );
-      if (!name) return;
+      if (!name || /[/\\](dist|node_modules)[/\\]/.test(path)) return;
       pending.add(name);
       clearTimeout(timer);
       timer = setTimeout(() => {

@@ -1,45 +1,23 @@
-# My agent
+# My Nylorun agent
 
-The creator configures a provider before starting development. For later sessions, run `npm run dev`. If setup was skipped with `--skip-config` or interrupted, run `npm run configure` first, then `npm run dev`.
-Edit agents under `agents/` and compose your Hono app in `src/index.ts`.
+Requires Node 24 and npm 11. Agent and tool definitions live in `agents/`. The CLI runs a separate SQLite Runtime and connects your tools through the SDK's authenticated SSE executor.
 
-`npm run dev` starts your app on port 3000, waits until its agent endpoint is ready, then starts Studio and opens it in your browser. Use `npm run dev -- --no-open` to start Studio without opening a browser. Run `npm run studio` in another terminal to attach Studio separately. `npm run build` creates `dist/`; deploy it alongside `package.json`, installed production dependencies, and environment variables, then run `npm start`.
-
-Development orchestration is provided by the installed `nylorun` CLI. Use `npm run dev -- --no-studio` for the application alone. Copy `.env.example` to `.env` and fill in `MODEL_PROVIDER`, `MODEL`, and `MODEL_PROVIDER_API_KEY`, or run `npm run configure`. Custom OpenAI-compatible providers also use `MODEL_PROVIDER_BASE_URL`. Hosting providers can supply these variables directly; no credential files are required for API keys. The single `tsconfig.json` builds your sources; `npm run check` checks types without emitting files.
-
-## Runtime DX (openSession + serveAgents)
-
-Talk to an agent with three calls — keep the session bag named **`info`** (not `user`):
-
-```ts
-import { openSession } from "@nylorun/runtime";
-import { assistant } from "../agents/assistant/agent.js";
-
-const session = openSession(assistant, { info: { id: "local-dev" } });
-const accepted = await session.input("Hello");
-for await (const event of session.stream()) {
-  // turn.started · text.delta · turn.settled · …
-}
+```sh
+npm run configure
+npm run dev
 ```
 
-Serve your code with `serveAgents`:
+Open Studio and ask **Look up order demo-123**. The local tool returns `shipped`; Studio shows the tool call and assistant response. Model calls use your configured provider and may incur its usual charges.
 
-| Call | Returns | Use when |
-|---|---|---|
-| `serveAgents({ agents, runtime })` | Hono app | Node + Studio (`nylorun dev` mounts under `/agents`) |
-| `serveAgents({ agents })` | `{ fetch }` | Workers, Bun, Deno, or a framework route (`export const POST = nylorun.fetch`) |
+`npm run dev -- --no-open` avoids opening a browser. `--no-studio` runs headless. Use `npm run studio` to attach separately. Runtime defaults to `http://127.0.0.1:8787`; `PORT` changes it. Studio chooses a free port starting at 4161.
 
-Do not put `model` on `Agent({})`. Local Runtime selects the model via env / `onModelCall`; Cloud owns the remote model loop.
-
-## Cloud / sandbox
-
-Optional. Point the same starter at Cloud Agents API:
-
-```dotenv
-NYLORUN_URL=https://sandbox.nylorun.dev
-NYLORUN_SECRET_KEY=nyl_sk_…
-# optional: NYLORUN_MODE=cloud
-# force local despite URL/key: NYLORUN_MODE=local
+```sh
+npm run build
+npm start
 ```
 
-`src/index.ts` exports the Hono app. `nylorun dev` and `nylorun start` supply the Node server and load `.env` without overriding process variables. OAuth state, when used, lives in ignored `.nylorun/auth.json`. Sessions use memory storage by default and disappear on process restart. For a single Node host, explicitly configure `localSessions({ root: ".data/sessions" })` from `@nylorun/runtime/node`. Shared storage alone does not provide distributed scheduling. See https://docs.nylorun.com/docs/run-agents/deploy for hosting guidance.
+Compiled start runs Runtime and executor without Studio or watching. Studio can attach in a separate terminal. `agents/index.ts` exports the registry; there is no Hono app to maintain. Source edits restart the local development stack. Start a new session after changing definitions or implementations; active-session upgrades are not supported.
+
+Local credentials and SQLite live in gitignored `.nylorun/`. Keep this directory private. Credentials are generated automatically and kept out of browser configuration. Ordinary shutdown/restart preserves completed session history. `NYLORUN_IMPLEMENTATION_VERSION` defaults to `dev`; assign an explicit version when changing a versioned implementation.
+
+This beta supports local text and ordinary tools. Advanced waits, media, MCP, subagents, deployment, reconciliation and broad recovery guarantees are deferred. `NYLORUN_DEV_MODEL=fixture` is a credential-free release-check fixture for this starter; it is not a general model.

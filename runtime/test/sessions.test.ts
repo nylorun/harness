@@ -9,7 +9,7 @@ import {
   memorySessions,
   SessionHost,
   type StoredSession,
-} from "../src/index.js";
+} from "./legacy-api.js";
 import { localSessions } from "../src/node/local-sessions.js";
 import { Hono } from "hono";
 

@@ -2,16 +2,17 @@
   "version": 1,
   "creatorVersion": "0.6.0-beta",
   "compatibility": {
-    "harness": "0.13.0-beta",
+    "harness": "0.14.0-beta.3",
     "studio": "0.5.0-beta",
-    "runtime": "0.5.0-beta"
+    "runtime": "0.5.0-beta",
+    "agents": "0.1.0-beta.1"
   },
-  "templateHash": "ee77259c864cb3ccbee574a39796b21762e7dad4c8fc3b3dda1804b5c77eb382",
+  "templateHash": "a7ef2ae296b2995cb3f2e7032ed5ad3fe5386757cd21cc7e0fcfdb5cc08db620",
   "files": {
-    ".env.example": "5f0bc78840f6fc248173583c4e692e2277337855656341bfaf84fb7ea9601e86",
-    ".gitignore": "cb94dc6a72307da7dfee704758317e46c3d8ba04076ec66b031c648265c36e05",
-    "package.json": "f3d8224fbc17d2db3bcfb2442cfa31191adeeb9cd4d44b0dab421dfb44f97e9e",
-    "src/index.ts": "249c06e9d3e21456973a4f1baae1f969f1331ed8d76655a61a988683a460f884",
+    ".env.example": "43b4ad5715cd8a6b6d95ebc4b3de35e704b4be91aec07ca80984ff9550307a57",
+    ".gitignore": "35d28e69221a58d60f19655637c7d99310a6dd6e0fda5f51c544d876ad19a3a0",
+    "package.json": "04a30ea69f4559abdca4af0d9c5d0701ae5f72d7e53a80fa7156cd3ffbaf04ea",
+    "src/index.ts": "d61a6b97f77f2f813384e82ded8f7a2905f98f2b75399b32510d6f266d057b8e",
     "tsconfig.build.json": "0210063cd78016582d5c14a7627a703258910a20ff9c57db7951e5c2a9d62c7d",
     "tsconfig.json": "912b9cdf9eac674c7f8e47c51c78594fbf09ba6372cf3131acfa4acb390b4d6a"
   }

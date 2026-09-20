@@ -26,13 +26,13 @@ export function planVersions(before, compatibility, pending, channel) {
   for (const name of packages) core(before[name]);
   if (
     !compatibility ||
-    Object.keys(compatibility).length !== 3 ||
-    ["harness", "runtime", "studio"].some(
+    Object.keys(compatibility).length !== 4 ||
+    ["harness", "agents", "runtime", "studio"].some(
       (name) => !semver.valid(compatibility[name]),
     )
   )
     throw new Error(
-      "Compatibility must contain exactly three valid package pins.",
+      "Compatibility must contain exactly four valid package pins.",
     );
   const changesets = [...pending];
   const bumps = new Map();
@@ -87,6 +87,24 @@ export function planVersions(before, compatibility, pending, channel) {
       releases: [{ name: fullName("runtime"), type: "patch" }],
     });
   }
+  // Release consumers whenever a pinned production dependency changes.
+  for (const [dependency, consumers] of [
+    ["harness", ["agents"]],
+    ["agents", ["runtime", "studio"]],
+  ]) {
+    if (versions[dependency] && versions[dependency] !== before[dependency])
+      for (const name of consumers) {
+        if (!versions[name]) {
+          bumps.set(name, "patch");
+          versions[name] = bump(name, "patch");
+        }
+        changesets.push({
+          id: `release-${name}-${dependency}`,
+          summary: `Pin ${dependency} to the tested release.`,
+          releases: [{ name: fullName(name), type: "patch" }],
+        });
+      }
+  }
   if (!Object.keys(versions).length)
     throw new Error(
       "No pending changesets or beta versions to promote. Add release intent with npm run changeset first.",
@@ -100,7 +118,7 @@ export function planVersions(before, compatibility, pending, channel) {
     changesets.push({
       id: "release-creator-compatibility",
       summary:
-        "Update the tested Harness, Runtime, and Studio compatibility combination.",
+        "Update the tested Harness, SDK, Runtime, and Studio compatibility combination.",
       releases: [{ name: fullName("create-agent"), type: "patch" }],
     });
   }
