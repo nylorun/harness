@@ -25,9 +25,15 @@ try {
       'serveAgents({ agents, runtime })'
     )
   );
+  assert.ok(files["src/index.ts"]?.includes("openSession"));
+  assert.ok(files["src/index.ts"]?.includes("{ fetch }"));
   assert.ok(files["src/index.ts"]?.includes("export default app"));
   assert.ok(!files["src/index.ts"]?.includes("@hono/node-server"));
+  assert.ok(!files["agents/assistant/agent.ts"]?.match(/\bmodel\s*:/));
   assert.ok(files[".env.example"]?.includes("MODEL_PROVIDER_API_KEY="));
+  assert.ok(files[".env.example"]?.includes("NYLORUN_URL="));
+  assert.ok(files[".env.example"]?.includes("NYLORUN_SECRET_KEY="));
+  assert.ok(files["README.md"]?.includes("openSession"));
   assert.ok(!Object.keys(files).some((path) => path.startsWith(".env/")));
   assert.equal(files["nylorun.config.ts"], undefined);
   const manifest = JSON.parse(files["package.json"]);

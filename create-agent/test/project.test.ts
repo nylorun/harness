@@ -36,6 +36,12 @@ describe("starter template", () => {
     expect(files[".env/auth.json"]).toBeUndefined();
     expect(files["src/index.ts"]).toContain("serveAgents({ agents, runtime })");
     expect(files["src/index.ts"]).toContain("new Runtime()");
+    expect(files["src/index.ts"]).toContain("openSession");
+    expect(files["src/index.ts"]).toContain("{ fetch }");
+    expect(files["agents/assistant/agent.ts"]).not.toMatch(/\bmodel\s*:/);
+    expect(files["README.md"]).toContain("openSession");
+    expect(files["README.md"]).toContain("NYLORUN_URL");
+    expect(files["README.md"]).toContain("`info`");
     expect(JSON.parse(files["package.json"]!).name).toBe("my-nylorun-agent");
     expect(files["README.md"]).toMatch(/^# My agent\n/u);
   });
@@ -57,6 +63,9 @@ describe("starter template", () => {
     const files = await starterFiles(compatibility, true);
     expect(files[".gitignore"]).toContain("node_modules/");
     expect(files[".env.example"]).toContain("MODEL_PROVIDER=");
+    expect(files[".env.example"]).toContain("NYLORUN_URL=");
+    expect(files[".env.example"]).toContain("NYLORUN_SECRET_KEY=");
+    expect(files[".env.example"]).toContain("NYLORUN_MODE=");
     expect(files[".gitignore"]).toContain(".nylorun/");
     expect(Object.keys(files).some((path) => path.includes("_gitignore"))).toBe(
       false
