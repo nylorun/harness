@@ -13,7 +13,10 @@ const forbidden = [
   "@nylorun/studio",
   "@nylorun/create-harness",
 ];
-if (manifest.description !== "Nylorun's TypeScript agent runtime. See github.com/nylorun/harness.")
+if (
+  manifest.description !==
+  "Nylorun's TypeScript agent execution engine. See github.com/nylorun/harness."
+)
   throw new Error("Harness package description must direct users to the canonical repository.");
 if (!Array.isArray(manifest.keywords) || manifest.keywords.length === 0)
   throw new Error("Harness package must declare npm keywords.");
@@ -74,6 +77,7 @@ try {
   const allowed = (path) =>
     path === "package.json" ||
     path === "README.md" ||
+    path === "HOST_CONTRACT.md" ||
     path === "CHANGELOG.md" ||
     path === "LICENSE" ||
     /^dist\/.+\.(?:js|d\.ts)$/.test(path);
@@ -86,8 +90,10 @@ try {
     "LICENSE",
     "dist/index.js",
     "dist/index.d.ts",
-    "dist/execution/model/adapters.js",
-    "dist/execution/model/adapters.d.ts",
+    "dist/loop/model/adapters.js",
+    "dist/loop/model/adapters.d.ts",
+    "dist/run/index.js",
+    "dist/run/index.d.ts",
   ]) {
     if (!files.includes(required)) throw new Error(`Missing tarball file: ${required}`);
   }
@@ -105,7 +111,7 @@ try {
     "definition/bind-agent.js",
     "definition/agent-definition.js",
     "definition/bound.js",
-    "execution/step/runtime.js",
+    "loop/step/runtime.js",
   ]) {
     try {
       await import(`@nylorun/harness/${path}`);
@@ -114,10 +120,9 @@ try {
       if (error.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw error;
     }
   }
-  const adapters = await import(new URL("../dist/execution/model/adapters.js", import.meta.url));
+  const definitions = await import("@nylorun/core/define");
+  const adapters = await import(new URL("../dist/loop/model/adapters.js", import.meta.url));
   for (const name of [
-    "createExecutionState",
-    "validateExecutionState",
     "AgentBuilder",
     "AgentBuildError",
     "AgentLifecycleError",
@@ -125,10 +130,28 @@ try {
     "isHarnessError",
     "Agent",
     "tool",
+    "capability",
+    "ToolError",
     "model",
     "middleware",
+    "checkCompatibility",
+    "hashManifest",
   ]) {
-    if (!(name in entry)) throw new Error(`Missing public export: ${name}`);
+    if (!(name in (name === "checkCompatibility" ? entry : definitions)))
+      throw new Error(`Missing public export: ${name}`);
+  }
+  const execution = await import(new URL("../dist/run/index.js", import.meta.url));
+  for (const name of [
+    "run",
+    "createRunState",
+    "runDurable",
+    "createDurableCheckpoint",
+    "createExecutionState",
+    "validateExecutionState",
+    "bindingFromAgent",
+    "checkCompatibility",
+  ]) {
+    if (!(name in execution)) throw new Error(`Missing run export: ${name}`);
   }
   for (const name of [
     "toChatCompletions",
@@ -140,6 +163,7 @@ try {
     "toMessages",
     "fromMessages",
     "anthropicAdapter",
+    "preparedModel",
   ]) {
     if (!(name in adapters)) throw new Error(`Missing model adapter export: ${name}`);
   }

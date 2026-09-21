@@ -1,46 +1,66 @@
 import assert from "node:assert/strict";
-import { ProcessGroup } from "./lib/processes.mjs";
-import { root, npmCli } from "./lib/repo.mjs";
-import { availablePort } from "./lib/development.mjs";
+import { mkdtemp, rm, cp, symlink, writeFile, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { root } from "./lib/repo.mjs";
+import { availablePort, develop } from "./lib/development.mjs";
 
-const group = new ProcessGroup();
+// Exercise the repository supervisor without reading or changing developer credentials/data.
+const temporary = await mkdtemp(join(tmpdir(), "nylorun-root-smoke-"));
+let app;
 try {
+  await cp(
+    join(root, "examples/package.json"),
+    join(temporary, "package.json"),
+  );
+  await mkdir(join(temporary, "agents"));
+  await cp(
+    join(root, "examples/agents/release"),
+    join(temporary, "agents/release"),
+    { recursive: true },
+  );
+  await writeFile(
+    join(temporary, "agents/index.ts"),
+    'export { agents } from "./release/index.js";\n',
+  );
+  await symlink(
+    join(root, "examples/node_modules"),
+    join(temporary, "node_modules"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
   const port = await availablePort();
   let studioPort = await availablePort();
   while (studioPort === port) studioPort = await availablePort();
-  const child = group.start(
-    "root-dev",
-    process.execPath,
-    [
-      npmCli(),
-      "run",
-      "dev",
-      "--",
-      "--no-open",
-      "--port",
-      String(port),
-      "--studio-port",
-      String(studioPort),
-    ],
-    { cwd: root },
+  process.env.NYLORUN_DEV_MODEL = "fixture";
+  app = await develop(
+    { studio: true, open: false, port, studioPort },
+    { project: temporary, built: true },
   );
   const url = `http://127.0.0.1:${studioPort}`;
-  await child.ready(`${url}/nylo-studio.config.json`, 90_000);
   assert.deepEqual(
     await (await fetch(`${url}/nylo-studio.config.json`)).json(),
-    { agentServerUrl: `http://127.0.0.1:${port}/agents` },
+    { runtimeUrl: "/_studio/runtime", local: true },
   );
-  assert.match(await (await fetch(url)).text(), /@vite\/client/);
-  const agents = await (
-    await fetch(`http://127.0.0.1:${port}/agents/v1/agents`)
-  ).json();
-  assert.equal(agents.agents.length, 11);
-  await child.stop();
+  assert.match(await (await fetch(url)).text(), /<div id="root">/);
+  const agents = await (await fetch(`${url}/_studio/runtime/v1/agents`)).json();
+  assert.equal(agents.agents.length, 1);
+  // IPv4 and localhost are both valid same-origin entry points.
+  const session = await fetch(
+    `${url}/_studio/runtime/v1/sessions/smoke-local`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: url },
+      body: JSON.stringify({ requestId: crypto.randomUUID(), agentId: "assistant", ownerUserId: "ignored" }),
+    },
+  );
+  assert.ok(session.ok, await session.text());
+  await app.close();
   await availablePort(port);
   await availablePort(studioPort);
   console.log(
-    "Development smoke passed: real Runtime, eleven agents, Studio configuration proxy, Vite frontend, and shutdown.",
+    "Development smoke passed: real Runtime, supported agent, Studio session proxy, packaged frontend, and shutdown.",
   );
 } finally {
-  await group.close();
+  await app?.close();
+  await rm(temporary, { recursive: true, force: true });
 }

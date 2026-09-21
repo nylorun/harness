@@ -1,6 +1,6 @@
 import { registered } from "./fixtures.js";
 import { describe, expect, it } from "vitest";
-import { type ModelConfigurationSnapshot } from "../src/index.js";
+import { type ModelConfigurationSnapshot } from "@nylorun/core/define";
 import { testAgent, model, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("model configuration", () => {

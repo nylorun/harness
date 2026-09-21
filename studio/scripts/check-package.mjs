@@ -1,3 +1,5 @@
+const { checkBoundaries } = await import("../../scripts/check-boundaries.mjs");
+checkBoundaries("studio");
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,7 +35,7 @@ const cache = mkdtempSync(join(tmpdir(), "nylo-studio-pack-"));
 const output = execFileSync(
   process.platform === "win32" ? "npm.cmd" : "npm",
   ["pack", "--json", "--dry-run", "--ignore-scripts"],
-  { encoding: "utf8", env: { ...process.env, npm_config_cache: cache } },
+  { encoding: "utf8", env: { ...process.env, npm_config_cache: cache } }
 );
 rmSync(cache, { recursive: true, force: true });
 const files = JSON.parse(output)[0].files.map((entry) => entry.path);

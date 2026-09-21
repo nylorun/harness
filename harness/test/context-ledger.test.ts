@@ -1,6 +1,6 @@
 import { registered } from "./fixtures.js";
 import { describe, expect, it } from "vitest";
-import { type ContextSnapshot } from "../src/index.js";
+import { type ContextSnapshot } from "@nylorun/core/define";
 import { testAgent, model, offer, tool, toolCalls, turn } from "./fixtures.js";
 
 describe("runtime context", () => {

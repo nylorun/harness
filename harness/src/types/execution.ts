@@ -1,8 +1,13 @@
-import type { ModelAdapter } from "./model.js";
-import type { InputEvent, MessageInput, TranscriptEntry } from "./transcript.js";
-import type { ObserveEvent } from "./observe.js";
-import type { JsonObject, JsonValue, Tripwire } from "./shared.js";
-import type { RequiredInteraction, ToolExecutionResume, ToolOutcome, ToolResult } from "./tool.js";
+import type { ModelAdapter } from "@nylorun/core/define";
+import type { InputEvent, MessageInput, TranscriptEntry } from "@nylorun/core/define";
+import type { ObserveEvent } from "@nylorun/core/define";
+import type { JsonObject, JsonValue, Tripwire } from "@nylorun/core/define";
+import type {
+  RequiredInteraction,
+  ToolExecutionResume,
+  ToolOutcome,
+  ToolResult,
+} from "@nylorun/core/define";
 
 export type ExecutionInput =
   | MessageInput
@@ -12,6 +17,11 @@ export type ExecutionInput =
       readonly kind: "settle";
       readonly invocationId: string;
       readonly outcome: Extract<ToolOutcome, { kind: "completed" | "failed" | "denied" }>;
+    }
+  | {
+      readonly kind: "wait-resolve";
+      readonly waitId: string;
+      readonly value?: JsonValue;
     };
 
 /** Portable reference to deployed code. Applications must preserve this value intact. */
@@ -39,6 +49,12 @@ export interface SavedToolCall {
   readonly interactionPhase?: "before" | "execute";
   readonly resume?: ToolExecutionResume;
   readonly token?: JsonValue;
+  /** Optional wait metadata for H6 durable waits. */
+  readonly wait?: {
+    readonly kind: "ask" | "approve" | "sleep" | "waitFor";
+    readonly waitId: string;
+    readonly name?: string;
+  };
 }
 
 export interface ExecutionPlan {
@@ -54,6 +70,8 @@ export interface ExecutionPlan {
 export interface ExecutionState {
   readonly version: 1;
   readonly agentId: string;
+  /** Definition binding — required for resume after Phase 2. Optional on legacy states. */
+  readonly manifestHash?: string;
   readonly executionId: string;
   readonly outputContract?: JsonObject;
   readonly revision: number;
@@ -63,6 +81,11 @@ export interface ExecutionState {
   readonly plan?: ExecutionPlan;
   /** Abandoned actions retained for reconciliation, never automatically dispatched. */
   readonly cancelledCalls?: readonly SavedToolCall[];
+  /**
+   * Durable session memory (tools write via `ctx.state`; beforeModelCall reads).
+   * Runtime persists this with the checkpoint.
+   */
+  readonly state?: JsonObject;
 }
 
 export type ExecutionEvent = (

@@ -1,7 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ToolDefinition } from "@nylorun/harness";
+import type { ToolDefinition } from "@nylorun/agents/define";
 
 export async function loadToolsFromDirectory(
   root: string
@@ -48,8 +48,8 @@ function isToolDefinition(value: unknown): value is ToolDefinition {
     typeof value === "object" &&
     "name" in value &&
     typeof value.name === "string" &&
-    "inputSchema" in value &&
-    "execute" in value &&
-    typeof value.execute === "function"
+    ("inputSchema" in value || "input" in value) &&
+    (typeof (value as { execute?: unknown }).execute === "function" ||
+      typeof (value as { run?: unknown }).run === "function")
   );
 }

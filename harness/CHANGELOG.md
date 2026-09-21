@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.15.0-beta
+
+### Major Changes
+
+- 2898d02: Extract shared definitions and contracts into core and local orchestration into
+  CLI. Harness becomes execution-only; the SDK no longer installs the engine and
+  Runtime no longer depends on the SDK. Author applications through agents and
+  install cli for the unchanged nylorun commands. See the package architecture and
+  migration guide. Cloud installs published packages from npm independently.
+
+### Minor Changes
+
+- 41e613c: Ship the local SDK registry workflow with an independent SQLite Runtime, connected tool executor, authenticated Studio proxy, and a text-and-tool starter. Replace the legacy Hono starter and AG-UI transport. Require Node 24 and include the SDK in exact release compatibility pins.
+
+  Break the Harness execution import from `/engine` to `/run` and rename hosted execution APIs to durable execution APIs, including RunBinding, BoundRunOptions, and createRunState. Update all consumers without compatibility aliases; retain persisted checkpoint fields and version pins.
+
+### Patch Changes
+
+- Pin core to the tested release.
+- Updated dependencies [2898d02]
+  - @nylorun/core@0.1.1-beta
+
+## Unreleased
+
+### Minor Changes
+
+- Breaking beta: replace `/engine` with `/run`; rename hosted execution to durable execution.
+  Use `runDurable`, `createDurableCheckpoint`, `DurableCheckpoint`, `DurableResult`,
+  `DurableHost`, `RunBinding`, `BoundRunOptions`, and `createRunState`. No aliases remain.
+  Persisted checkpoint fields and the `hosted-1` compatibility pin are unchanged.
+
+- Breaking beta: the package root is now an alias of `/define`. Import
+  `createExecutionState` / `validateExecutionState` from `@nylorun/harness/run` and
+  `preparedModel` from `@nylorun/harness/model/adapters`. Authoring and wire-contract specifiers remain unchanged.
+- Internal source folder `execution/` is now `loop/` (one `run()` invocation). The
+  `/model/adapters` specifier is unchanged.
+- DX v5.6: Agent usable without `.build()`; `.use()` returns a new agent; top-level `tools` /
+  `instructions` (no `model` on `Agent({})`). `tool()` accepts `input` / `output` / `run`; plain
+  returns complete; export `ToolError`; tool `approval` / `effects`; `ctx.idempotencyKey`,
+  `redelivery`, `state`, `session`, `progress`, and durable waits (`ask` / `approve` / `sleep` /
+  `waitFor` / `step`).
+- Agent-as-JSON: versioned manifest (`schemaVersion: 2`), `toJSON` / `Agent.from`, `hashManifest`,
+  `checkCompatibility`; identity by manifest hash (not WeakMap-only). Session memory on
+  `ExecutionState.state`. Capability `model` is no longer projected into the published manifest.
+- Dynamics: `beforeModelCall` / `afterModelCall` with `Patch` / `Decision`; middleware deprecated
+  but kept through 1.0. Export `@nylorun/harness/run` for run-from-checkpoint; `agent.run` is a
+  1.0 alias. Export type-only `Session` / `Turn` / `Event` / `Result`.
+
 ## 0.13.0-beta
 
 ### Minor Changes

@@ -31,7 +31,10 @@ export async function starterFiles(
         files[templatePath(relative(root, absolute))] = (
           await readFile(absolute, "utf8")
         )
+          .replaceAll("{{CORE_VERSION}}", compatibility.core)
+          .replaceAll("{{CLI_VERSION}}", compatibility.cli)
           .replaceAll("{{HARNESS_VERSION}}", compatibility.harness)
+          .replaceAll("{{AGENTS_VERSION}}", compatibility.agents)
           .replaceAll("{{RUNTIME_VERSION}}", compatibility.runtime)
           .replaceAll("{{STUDIO_VERSION}}", compatibility.studio);
     }
@@ -45,10 +48,7 @@ export async function starterFiles(
     manifest.scripts.dev = "nylorun dev --no-studio";
     delete manifest.scripts.studio;
     files["package.json"] = JSON.stringify(manifest, null, 2) + "\n";
-    files["README.md"] = files["README.md"]!.replace(
-      "`npm run dev` starts your app on port 3000, waits until its agent endpoint is ready, then starts Studio and opens it in your browser. Use `npm run dev -- --no-open` to start Studio without opening a browser. Run `npm run studio` in another terminal to attach Studio separately.",
-      "`npm run dev` starts your app on port 3000."
-    );
+
   }
   return Object.freeze(files);
 }

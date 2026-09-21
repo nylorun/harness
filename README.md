@@ -2,7 +2,9 @@
 
 Observable, portable, composable TypeScript agent execution. Harness is state-in/state-out; optional Runtime owns sessions and hosting.
 
-This repository is a monorepo of independently versioned packages—Harness, Runtime, Studio, and the project creator—plus runnable examples.
+This repository contains core (definitions/contracts), harness (engine), agents (SDK), runtime (OSS host), CLI, Studio and the project creator. Cloud lives in the private agents-api repository. See the [package architecture](docs/design/package-architecture.md) for dependency and process diagrams.
+
+For the new core-runtime beta, start with [the SDK](agents/README.md), [standalone Runtime](runtime/README.md), [host contract](harness/HOST_CONTRACT.md), and [implementation handoff](IMPLEMENTATION_HANDOFF.md). The local starter/Studio workflow uses this architecture. The packed-package text/tool workflow is covered by the focused release smoke; broader recovery and conformance gates remain open.
 
 > **Experimental beta.** Public APIs may change before 1.0. Prefer the `@beta` dist-tag for installs until then.
 
@@ -23,7 +25,7 @@ Useful flags (after `--`):
 | `--skip-config` | Skip provider setup (required when stdin/stdout are not interactive) |
 | `--no-studio` | Scaffold a headless project without Studio |
 
-The creator only scaffolds the project. The generated app depends on Harness and Runtime; Studio is a development dependency. Runtime provides the `nylorun` CLI.
+The creator scaffolds, installs, configures, and starts the project. The generated app depends on the SDK and CLI; Studio is a development dependency. The `@nylorun/cli` package provides `nylorun` and brings the OSS runtime.
 
 ## Develop this repository
 
@@ -36,14 +38,17 @@ npm run setup
 npm run dev
 ```
 
-`npm run setup` installs both lockfiles and builds packages. Before the first conversation in the examples app, run `npm run configure` in another terminal.
+`npm run setup` installs both lockfiles and builds packages. Before starting the examples app, run `npm run configure`.
 
 ## Packages
 
 | Package | Role |
 |---|---|
-| [`@nylorun/harness`](./harness) | Model/tool loop and capability composition |
-| [`@nylorun/runtime`](./runtime) | Agent lifecycle, Hono protocol routing, providers, and the `nylorun` CLI |
+| [`@nylorun/core`](./core) | Shared definitions, contracts and manifest identity |
+| [`@nylorun/harness`](./harness) | Execution engine and checkpoints |
+| [`@nylorun/cli`](./cli) | Local project configuration and orchestration |
+| [`@nylorun/agents`](./agents) | Session SDK, authoring and authenticated SSE customer executor |
+| [`@nylorun/runtime`](./runtime) | SQLite execution host and providers |
 | [`@nylorun/studio`](./studio) | Local dashboard for compatible agent servers |
 | [`@nylorun/create-agent`](./create-agent) | Project scaffolding, compatibility pins, and examples sync |
 | [`examples`](./examples) | Authored capability demonstrations on the generated project shell |

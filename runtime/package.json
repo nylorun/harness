@@ -1,7 +1,7 @@
 {
   "name": "@nylorun/runtime",
-  "version": "0.5.0-beta",
-  "description": "Portable agent runtime, Hono protocol router, model providers, and the Nylorun CLI.",
+  "version": "0.6.0-beta",
+  "description": "SQLite agent execution host and model providers.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -10,10 +10,7 @@
     "directory": "runtime"
   },
   "engines": {
-    "node": ">=22.19.0"
-  },
-  "bin": {
-    "nylorun": "dist/cli.js"
+    "node": ">=24.0.0"
   },
   "exports": {
     ".": {
@@ -23,6 +20,15 @@
     "./node": {
       "types": "./dist/node/index.d.ts",
       "import": "./dist/node/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/runtime.d.ts",
+      "import": "./dist/core/runtime.js"
+    },
+    "./server": "./dist/core/main.js",
+    "./configuration": {
+      "types": "./dist/configuration.d.ts",
+      "import": "./dist/configuration.js"
     }
   },
   "files": [
@@ -41,15 +47,14 @@
     "typecheck": "node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "prepack": "npm run build",
-    "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\""
+    "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
+    "start": "node dist/core/main.js"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.85.1",
     "@hono/node-server": "^2.1.1",
-    "@nylorun/harness": "0.13.0-beta"
-  },
-  "peerDependencies": {
-    "hono": "^4.13.7"
+    "@nylorun/harness": "0.15.0-beta",
+    "@nylorun/core": "0.1.1-beta"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",

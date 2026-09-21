@@ -12,7 +12,7 @@ import {
   type MessagesRequest,
   type ResponsesRequest,
 } from "@nylorun/harness/model/adapters";
-import type { ModelCall } from "../../src/index.js";
+import type { ModelCall } from "@nylorun/core/define";
 
 declare const call: ModelCall;
 const chat: ChatCompletionsRequest = toChatCompletions(call);

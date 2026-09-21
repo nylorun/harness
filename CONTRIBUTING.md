@@ -4,8 +4,10 @@
 
 | Directory | Responsibility |
 |---|---|
-| `harness/` | Agent engine and capabilities |
-| `runtime/` | Providers, hosting, persistence, and `nylorun` |
+| `core/` | Shared definitions and contracts |
+| `harness/` | Agent execution engine |
+| `cli/` | Local `nylorun` orchestration |
+| `runtime/` | Providers, hosting and persistence |
 | `studio/` | Dashboard and programmatic startup |
 | `create-agent/` | Starter, renderer, compatibility pins, and stack tests |
 | `examples/` | Generated application shell and authored demonstrations |
@@ -24,43 +26,37 @@ nvm install
 nvm use
 npm install --global npm@11.15.0
 npm run setup
+npm run configure
 npm run dev
 ```
 
-Setup installs both lockfiles and builds packages. All four packages compile with the TypeScript 7 native compiler; `typescript` is aliased to the TypeScript 6 bridge for scripts that use the compiler API. It does not configure models,
+Setup installs both lockfiles and builds packages. The seven packages compile with the TypeScript 7 native compiler; `typescript` is aliased to the TypeScript 6 bridge for scripts that use the compiler API. It does not configure models,
 regenerate examples, or change local credentials/data. Package consumer Node
 support remains separate from the pinned contributor toolchain.
 
-Studio opens at `http://127.0.0.1:4161`; Runtime listens on port 3000.
-Opening Studio needs no credentials. Before your first conversation, run this
-in another terminal:
-
-```sh
-npm run configure
-```
-
-Provider setup belongs to examples. Credentials live in `examples/.env/`, model
-selection in `examples/config/`, and persistence/media in `examples/.data/`.
-Live integrations may need additional setup; see [examples](./examples/README.md).
+Studio opens at `http://127.0.0.1:4161`; Runtime listens on port 8787.
+Run `npm run configure` before startup. Provider settings and API keys live in
+`examples/.env`; local credentials, OAuth, and SQLite live in gitignored
+`examples/.nylorun/`. Advanced examples retain their own historical data paths.
 
 ## Development
 
 | Command | Use |
 |---|---|
-| `npm run dev` | Examples with live package rebuilds and Studio hot reload |
+| `npm run dev` | Supported local example with package rebuilds and Studio |
 | `npm run dev -- --no-open` | Keep the browser closed |
 | `npm run dev -- --no-studio` | Run only the agent server |
 | `npm run dev -- --port 4200 --studio-port 4201` | Choose different ports |
 | `npm run dev:starter` | Preview a fresh starter against local packages |
-| `npm run build` | Build all four packages |
+| `npm run build` | Build all seven packages |
 | `npm test` | Run package, tooling, and examples tests after setup |
 | `npm run check` | Build and run the standard repository checks |
-| `npm run check:stack` | Test isolated tarballs, CLI commands, and built assets |
+| `npm run check:stack` | Check generated starter contracts and built example assets |
 
-Agent/configuration edits use Runtime reload and retain existing sessions.
-Harness/Runtime edits rebuild and restart the server: **active sessions end**.
-A compile error leaves the running server available; fixing it resumes rebuilds.
-Studio frontend edits hot reload; server edits rebuild and restart Studio.
+Agent edits restart the development stack. Start a new session after definition
+changes. Harness/SDK/Runtime edits rebuild and restart the host. A compile error
+leaves the running server available; fixing it resumes rebuilds. Studio edits
+rebuild and restart its packaged frontend and server.
 Stop development before changing dependencies, then rerun setup.
 
 Starter preview prints a retained directory under `.tmp/` and its provider setup

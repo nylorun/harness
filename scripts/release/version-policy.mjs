@@ -26,13 +26,13 @@ export function planVersions(before, compatibility, pending, channel) {
   for (const name of packages) core(before[name]);
   if (
     !compatibility ||
-    Object.keys(compatibility).length !== 3 ||
-    ["harness", "runtime", "studio"].some(
+    Object.keys(compatibility).length !== 6 ||
+    ["core", "harness", "agents", "runtime", "studio", "cli"].some(
       (name) => !semver.valid(compatibility[name]),
     )
   )
     throw new Error(
-      "Compatibility must contain exactly three valid package pins.",
+      "Compatibility must contain exactly six valid package pins.",
     );
   const changesets = [...pending];
   const bumps = new Map();
@@ -75,17 +75,25 @@ export function planVersions(before, compatibility, pending, channel) {
       }
     }
   }
-  if (versions.harness && versions.harness !== before.harness) {
-    if (!versions.runtime) {
-      bumps.set("runtime", "patch");
-      versions.runtime = bump("runtime", "patch");
-    }
-    changesets.push({
-      id: "release-runtime-harness",
-      summary:
-        "Update Runtime's canonical Harness dependency to the tested release.",
-      releases: [{ name: fullName("runtime"), type: "patch" }],
-    });
+  // Release consumers whenever a pinned production dependency changes.
+  for (const [dependency, consumers] of [
+    ["core", ["harness", "agents", "runtime"]],
+    ["harness", ["runtime"]],
+    ["agents", ["studio", "cli"]],
+    ["runtime", ["cli"]],
+  ]) {
+    if (versions[dependency] && versions[dependency] !== before[dependency])
+      for (const name of consumers) {
+        if (!versions[name]) {
+          bumps.set(name, "patch");
+          versions[name] = bump(name, "patch");
+        }
+        changesets.push({
+          id: `release-${name}-${dependency}`,
+          summary: `Pin ${dependency} to the tested release.`,
+          releases: [{ name: fullName(name), type: "patch" }],
+        });
+      }
   }
   if (!Object.keys(versions).length)
     throw new Error(
@@ -100,7 +108,7 @@ export function planVersions(before, compatibility, pending, channel) {
     changesets.push({
       id: "release-creator-compatibility",
       summary:
-        "Update the tested Harness, Runtime, and Studio compatibility combination.",
+        "Update the tested Harness, SDK, Runtime, and Studio compatibility combination.",
       releases: [{ name: fullName("create-agent"), type: "patch" }],
     });
   }

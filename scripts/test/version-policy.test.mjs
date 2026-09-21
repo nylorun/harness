@@ -3,13 +3,19 @@ import { test } from "node:test";
 import { planVersions } from "../release/version-policy.mjs";
 
 const versions = {
+  core: "0.1.0-beta.1",
+  cli: "0.1.0-beta.1",
   harness: "0.10.0-beta.1",
+  agents: "0.1.0-beta.1",
   runtime: "0.1.0-beta.1",
   studio: "0.3.0-beta.1",
   "create-agent": "0.1.0-beta.1",
 };
 const pins = {
+  core: versions.core,
+  cli: versions.cli,
   harness: versions.harness,
+  agents: versions.agents,
   runtime: versions.runtime,
   studio: versions.studio,
 };
@@ -19,7 +25,7 @@ const intent = (name, type = "patch") => ({
   releases: [{ name: `@nylorun/${name}`, type }],
 });
 
-test("the migration computes the approved four-package targets and exact pins", () => {
+test("the migration computes the approved package targets and exact pins", () => {
   const { plan, releases } = planVersions(
     versions,
     pins,
@@ -32,13 +38,14 @@ test("the migration computes the approved four-package targets and exact pins", 
     "beta"
   );
   assert.deepEqual(plan.packages, {
+    cli: "0.1.1-beta",
     harness: "0.11.0-beta",
     runtime: "0.1.1-beta",
     studio: "0.4.0-beta",
     "create-agent": "0.2.0-beta",
   });
-  for (const name of ["harness", "runtime", "studio"])
-    assert.equal(plan.compatibility[name], plan.packages[name]);
+  for (const name of ["core", "harness", "agents", "runtime", "studio", "cli"])
+    assert.equal(plan.compatibility[name], plan.packages[name] ?? versions[name]);
   for (const release of releases)
     assert.equal(release.newVersion, plan.packages[release.name.slice(9)]);
 });
@@ -65,7 +72,10 @@ for (const [before, type, expected] of [
 
 test("pre-1.0 latest promotion keeps *-beta versions for dist-tag moves", () => {
   const current = {
+    core: "0.1.0-beta",
+    cli: "0.1.0-beta",
     harness: "0.10.0-beta",
+    agents: "0.1.0-beta",
     runtime: "0.1.0-beta",
     studio: "0.3.0-beta",
     "create-agent": "0.1.0-beta",
@@ -73,7 +83,10 @@ test("pre-1.0 latest promotion keeps *-beta versions for dist-tag moves", () => 
   const { plan, releases } = planVersions(
     current,
     {
+      core: current.core,
+      cli: current.cli,
       harness: current.harness,
+      agents: current.agents,
       runtime: current.runtime,
       studio: current.studio,
     },
@@ -100,7 +113,10 @@ test("pending latest changes before 1.0 bump the core and keep -beta", () => {
 
 test("post-1.0 latest promotion strips -beta from the promoted package", () => {
   const before = {
+    core: "1.0.0",
+    cli: "1.0.0",
     harness: "1.0.0",
+    agents: "1.0.0",
     runtime: "1.1.0-beta",
     studio: "1.0.0",
     "create-agent": "1.0.0",
@@ -108,11 +124,11 @@ test("post-1.0 latest promotion strips -beta from the promoted package", () => {
   assert.deepEqual(
     planVersions(
       before,
-      { harness: "1.0.0", runtime: "1.1.0-beta", studio: "1.0.0" },
+      { core: "1.0.0", cli: "1.0.0", harness: "1.0.0", agents: "1.0.0", runtime: "1.1.0-beta", studio: "1.0.0" },
       [],
       "latest"
     ).plan.packages,
-    { runtime: "1.1.0", "create-agent": "1.0.1" }
+    { runtime: "1.1.0", cli: "1.0.1", "create-agent": "1.0.1" }
   );
 });
 
@@ -165,4 +181,16 @@ test("a Harness release also advances Runtime and pins the canonical contracts t
   assert.equal(plan.packages.runtime, "0.1.1-beta");
   assert.equal(plan.compatibility.harness, plan.packages.harness);
   assert.ok(changesets.some(item => item.id === "release-runtime-harness"));
+});
+
+
+test("core releases propagate to both hosts and SDK without coupling engine releases to SDK", () => {
+  const shared = planVersions(versions, pins, [intent("core", "minor")], "beta").plan;
+  for (const name of ["core", "harness", "agents", "runtime", "studio", "cli", "create-agent"])
+    assert.ok(shared.packages[name], `${name} must receive its updated dependency pin`);
+  const engine = planVersions(versions, pins, [intent("harness")], "beta").plan;
+  assert.equal(engine.packages.agents, undefined);
+  assert.equal(engine.packages.studio, undefined);
+  assert.ok(engine.packages.runtime);
+  assert.ok(engine.packages.cli);
 });

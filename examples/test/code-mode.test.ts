@@ -1,18 +1,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  Agent,
-  model,
-  type CapabilityItems,
-  type ToolDefinition,
-} from "@nylorun/harness";
+import { Agent, model, type CapabilityItems, type ToolDefinition } from "@nylorun/core/define";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CODE_MODE_RULE,
   CODE_MODE_USAGE,
   codeMode,
 } from "../agents/code-mode/capability.js";
+import { invokeTool } from "./support.js";
 
 const adapter = model(async () => ({
   output: [{ type: "text" as const, text: "ok" }],
@@ -30,17 +26,6 @@ afterEach(async () => {
 function items<T>(value: CapabilityItems<T> | undefined): readonly T[] {
   if (value === undefined) return [];
   return "items" in value ? value.items : value;
-}
-
-function context() {
-  return {
-    executionId: "session",
-    turnId: "turn",
-    stepId: "step",
-    callId: "call",
-    invocationId: "invocation",
-    signal: new AbortController().signal,
-  };
 }
 
 function catalogTool(
@@ -73,17 +58,14 @@ describe("codeMode()", () => {
   it("runs a program that composes calculate then convert", async () => {
     const declaration = await codeMode();
     await expect(
-      catalogTool("run_code", declaration).execute(
-        {
-          code: [
-            'const calculated = await tools.calculate({ expression: "100 / 4" });',
-            'const converted = await tools.convert({ value: calculated.value, from: "celsius", to: "fahrenheit" });',
-            "return { value: calculated.value, result: converted.result };",
-          ].join("\n"),
-          description: "Convert 100/4 celsius to fahrenheit.",
-        },
-        context()
-      )
+      invokeTool(catalogTool("run_code", declaration), {
+        code: [
+          'const calculated = await tools.calculate({ expression: "100 / 4" });',
+          'const converted = await tools.convert({ value: calculated.value, from: "celsius", to: "fahrenheit" });',
+          "return { value: calculated.value, result: converted.result };",
+        ].join("\n"),
+        description: "Convert 100/4 celsius to fahrenheit.",
+      })
     ).resolves.toEqual({
       kind: "completed",
       output: {
@@ -113,24 +95,21 @@ describe("codeMode()", () => {
   it("rejects a failed binding as ToolCallError that the program can catch", async () => {
     const declaration = await codeMode();
     await expect(
-      catalogTool("run_code", declaration).execute(
-        {
-          code: [
-            "try {",
-            '  await tools.convert({ value: 1, from: "celsius", to: "meter" });',
-            "  return { caught: false };",
-            "} catch (error) {",
-            "  return {",
-            "    caught: error instanceof ToolCallError,",
-            "    toolName: error.toolName,",
-            "    message: error.message,",
-            "  };",
-            "}",
-          ].join("\n"),
-          description: "Catch an incompatible convert.",
-        },
-        context()
-      )
+      invokeTool(catalogTool("run_code", declaration), {
+        code: [
+          "try {",
+          '  await tools.convert({ value: 1, from: "celsius", to: "meter" });',
+          "  return { caught: false };",
+          "} catch (error) {",
+          "  return {",
+          "    caught: error instanceof ToolCallError,",
+          "    toolName: error.toolName,",
+          "    message: error.message,",
+          "  };",
+          "}",
+        ].join("\n"),
+        description: "Catch an incompatible convert.",
+      })
     ).resolves.toEqual({
       kind: "completed",
       output: {
@@ -154,13 +133,10 @@ describe("codeMode()", () => {
   it("rejects an unknown tools binding", async () => {
     const declaration = await codeMode();
     await expect(
-      catalogTool("run_code", declaration).execute(
-        {
-          code: "await tools.missing({});",
-          description: "Call a tool that is not in the SDK.",
-        },
-        context()
-      )
+      invokeTool(catalogTool("run_code", declaration), {
+        code: "await tools.missing({});",
+        description: "Call a tool that is not in the SDK.",
+      })
     ).resolves.toEqual({
       kind: "failed",
       code: "code_run_failed",

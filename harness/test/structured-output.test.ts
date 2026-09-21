@@ -1,6 +1,7 @@
+import { runAgent } from "./run-agent.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Agent, defineSchema, type ModelCandidate } from "../src/index.js";
+import { Agent, defineSchema, type ModelCandidate } from "@nylorun/core/define";
 
 describe("agent output contracts", () => {
   it("projects and validates the final schema through a tool loop", async () => {
@@ -19,7 +20,7 @@ describe("agent output contracts", () => {
       })
       .build();
     let calls = 0;
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       input: "go",
       onModelCall: async (call) => {
         seen.push(call.outputSchema);
@@ -47,7 +48,7 @@ describe("agent output contracts", () => {
       name: "A",
       outputSchema: z.object({ count: z.number() }),
     }).build();
-    const result = await agent.run({ input: "go", onModelCall: async () => candidate });
+    const result = await runAgent(agent, { input: "go", onModelCall: async () => candidate });
     expect(result).toMatchObject({ status: "failed", error: { code: "output.invalid" } });
     expect(result.state.transcript.some((entry) => entry.kind === "candidate")).toBe(true);
   });
@@ -60,7 +61,7 @@ describe("agent output contracts", () => {
       })
       .build();
     expect(
-      await agent.run({
+      await runAgent(agent, {
         input: "go",
         onModelCall: async () => ({ output: [{ type: "json", value: { count: 3 } }] }),
       }),
@@ -86,12 +87,10 @@ describe("agent output contracts", () => {
     };
     for (const outputSchema of [explicit, standard])
       expect(
-        await Agent({ id: "a", name: "A", outputSchema })
-          .build()
-          .run({
-            input: "go",
-            onModelCall: async () => ({ output: [{ type: "json", value: 7 }] }),
-          }),
+        await runAgent(Agent({ id: "a", name: "A", outputSchema }).build(), {
+          input: "go",
+          onModelCall: async () => ({ output: [{ type: "json", value: 7 }] }),
+        }),
       ).toMatchObject({ status: "completed", output: 7 });
   });
 });

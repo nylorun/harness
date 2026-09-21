@@ -1,5 +1,8 @@
 {
-  "harness": "0.13.0-beta",
-  "studio": "0.5.0-beta",
-  "runtime": "0.5.0-beta"
+  "harness": "0.15.0-beta",
+  "studio": "0.6.0-beta",
+  "runtime": "0.6.0-beta",
+  "agents": "0.2.0-beta",
+  "core": "0.1.1-beta",
+  "cli": "0.1.1-beta"
 }

@@ -1,26 +1,39 @@
-import type { BoundMiddleware } from "./bound.js";
+import type { BoundMiddleware } from "@nylorun/core/define";
 import type { ToolRegistry } from "./registry.js";
-import type { TurnOutputContract } from "./output-contract.js";
-import { HarnessError } from "../errors.js";
+import type { TurnOutputContract } from "@nylorun/core/define";
+import type { AgentManifest } from "@nylorun/core/define";
+import type { Implementations } from "@nylorun/core/define";
 
 export interface AgentDefinition {
   readonly id: string;
   readonly middleware: readonly BoundMiddleware[];
   readonly registry: ToolRegistry;
   readonly output?: TurnOutputContract;
+  readonly manifest: AgentManifest;
+  readonly hash: string;
+  readonly implementations: Implementations;
 }
 
-// Definition lookup only; execution progress is never retained here.
-const definitions = new WeakMap<object, AgentDefinition>();
-export function registerDefinition(agent: object, definition: AgentDefinition): void {
-  definitions.set(agent, definition);
-}
+export type { Implementations };
+
+import { bindingFromAgent, bindOutputContract } from "@nylorun/core/define";
+import type { AgentBinding, BuiltAgent } from "@nylorun/core/define";
+import { ToolRegistry as Registry } from "./registry.js";
+import { hashManifest } from "@nylorun/core/compatibility";
 export function definitionFor(agent: object): AgentDefinition {
-  const definition = definitions.get(agent);
-  if (!definition)
-    throw new HarnessError(
-      "execution.invalid-input",
-      "createExecutionState() requires the original agent returned by Agent(...).build(); initialize wrapper state with that original agent.",
-    );
-  return definition;
+  return definitionFromBinding(bindingFromAgent(agent as BuiltAgent));
+}
+export function definitionFromBinding(binding: AgentBinding): AgentDefinition {
+  return Object.freeze({
+    id: binding.manifest.id,
+    manifest: binding.manifest,
+    hash: hashManifest(binding.manifest),
+    middleware: binding.declarations,
+    implementations: binding.implementations,
+    registry: new Registry(binding.declarations, binding.tools),
+    ...(binding.outputSchema ? { output: bindOutputContract(binding.outputSchema) } : {}),
+  });
+}
+export function tryDefinitionFor(agent: object): AgentDefinition | undefined {
+  return typeof (agent as BuiltAgent).getBinding === "function" ? definitionFor(agent) : undefined;
 }

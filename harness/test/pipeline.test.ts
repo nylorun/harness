@@ -1,6 +1,6 @@
 import { registered } from "./fixtures.js";
 import { describe, expect, it, vi } from "vitest";
-import { tool as authoredTool } from "../src/index.js";
+import { tool as authoredTool } from "@nylorun/core/define";
 import { testAgent, execution, offer, model, tool, toolCalls, turn } from "./fixtures.js";
 import { z } from "zod";
 

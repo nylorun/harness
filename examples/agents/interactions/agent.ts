@@ -1,4 +1,4 @@
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/agents/define";
 import { join } from "node:path";
 import { askUser } from "./ask-user.js";
 import { notes } from "./notes.js";

@@ -1,6 +1,7 @@
+import { runAgent } from "./run-agent.js";
 import { z } from "zod";
+import { createExecutionState } from "../src/run/index.js";
 import {
-  createExecutionState,
   Agent,
   AgentBuildError,
   model as typedModel,
@@ -14,22 +15,27 @@ import {
   type ToolDefinition,
   type ToolExecutionContext,
   type ToolOutcome,
-} from "../src/index.js";
+} from "@nylorun/core/define";
 export const objectSchema = z.object({}).passthrough();
 
 /** Test-only convenience for existing pipeline assertions. All execution uses Promise run(). */
 export function testAgent(options: any = {}): any {
-  const builder = Agent({
+  let builder = Agent({
     id: options.id ?? "test",
     name: options.name ?? "Test",
     ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
     ...(options.outputSchema === undefined ? {} : { outputSchema: options.outputSchema }),
   });
-  const use = builder.use.bind(builder),
-    build = builder.build.bind(builder);
   let adapter: ModelAdapter;
   let built: any;
-  const fixture: any = builder;
+  const fixture: any = {
+    get id() {
+      return builder.id;
+    },
+    get name() {
+      return builder.name;
+    },
+  };
   fixture.with = (value: ModelAdapter) => {
     adapter = value;
     return fixture;
@@ -37,7 +43,7 @@ export function testAgent(options: any = {}): any {
   fixture.use = (id: any, handler?: any) => {
     const handle = handler ?? id;
     if (handle?.fixtureTools)
-      use({
+      builder = builder.use({
         id: typeof id === "string" ? id : "fixture",
         tools: { slot: "fixture-registration", items: handle.fixtureTools },
         middleware: async (request, next) => {
@@ -45,13 +51,13 @@ export function testAgent(options: any = {}): any {
           return handle(request, next);
         },
       });
-    else if (handler) use(id, handler);
-    else use(id);
+    else if (handler) builder = builder.use(id, handler);
+    else builder = builder.use(id);
     return fixture;
   };
   fixture.build = () => {
     if (built) return built;
-    const agent = build();
+    const agent = builder.build();
     return (built = {
       ...agent,
       run: (options: any = {}) => fixtureSession(agent, adapter, options),
@@ -91,46 +97,44 @@ function fixtureSession(agent: BuiltAgent, adapter: ModelAdapter, options: any):
     },
     input(input: any, controls: any = {}) {
       const before = state?.transcript.length ?? 0;
-      const completed = agent
-        .run({
-          state,
-          input,
-          info: options.info ?? {
-            userId: options.userId,
-            ...(options.context === undefined ? {} : { context: options.context }),
-          },
-          signal: controls.signal ?? controller.signal,
-          onModelCall: options.onModelCall ?? adapter,
-          onEvent: (event) => {
-            options.observer?.(event);
-            for (const listener of observers) listener(event);
-          },
-        })
-        .then((result) => {
-          state = result.state;
-          const events: any[] = result.state.transcript.slice(before).flatMap((entry: any) =>
-            entry.kind === "input"
-              ? [{ type: "input", event: entry.event, turnId: entry.turnId }]
-              : entry.kind === "candidate"
-                ? [
-                    {
-                      type: "candidate",
-                      candidate: entry.candidate,
-                      turnId: entry.turnId,
-                      stepId: entry.stepId,
-                    },
-                  ]
-                : entry.kind === "final"
-                  ? [{ type: "final", output: entry.output, turnId: entry.turnId }]
-                  : [],
-          );
-          if (result.status === "failed") events.push({ type: "tripwire", tripwire: result.error });
-          if (result.status === "paused")
-            for (const call of result.pending)
-              if (call.interaction)
-                events.push({ type: "interaction.required", interaction: call.interaction });
-          return { status: result.status === "paused" ? "waiting" : result.status, events };
-        });
+      const completed = runAgent(agent, {
+        state,
+        input,
+        info: options.info ?? {
+          userId: options.userId,
+          ...(options.context === undefined ? {} : { context: options.context }),
+        },
+        signal: controls.signal ?? controller.signal,
+        onModelCall: options.onModelCall ?? adapter,
+        onEvent: (event) => {
+          options.observer?.(event);
+          for (const listener of observers) listener(event);
+        },
+      }).then((result) => {
+        state = result.state;
+        const events: any[] = result.state.transcript.slice(before).flatMap((entry: any) =>
+          entry.kind === "input"
+            ? [{ type: "input", event: entry.event, turnId: entry.turnId }]
+            : entry.kind === "candidate"
+              ? [
+                  {
+                    type: "candidate",
+                    candidate: entry.candidate,
+                    turnId: entry.turnId,
+                    stepId: entry.stepId,
+                  },
+                ]
+              : entry.kind === "final"
+                ? [{ type: "final", output: entry.output, turnId: entry.turnId }]
+                : [],
+        );
+        if (result.status === "failed") events.push({ type: "tripwire", tripwire: result.error });
+        if (result.status === "paused")
+          for (const call of result.pending)
+            if (call.interaction)
+              events.push({ type: "interaction.required", interaction: call.interaction });
+        return { status: result.status === "paused" ? "waiting" : result.status, events };
+      });
       last = completed;
       return { completed };
     },

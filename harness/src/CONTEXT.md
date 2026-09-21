@@ -1,14 +1,27 @@
-# Harness source
+# Agent execution
 
-A definition is assembled. Execution owns progress. A step is one model call. Compiled pieces stay next to the phase that owns them; `package.json` exports, not folder names, keep them off the public package.
+Agent definitions describe capabilities. The engine advances execution; a host
+persists progress and connects it to external systems.
 
-| Folder             | Job                                                                       |
-| ------------------ | ------------------------------------------------------------------------- |
-| `types/`           | Public contracts for callers and adapters                                 |
-| `definition/`      | Assemble a definition: capabilities, tools, output contract, `BuiltAgent` |
-| `execution/`       | One `run()` invocation: resume, record, dispatch, settle                  |
-| `execution/step/`  | One model call: middleware, request, seal                                 |
-| `execution/model/` | Normalize candidates and project a portable model call                    |
-| `utils/`           | Shared JSON and identity helpers                                          |
+## Language
 
-`Agent(...).use(...).build()` retains definitions only. `run({ state, input, onModelCall })` is a new invocation each time; supplied state is never mutated.
+**Manifest**: The serializable description of an agent's declared capabilities.
+Its canonical hash identifies the definition used by an execution.
+
+**Binding**: The local pairing of a manifest with ordered declarations, executable
+tool snapshots, hooks and live schema validators. Functions in a binding stay local.
+
+**Loop**: The progression from model calls through tool outcomes to a final result
+or a durable wait. A supplied checkpoint is not mutated by a new invocation.
+
+**Step**: One model call together with its middleware and tool plan.
+
+**Host**: The OSS or Cloud runtime that owns persistence, scheduling,
+authentication and provider access around the shared engine.
+
+**Executor**: The customer process that claims host-issued actions and runs the
+developer's tool and hook implementations.
+_Avoid_: Runtime, when referring to customer code execution.
+
+**SDK client**: The shared application interface for communicating with a host.
+Authoring and executor capabilities accompany it in the agents SDK.

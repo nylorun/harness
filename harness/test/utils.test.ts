@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createId } from "../src/utils/ids.js";
-import { createObservationSink, emitObserve } from "../src/execution/observe.js";
+import { createObservationSink, emitObserve } from "../src/loop/observe.js";
 
 describe("portable utility primitives", () => {
   it("creates prefixed UUID v4 identifiers with Web Crypto", () => {

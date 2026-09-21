@@ -5,7 +5,7 @@ async function build() {
   for (const name of packages) await script("build", name);
 }
 async function tests() {
-  for (const name of ["harness", "runtime", "create-agent"])
+  for (const name of ["core", "harness", "agents", "runtime", "cli", "create-agent"])
     await script("test", name);
   await script("test:tooling");
   await npm(["test"], { cwd: join(root, "examples") });
@@ -20,6 +20,7 @@ try {
   if (command !== "test" && !flags.includes("--built")) await build();
   if (command === "test") await tests();
   if (command === "check") {
+    await node("scripts/check-boundaries.mjs");
     await script("format:check", "harness");
     await script("test:types", "harness");
     await script("test:types", "create-agent");
@@ -28,6 +29,7 @@ try {
       await node(`${name}/scripts/check-package.mjs`, [], {
         cwd: join(root, name),
       });
+    await node("scripts/check-isolated.mjs");
     await node("create-agent/scripts/examples.mjs", ["--check"]);
     await npm(["run", "check"], { cwd: join(root, "examples") });
     await npm(["run", "build"], { cwd: join(root, "examples") });

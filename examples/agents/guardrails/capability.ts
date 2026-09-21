@@ -1,4 +1,4 @@
-import { middleware, tool, type InputEvent } from "@nylorun/harness";
+import { middleware, tool, type InputEvent } from "@nylorun/agents/define";
 import { z } from "zod";
 
 const blocked = /secret|password|credential|api[_-]?key/iu;

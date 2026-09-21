@@ -1,6 +1,8 @@
 # Harness examples
 
-An exact create-agent project shell with eleven authored Harness demonstrations under `agents/`. `src/index.ts` is the Hono entrypoint; the authored catalog serves agents with Runtime (explicit local session storage and the media adapter). The application owns HTTP and lifecycle.
+The default registry exports one SDK order-lookup agent from `agents/release/`. Runtime and the connected tool executor run as separate processes; Studio uses the session HTTP/SSE API.
+
+The eleven older demonstrations remain as source references under `agents/` and `legacy-registry.ts`, outside the release registry. Their descriptions below are historical and do not establish support in the new host.
 
 ## Install and configure
 
@@ -12,7 +14,7 @@ npm run configure
 npm run dev
 ```
 
-Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 3000. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup.
+Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 8787. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup.
 
 Model selection and API keys use `.env`: set `MODEL_PROVIDER`, `MODEL`, `MODEL_PROVIDER_API_KEY`, and (for custom endpoints) `MODEL_PROVIDER_BASE_URL`, or run `npm run configure`. Existing `.env/` directories require [manual migration](../runtime/README.md#upgrading-an-existing-starter); local state is never moved automatically.
 
@@ -187,3 +189,7 @@ rm -rf .data
 
 
 The generated starter defaults to memory sessions. This examples recipe explicitly chooses `localSessions({ root: ".data/sessions" })`. Its application signal handlers drain Runtime before closing external tools. Harness has no session or resource-disposal lifecycle.
+
+## Current release storage
+
+The supported registry uses SQLite and generated local credentials in `.nylorun/`. Historical `.data/` files are not automatically migrated. Start new sessions after definition changes. The starter README documents the supported text/tool workflow.

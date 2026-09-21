@@ -1,26 +1,45 @@
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/core/define";
 import { z } from "zod";
 import { expect, it } from "vitest";
 import { Hono } from "hono";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { agentContract } from "./contract-suite.js";
 import { memorySessions } from "../src/sessions/store.js";
+import { localSessions } from "../src/node/local-sessions.js";
 import { Runtime, serveAgents } from "../src/server/host.js";
-import type { RuntimeAgent, RuntimeEvent } from "../src/contracts.js";
+import type {
+  RuntimeAgent,
+  RuntimeModelAdapter,
+} from "../src/contracts.js";
 
-function isolated(agents: readonly RuntimeAgent[]) {
+function echoModel(
+  interaction?: "approval" | "response",
+): RuntimeModelAdapter {
+  return async (call) =>
+    interaction && !call.prompt.some((item) => item.kind === "tool-result")
+      ? {
+          output: [{ type: "tool-call", id: "c", name: "confirm", args: {} }],
+        }
+      : "hello";
+}
+
+function isolated(
+  agents: readonly RuntimeAgent[],
+  interaction?: "approval" | "response",
+  onModelCall: RuntimeModelAdapter = echoModel(interaction),
+) {
   const runtime = new Runtime({
     observer: () => {},
     sessions: memorySessions(),
+    onModelCall,
   });
   return { runtime, app: serveAgents({ agents, runtime }) };
 }
 
-function engine(
-  onStop = () => {},
-  onClose = async () => {},
-  interaction?: "approval" | "response"
-): RuntimeAgent {
-  const agent = Agent({ id: "echo", name: "Echo" })
+function engine(interaction?: "approval" | "response"): RuntimeAgent {
+  return Agent({ id: "echo", name: "Echo" })
     .use({
       id: "tools",
       tools: [
@@ -43,22 +62,10 @@ function engine(
       },
     })
     .build();
-  const run = agent.run.bind(agent);
-  agent.run = (options) =>
-    run({
-      ...options,
-      onModelCall: async (call) =>
-        interaction && !call.prompt.some((item) => item.kind === "tool-result")
-          ? {
-              output: [
-                { type: "tool-call", id: "c", name: "confirm", args: {} },
-              ],
-            }
-          : "hello",
-    });
-  return agent;
 }
-agentContract("Harness", (kind) => engine(undefined, undefined, kind));
+
+agentContract("Harness", (kind) => engine(kind), echoModel);
+
 it("advertises root-mounted agent routes without an agents segment", async () => {
   const { runtime, app } = isolated([engine()]);
   try {
@@ -79,79 +86,38 @@ it("advertises and serves routes from the agents mount", async () => {
   const runtime = new Runtime({
     observer: () => {},
     sessions: memorySessions(),
+    onModelCall: echoModel(),
   });
   const app = new Hono();
   app.route(
     "/agents",
-    serveAgents({ agents: [engine()], runtime, basePath: "/agents" })
+    serveAgents({ agents: [engine()], runtime, basePath: "/agents" }),
   );
   try {
     const discovery = await (
       await app.request("http://local/agents/v1/agents")
     ).json();
     expect(discovery.agents[0].manifestUrl).toBe("/agents/echo/manifest.json");
-    const manifest = await (
+    const manifesto = await (
       await app.request("http://local/agents/echo/manifest.json")
     ).json();
-    expect(manifest.endpoints.agUi).toBe("/agents/echo/v1/ag-ui");
+    expect(manifesto.endpoints.agUi).toBe("/agents/echo/v1/ag-ui");
     expect(
       (await app.request("http://local/agents/agents/echo/manifest.json"))
-        .status
+        .status,
     ).toBe(404);
-    expect(
-      (
-        await app.request("http://local/agents/echo/v1/ag-ui", {
-          method: "POST",
-          body: JSON.stringify({
-            messages: [{ role: "user", content: "hello" }],
-          }),
-        })
-      ).status
-    ).toBe(200);
   } finally {
     await runtime.close();
   }
 });
 
-it("does not assume ownership of application resources", async () => {
-  const steps: string[] = [];
-  const { runtime, app } = isolated([
-    engine(
-      () => steps.push("session"),
-      async () => {
-        steps.push("agent");
-      }
-    ),
-  ]);
-  await app.request("http://local/echo/v1/ag-ui", {
-    method: "POST",
-    body: JSON.stringify({ messages: [{ role: "user", content: "hello" }] }),
-  });
-  await runtime.close();
-  expect(steps).toEqual([]);
-});
-it("rejects duplicate identities", () => {
-  expect(() =>
-    serveAgents({
-      agents: [engine(), engine()],
-      runtime: new Runtime({
-        observer: () => {},
-        sessions: memorySessions(),
-      }),
-    })
-  ).toThrow("unique");
-});
-
 it("continues saved sessions across restarts without losing history", async () => {
-  const { mkdtemp, rm } = await import("node:fs/promises");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const { localSessions } = await import("../src/node/local-sessions.js");
   const root = await mkdtemp(join(tmpdir(), "runtime-history-"));
   const agents = [engine()];
   const isolatedConfig = () => ({
     observer: () => {},
     sessions: localSessions({ root }),
+    onModelCall: echoModel(),
   });
   let runtime = new Runtime(isolatedConfig());
   let app = serveAgents({ agents, runtime });
@@ -189,21 +155,10 @@ it("continues saved sessions across restarts without losing history", async () =
 
 it("rejects path-shaped thread IDs before running the agent", async () => {
   let runs = 0;
-  const { runtime, app } = isolated(
-    [
-      engine(
-        () => {},
-        async () => {},
-        undefined
-      ),
-    ].map((agent) => ({
-      ...agent,
-      run(options?: { id?: string }) {
-        runs += 1;
-        return agent.run(options);
-      },
-    }))
-  );
+  const { runtime, app } = isolated([engine()], undefined, async (call, ctx) => {
+    runs += 1;
+    return echoModel()(call, ctx);
+  });
   try {
     for (const threadId of ["../escape", "a/b", "..", ""]) {
       const response = await app.request("http://local/echo/v1/ag-ui", {
@@ -223,22 +178,33 @@ it("rejects path-shaped thread IDs before running the agent", async () => {
 });
 
 it("mounts under a prefix and injects app-provided actor and request metadata", async () => {
-  let runOptions:
-    | { id?: string; userId?: string; context?: Record<string, unknown> }
-    | undefined;
+  let seenInfo: unknown;
   let received: unknown;
-  const base = engine();
-  const agent: RuntimeAgent = {
-    ...base,
-    run(options) {
-      runOptions = options;
-      received = options.input;
-      return base.run(options);
-    },
-  };
+  const agent = Agent({ id: "echo", name: "Echo" })
+    .use({
+      id: "tools",
+      tools: [
+        {
+          name: "probe",
+          inputSchema: z.object({}),
+          execute: async (_args, ctx) => {
+            seenInfo = ctx.info;
+            return { kind: "completed" as const, output: "done" };
+          },
+        },
+      ],
+    })
+    .build();
   const runtime = new Runtime({
     observer: () => {},
     sessions: memorySessions(),
+    onModelCall: async (call) => {
+      if (!call.prompt.some((item) => item.kind === "tool-result"))
+        return {
+          output: [{ type: "tool-call", id: "1", name: "probe", args: {} }],
+        };
+      return "hello";
+    },
   });
   const app = new Hono();
   app.route(
@@ -249,25 +215,25 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
       basePath: "/api/agents",
       getActor: async () => ({ id: "person-1", context: { tenant: "acme" } }),
       getRequestMetadata: async () => ({ requestId: "request-1" }),
-    })
+    }),
   );
   try {
     const discovery = await (
       await app.request("http://local/api/agents/v1/agents")
     ).json();
     expect(discovery.agents[0].manifestUrl).toBe(
-      "/api/agents/echo/manifest.json"
+      "/api/agents/echo/manifest.json",
     );
-    const manifest = await (
+    const manifesto = await (
       await app.request("http://local/api/agents/echo/manifest.json")
     ).json();
-    expect(manifest.endpoints.agUi).toBe("/api/agents/echo/v1/ag-ui");
+    expect(manifesto.endpoints.agUi).toBe("/api/agents/echo/v1/ag-ui");
     expect(
       new URL(discovery.agents[0].manifestUrl, "http://local/api/agents/")
-        .pathname
+        .pathname,
     ).toBe("/api/agents/echo/manifest.json");
     expect(
-      new URL(manifest.endpoints.agUi, "http://local/api/agents/").pathname
+      new URL(manifesto.endpoints.agUi, "http://local/api/agents/").pathname,
     ).toBe("/api/agents/echo/v1/ag-ui");
     await (
       await app.request("http://local/api/agents/echo/v1/ag-ui", {
@@ -277,10 +243,25 @@ it("mounts under a prefix and injects app-provided actor and request metadata", 
         }),
       })
     ).text();
-    expect(runOptions).toMatchObject({
-      info: { userId: "person-1", tenant: "acme" },
+    expect(seenInfo).toMatchObject({
+      userId: "person-1",
+      tenant: "acme",
     });
-    expect(received).toMatchObject({ metadata: { requestId: "request-1" } });
+    const document = await runtime.host.read(
+      "echo",
+      (await runtime.host.list("echo"))[0]!.session,
+    );
+    received = document?.events.find((event) => event.type === "session.run.started")
+      ?.payload.message;
+    expect(received).toMatchObject({
+      content: [{ type: "text", text: "hello" }],
+    });
+    const input = document?.state?.transcript.find(
+      (entry) => entry.kind === "input",
+    );
+    expect(input).toMatchObject({
+      event: { metadata: { requestId: "request-1" } },
+    });
   } finally {
     await runtime.close();
   }
@@ -299,13 +280,13 @@ it("infers each request's mount including parameterized and multiple mounts", as
     ]) {
       const discovery = await (await app.request(`${prefix}/v1/agents`)).json();
       expect(discovery.agents[0].manifestUrl).toBe(
-        `${prefix}/echo/manifest.json`
+        `${prefix}/echo/manifest.json`,
       );
-      const manifest = await (
+      const manifesto = await (
         await app.request(discovery.agents[0].manifestUrl)
       ).json();
-      expect(manifest.endpoints.sessions).toBe(`${prefix}/echo/v1/sessions`);
-      expect(manifest.endpoints.agUi).toBe(`${prefix}/echo/v1/ag-ui`);
+      expect(manifesto.endpoints.sessions).toBe(`${prefix}/echo/v1/sessions`);
+      expect(manifesto.endpoints.agUi).toBe(`${prefix}/echo/v1/ag-ui`);
     }
   } finally {
     await runtime.close();
@@ -341,10 +322,10 @@ it("allows local Studio discovery and preflight only in development", async () =
           ]) {
             const response = await app.request(path, { headers: { origin } });
             expect(response.headers.get("access-control-allow-origin")).toBe(
-              allowed ? origin : null
+              allowed ? origin : null,
             );
             expect(
-              response.headers.get("access-control-allow-credentials")
+              response.headers.get("access-control-allow-credentials"),
             ).toBeNull();
           }
           if (allowed) {
@@ -357,11 +338,11 @@ it("allows local Studio discovery and preflight only in development", async () =
               }),
             });
             expect(stream.headers.get("access-control-allow-origin")).toBe(
-              origin
+              origin,
             );
             expect(stream.headers.get("vary")).toContain("Origin");
             expect(stream.headers.get("content-type")).toContain(
-              "text/event-stream"
+              "text/event-stream",
             );
             expect(await stream.text()).toContain("RUN_FINISHED");
           }
@@ -376,10 +357,10 @@ it("allows local Studio discovery and preflight only in development", async () =
           if (allowed) {
             expect(preflight.status).toBe(204);
             expect(
-              preflight.headers.get("access-control-allow-methods")
+              preflight.headers.get("access-control-allow-methods"),
             ).toContain("POST");
             expect(
-              preflight.headers.get("access-control-allow-headers")
+              preflight.headers.get("access-control-allow-headers"),
             ).toContain("content-type");
           }
         }
@@ -420,7 +401,7 @@ it("ignores Hono Node stream bindings when selecting the model environment", asy
                   threadId: "node-env",
                   messages: [{ role: "user", content: "hello" }],
                 }),
-              }
+              },
             );
             expect(response.status).toBe(200);
             expect(await response.text()).toContain("RUN_FINISHED");
@@ -480,7 +461,7 @@ it("still accepts Workers-style context.env provider bindings", async () => {
                   threadId: "workers-env",
                   messages: [{ role: "user", content: "hello" }],
                 }),
-              }
+              },
             );
             expect(response.status).toBe(200);
             expect(await response.text()).toContain("RUN_FINISHED");

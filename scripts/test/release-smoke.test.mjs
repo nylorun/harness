@@ -31,7 +31,7 @@ test("the publication smoke creates and starts a project without a terminal or p
   const commands = [];
   await createProject(
     options,
-    { harness: "1.0.0", runtime: "1.0.0", studio: "1.0.0" },
+    { harness: "1.0.0", agents: "1.0.0", runtime: "1.0.0", studio: "1.0.0" },
     {
       currentDirectory: () => resolve(".tmp/release-smoke-test"),
       isInteractive: () => false,

@@ -1,10 +1,6 @@
 import { createContext, Script } from "node:vm";
 import { z } from "zod";
-import type {
-  JsonValue,
-  ToolDefinition,
-  ToolExecutionContext,
-} from "@nylorun/harness";
+import { isToolError, type JsonValue, type ToolDefinition, type ToolExecutionContext, type ToolOutcome, type ToolRunResult } from "@nylorun/agents/define";
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const SYNC_TIMEOUT_MS = 1_000;
@@ -144,9 +140,9 @@ function createBindings(
           .join("; ");
         throw new ToolCallError(tool.name, issues);
       }
-      let outcome;
+      let outcome: ToolOutcome;
       try {
-        outcome = await tool.execute(parsed.data, context);
+        outcome = await invokeTool(tool, parsed.data, context);
       } catch (error) {
         throw new ToolCallError(tool.name, messageOf(error));
       }
@@ -193,6 +189,45 @@ function createBindings(
       return undefined;
     },
   });
+}
+
+/** Resolve execute|run, normalize plain returns, and map ToolError to failed. */
+export async function invokeTool(
+  tool: ToolDefinition,
+  args: unknown,
+  context: ToolExecutionContext,
+): Promise<ToolOutcome> {
+  const run = tool.execute ?? tool.run;
+  if (typeof run !== "function") {
+    throw new ToolCallError(
+      tool.name,
+      `Tool '${tool.name}' has no execute() or run().`,
+    );
+  }
+  try {
+    return normalizeToolOutcome(await run(args as never, context));
+  } catch (error) {
+    if (isToolError(error)) {
+      return { kind: "failed", code: error.code, message: error.message };
+    }
+    throw error;
+  }
+}
+
+export function normalizeToolOutcome(raw: ToolRunResult): ToolOutcome {
+  if (raw && typeof raw === "object" && "kind" in raw) {
+    const kind = (raw as { kind: string }).kind;
+    if (
+      kind === "completed" ||
+      kind === "denied" ||
+      kind === "failed" ||
+      kind === "interaction-required" ||
+      kind === "deferred"
+    ) {
+      return raw as ToolOutcome;
+    }
+  }
+  return { kind: "completed", output: raw as JsonValue };
 }
 
 function argsType(tool: ToolDefinition): string {

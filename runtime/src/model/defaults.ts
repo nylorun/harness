@@ -1,4 +1,4 @@
-import type { ModelAdapter } from "@nylorun/harness";
+import type { ModelAdapter } from "@nylorun/core/define";
 import { httpModel, type ModelEnvironment } from "./http-model.js";
 
 export interface ModelPreview {

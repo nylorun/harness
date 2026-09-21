@@ -7,7 +7,8 @@ import type {
   RuntimeAgent,
   UserContentPart,
 } from "../contracts.js";
-import type { ExecutionInput, ModelAdapter } from "@nylorun/harness";
+import type { BuiltAgent, ModelAdapter } from "@nylorun/core/define"
+import type { ExecutionInput } from "@nylorun/harness";
 import { agUiEvents } from "./ag-ui.js";
 import { EventDelivery } from "./delivery.js";
 import { scrub } from "../redact.js";
@@ -27,6 +28,12 @@ import {
   registerRuntimeLifecycle,
 } from "../model/defaults.js";
 import type { ModelEnvironment } from "../model/http-model.js";
+import {
+  createSessionHandle,
+  type OpenSessionOptions,
+  type SessionHandle,
+} from "../session/handle.js";
+import { installDefaultRuntimeFactory } from "../session/default.js";
 const randomUUID = () => crypto.randomUUID();
 
 type ChatContent =
@@ -59,9 +66,28 @@ export type AgentRouterOptions = Readonly<{
     | undefined
     | Promise<Record<string, JsonValue> | undefined>;
 }>;
-export type ServeAgentsOptions = AgentRouterOptions & {
+/** 1.0 compatibility: requires an explicit Runtime and returns a Hono app. */
+export type ServeAgentsCompatOptions = AgentRouterOptions & {
   readonly agents: readonly RuntimeAgent[];
   readonly runtime: Runtime;
+};
+/** DX v5.6 local: optional Runtime; returns `{ fetch }`. */
+export type ServeAgentsFetchOptions = AgentRouterOptions & {
+  readonly agents?: readonly RuntimeAgent[];
+  readonly runtime?: Runtime;
+  /** Alias for `getInfo` — keep the name `info` (never `user`). */
+  readonly info?: AgentRouterOptions["getInfo"];
+  readonly on?: {
+    readonly session?: {
+      readonly created?: (session: { readonly id: string; readonly agentId: string }) => void;
+      readonly idle?: (session: { readonly id: string; readonly agentId: string }) => void;
+      readonly failed?: (session: { readonly id: string; readonly agentId: string }) => void;
+    };
+  };
+};
+export type ServeAgentsOptions = ServeAgentsCompatOptions;
+export type ServeAgentsFetch = {
+  readonly fetch: (request: Request) => Response | Promise<Response>;
 };
 const kServe = Symbol("serve");
 
@@ -69,13 +95,45 @@ export class Runtime {
   readonly host: SessionHost;
   private served = false;
   private closing?: Promise<void>;
-  constructor(private readonly config: RuntimeConfig = {}) {
+  constructor(readonly config: RuntimeConfig = {}) {
     this.host = new SessionHost(config.sessions ?? memorySessions());
     registerRuntimeLifecycle(this.close);
   }
   close = (): Promise<void> => (this.closing ??= this.host.close());
 
-  [kServe](options: Omit<ServeAgentsOptions, "runtime">): Hono<any> {
+  resolveModel(onPreview?: (preview: import("../model/defaults.js").ModelPreview) => void): ModelAdapter {
+    return (
+      this.config.onModelCall ??
+      (this.config.createModel ?? defaultModel)({
+        environment: this.config.environment ?? processEnvironment(),
+        onPreview,
+        media: this.config.media,
+      })
+    );
+  }
+
+  openSession(
+    agent: BuiltAgent<any, any>,
+    options?: OpenSessionOptions,
+  ): SessionHandle {
+    return createSessionHandle(this, agent, options);
+  }
+
+  async listSessions(agentId: string) {
+    return this.host.list(agentId);
+  }
+
+  async getSession(agentId: string, sessionId: string) {
+    return this.host.read(agentId, sessionId);
+  }
+
+  async deleteSession(agentId: string, sessionId: string) {
+    return this.host.delete(agentId, sessionId);
+  }
+
+  [kServe](options: Omit<ServeAgentsCompatOptions, "runtime"> & {
+    readonly agents: readonly RuntimeAgent[];
+  }): Hono<any> {
     if (this.served) throw new Error("A Runtime may only be served once.");
     this.served = true;
     const agents = [...options.agents];
@@ -241,7 +299,21 @@ export class Runtime {
         pending_interaction: document.state?.plan?.calls.find(
           (call) => call.status === "interaction"
         )?.interaction,
+        pending_waits: document.state?.plan?.calls
+          .filter(
+            (call) =>
+              (call.status === "interaction" || call.status === "deferred") &&
+              call.wait
+          )
+          .map((call) => call.wait),
       });
+    });
+    app.delete("/:agentId/v1/sessions/:session", async (context) => {
+      const agent = agentFor(context);
+      const sessionId = context.req.param("session");
+      const deleted = await this.host.delete(agent.id, sessionId);
+      if (!deleted) return context.json({ error: "unknown session" }, 404);
+      return context.json({ session_id: sessionId, deleted: true });
     });
     app.post("/:agentId/v1/sessions/:session", async (context) => {
       const agent = agentFor(context),
@@ -270,6 +342,22 @@ export class Runtime {
       }
       if (payload.settlement) input = { kind: "settle", ...payload.settlement };
       else if (
+        payload.action === "wait-resolve" ||
+        payload.waitResolve ||
+        (interaction?.kind === "wait-resolve" &&
+          typeof interaction.waitId === "string")
+      ) {
+        const wait =
+          payload.waitResolve ??
+          (interaction?.kind === "wait-resolve" ? interaction : payload);
+        if (typeof wait.waitId !== "string")
+          return context.json({ error: "wait-resolve requires waitId" }, 400);
+        input = {
+          kind: "wait-resolve",
+          waitId: wait.waitId,
+          ...("value" in wait ? { value: wait.value } : {}),
+        };
+      } else if (
         interaction?.kind === "approval" &&
         typeof interaction.id === "string" &&
         typeof interaction.approved === "boolean"
@@ -291,7 +379,10 @@ export class Runtime {
         };
       else
         return context.json(
-          { error: "expected a correlated interaction or settlement" },
+          {
+            error:
+              "expected a correlated interaction, settlement, or wait-resolve",
+          },
           400
         );
       const document = await this.host.read(agent.id, sessionId);
@@ -437,10 +528,33 @@ export class Runtime {
     return app;
   }
 }
-export function serveAgents(options: ServeAgentsOptions): Hono<any> {
-  const { runtime, ...rest } = options;
-  return runtime[kServe](rest);
+
+export function serveAgents(options: ServeAgentsCompatOptions): Hono<any>;
+export function serveAgents(options: ServeAgentsFetchOptions): ServeAgentsFetch;
+export function serveAgents(
+  options: ServeAgentsCompatOptions | ServeAgentsFetchOptions,
+): Hono<any> | ServeAgentsFetch {
+  if ("runtime" in options && options.runtime) {
+    const { runtime, ...rest } = options;
+    return runtime[kServe]({
+      ...rest,
+      agents: options.agents ?? [],
+    });
+  }
+  const runtime = new Runtime({});
+  const getInfo = options.getInfo ?? ("info" in options ? options.info : undefined);
+  const app = runtime[kServe]({
+    ...options,
+    agents: options.agents ?? [],
+    ...(getInfo ? { getInfo } : {}),
+  });
+  return {
+    fetch: (request: Request) => app.fetch(request),
+  };
 }
+
+installDefaultRuntimeFactory(() => new Runtime({}));
+
 /** Workers-style provider bindings on context.env; ignore Hono Node stream slots. */
 function bindingsEnvironment(context: Context): ModelEnvironment | undefined {
   const env = context.env as ModelEnvironment | null | undefined;

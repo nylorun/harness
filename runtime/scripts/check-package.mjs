@@ -5,19 +5,6 @@ import { readFileSync, readdirSync, mkdtempSync, rmSync } from "node:fs";
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 if (!pkg.dependencies?.["@nylorun/harness"])
   throw new Error("Runtime must use canonical Harness contracts through a direct dependency.");
-const visited = new Set();
-function scanPortable(path) {
-  if (visited.has(path)) return;
-  visited.add(path);
-  const source = readFileSync(path, "utf8");
-  for (const match of source.matchAll(/(?:from\s*|import\s*\(\s*)["']([^"']+)["']/g)) {
-    const name = match[1];
-    if (name.startsWith("node:") || name.includes("pi-ai"))
-      throw new Error(`Node-only import ${name} reachable from portable root in ${path}`);
-    if (name.startsWith(".")) scanPortable(join(path, "..", name));
-  }
-}
-scanPortable("dist/index.js");
 const cache = mkdtempSync(join(tmpdir(), "nylorun-runtime-pack-"));
 const output = execFileSync(
   process.platform === "win32" ? "npm.cmd" : "npm",
@@ -27,19 +14,16 @@ const output = execFileSync(
 rmSync(cache, { recursive: true, force: true });
 const files = JSON.parse(output)[0].files.map((entry) => entry.path);
 for (const path of [
-  "dist/cli.js",
-  "dist/dev.js",
-  "dist/launcher.js",
-  "dist/dev-entry.js",
-  "dist/environment.js",
+  "dist/configuration.js",
   "dist/index.js",
   "dist/index.d.ts",
   "dist/node/index.js",
   "dist/node/local-sessions.js",
-  "dist/sessions/host.js",
+  "dist/core/runtime.js",
+  "dist/core/main.js",
   "README.md",
   "CHANGELOG.md",
   "LICENSE",
 ])
   if (!files.includes(path)) throw new Error(`Missing ${path}`);
-console.log("Runtime package and portable import boundary checks passed.");
+console.log("Runtime Node host package checks passed.");

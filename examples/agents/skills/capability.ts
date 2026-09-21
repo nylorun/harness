@@ -1,6 +1,6 @@
 import { projectAsset } from "@nylorun/runtime/node";
 import { join } from "node:path";
-import { tool, type CapabilityDeclaration } from "@nylorun/harness";
+import { tool, type CapabilityDeclaration } from "@nylorun/agents/define";
 import { z } from "zod";
 import {
   defineSkill,

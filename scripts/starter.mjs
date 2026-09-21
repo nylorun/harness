@@ -27,7 +27,7 @@ export async function renderPreview({ repo = root, studio = true } = {}) {
     await writeFile(join(project, path), content);
   }
   const manifest = await readJson(join(project, "package.json"));
-  for (const name of ["harness", "runtime"])
+  for (const name of ["core", "harness", "agents", "runtime", "cli"])
     manifest.dependencies[`@nylorun/${name}`] =
       `file:${join(repo, name).replaceAll("\\", "/")}`;
   if (studio)

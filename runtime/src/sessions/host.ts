@@ -1,10 +1,11 @@
-import { isHarnessError } from "@nylorun/harness";
-import type {
-  BuiltAgent,
-  ExecutionInput,
-  ModelAdapter,
-  RunResult,
-} from "@nylorun/harness";
+import { HarnessError, isHarnessError } from "@nylorun/core/define";
+import type { BuiltAgent, JsonObject, ModelAdapter } from "@nylorun/core/define"
+import type { ExecutionInput, ExecutionState, RunResult } from "@nylorun/harness";
+import {
+  bindingFromAgent,
+  createRunState,
+  run,
+} from "@nylorun/harness/run";
 import { scrub } from "../redact.js";
 import type {
   CanonicalEvent,
@@ -21,6 +22,8 @@ export interface SubmitOptions {
   readonly secrets?: readonly string[];
   readonly onEvent?: (event: CanonicalEvent) => void;
   readonly started?: Record<string, unknown>;
+  /** Seed `ExecutionState.state` when creating a new checkpoint (openSession). */
+  readonly sessionState?: JsonObject;
 }
 
 /** The built-in single-process coordinator. Storage adapters do not implement execution. */
@@ -55,6 +58,19 @@ export class SessionHost {
         ? { ...session, status: "interrupted" as const }
         : session,
     );
+  }
+
+  async delete(agentId: string, sessionId: string): Promise<boolean> {
+    const key = this.key(agentId, sessionId);
+    if (this.active.has(key))
+      throw new Error("Cannot delete a session while a run is active");
+    if ("delete" in this.store && typeof this.store.delete === "function")
+      return this.store.delete(agentId, sessionId);
+    const existing = await this.store.get(agentId, sessionId);
+    if (!existing) return false;
+    // Stores without delete: archive by removing via put tombstone is not supported;
+    // require ManagedSessionStore.delete or memorySessions.delete.
+    throw new Error("Session store does not support delete");
   }
 
   subscribe(
@@ -195,17 +211,25 @@ export class SessionHost {
             },
           );
           await save();
-          const result = await agent.run({
-            state: document.state,
-            input,
+          const binding = bindingFromAgent(agent);
+          const engineInput = resolveEngineInput(document.state, input);
+          const state = ensureEngineState(
+            binding,
+            document.state,
+            options.sessionState,
+          );
+          const result = await run({
+            binding,
+            state,
+            input: engineInput,
             info: options.info,
             signal: controller.signal,
             onModelCall: options.onModelCall,
             onEvent: (event) => {
-              add(event.type, event);
+              add(event.type, event as unknown as Record<string, unknown>);
             },
-            record: async (state) => {
-              document = { ...document, state };
+            record: async (next) => {
+              document = { ...document, state: next };
               await save();
             },
           });
@@ -302,7 +326,9 @@ export class SessionHost {
             "This session was interrupted; reconcile its external effects before cancellation.",
           );
         if (stored?.state?.status !== "paused") return;
-        const result = await agent.run({
+        const binding = bindingFromAgent(agent);
+        const result = await run({
+          binding,
           state: stored.state,
           input: { kind: "continue" },
           signal: AbortSignal.abort(new Error("Paused execution cancelled")),
@@ -359,4 +385,69 @@ export class SessionHost {
     if ("close" in this.store && typeof this.store.close === "function")
       await this.store.close();
   }
+}
+
+function ensureEngineState(
+  binding: ReturnType<typeof bindingFromAgent>,
+  existing: ExecutionState | undefined,
+  sessionState: JsonObject | undefined,
+): ExecutionState {
+  if (existing) {
+    if (!sessionState || Object.keys(existing.state ?? {}).length > 0)
+      return existing;
+    return {
+      ...existing,
+      state: { ...(existing.state ?? {}), ...sessionState },
+    };
+  }
+  return createRunState(binding, {
+    ...(sessionState ? { state: sessionState } : {}),
+  });
+}
+
+/**
+ * Map DX `wait-resolve` onto harness approve/respond/settle using wait metadata.
+ * Engine `ExecutionInput` already includes `wait-resolve`; resume is wired via
+ * existing interaction/deferred kinds until full wait-id resume lands.
+ */
+export function resolveEngineInput(
+  state: ExecutionState | undefined,
+  input: ExecutionInput,
+): ExecutionInput {
+  if (typeof input !== "object" || !("kind" in input) || input.kind !== "wait-resolve")
+    return input;
+  const call = state?.plan?.calls.find(
+    (item) => item.wait?.waitId === input.waitId,
+  );
+  if (!call)
+    throw new HarnessError(
+      "execution.invalid-input",
+      "No pending wait matches waitId",
+    );
+  if (call.status === "interaction" && call.interaction) {
+    if (call.interaction.kind === "approval")
+      return {
+        kind: "approve",
+        interactionId: call.interaction.id,
+        approved: input.value !== false && input.value !== "false",
+      };
+    return {
+      kind: "respond",
+      interactionId: call.interaction.id,
+      value: input.value ?? null,
+    };
+  }
+  if (call.status === "deferred")
+    return {
+      kind: "settle",
+      invocationId: call.invocationId,
+      outcome: {
+        kind: "completed",
+        output: input.value ?? null,
+      },
+    };
+  throw new HarnessError(
+    "execution.invalid-input",
+    "Wait is no longer pending",
+  );
 }

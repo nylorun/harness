@@ -1,12 +1,9 @@
+import { runAgent } from "./run-agent.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import {
-  Agent,
-  AgentBuilder,
-  createExecutionState,
-  type ExecutionEvent,
-  type ModelRequest,
-} from "../src/index.js";
+import { createExecutionState } from "../src/run/index.js";
+import { Agent, AgentBuilder, type ModelRequest } from "@nylorun/core/define";
+import { type ExecutionEvent } from "../src/index.js";
 
 function expectDataOnly(value: unknown): void {
   expect(typeof value).not.toBe("function");
@@ -20,7 +17,14 @@ describe("public interface boundaries", () => {
     const builder = Agent({ id: "a", name: "A" });
     const agent = builder.build();
     expect(builder.build()).toBe(agent);
-    expect(Reflect.ownKeys(agent).sort()).toEqual(["id", "manifest", "name", "run"]);
+    expect(Reflect.ownKeys(agent).sort()).toEqual([
+      "getBinding",
+      "hash",
+      "id",
+      "manifest",
+      "name",
+      "toJSON",
+    ]);
     for (const field of ["registry", "middleware", "output"]) {
       expect(field in agent).toBe(false);
     }
@@ -29,7 +33,9 @@ describe("public interface boundaries", () => {
     const decorated = Object.assign(agent, { close });
     const state = createExecutionState(decorated);
     // Extracted run does not depend on a public receiver holding definitions.
-    const run = agent.run;
+    expect("run" in agent).toBe(false);
+    const run = (options: import("../src/types/execution.js").RunOptions) =>
+      runAgent(agent, options);
     expect((await run({ state, input: "go", onModelCall: async () => "ok" })).status).toBe(
       "completed",
     );
@@ -53,14 +59,14 @@ describe("public interface boundaries", () => {
     expect(state).not.toHaveProperty("executionVersion");
     expectDataOnly(state);
     expect(createExecutionState(agent).executionId).not.toBe(state.executionId);
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       state,
       input: "go",
       onModelCall: async () => ({ output: [{ type: "json", value: { count: 2 } }] }),
     });
     expect(result).toMatchObject({ status: "completed", output: { count: 2 } });
     expect(state.turnCount).toBe(0);
-    expect(() => createExecutionState({ ...agent })).toThrow(/original agent returned by Agent/);
+    expect(() => createExecutionState({ ...agent })).toThrow(/getBinding/);
   });
 
   it("projects tool metadata before adapters run while keeping dispatch and events intact", async () => {
@@ -84,7 +90,7 @@ describe("public interface boundaries", () => {
       .build();
     const requests: ModelRequest[] = [];
     const events: ExecutionEvent[] = [];
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       input: "double 3",
       onEvent: (event) => {
         events.push(event);

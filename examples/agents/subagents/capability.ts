@@ -1,4 +1,5 @@
-import { tool, type BuiltAgent } from "@nylorun/harness";
+import { run, bindingFromAgent } from "@nylorun/harness/run";
+import { tool, type BuiltAgent } from "@nylorun/agents/define";
 import { z } from "zod";
 
 export function delegateTo(agents: Readonly<Record<string, BuiltAgent>>) {
@@ -33,7 +34,7 @@ export function delegateTo(agents: Readonly<Record<string, BuiltAgent>>) {
             };
           }
           try {
-            const completion = await child.run({ input: task, onModelCall: context.onModelCall, signal: context.signal, info: context.info });
+            const completion = await run({ binding: bindingFromAgent(child), input: task, onModelCall: context.onModelCall, signal: context.signal, info: context.info });
             if (completion.status !== "completed") return { kind: "failed" as const, code: "subagent.incomplete", message: `Specialist '${name}' ended with status ${completion.status}.` };
             return { kind: "completed" as const, output: { specialist: name, answer: completion.output } };
           } catch (error) {

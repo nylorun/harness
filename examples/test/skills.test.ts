@@ -1,13 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  Agent,
-  model,
-  type CapabilityDeclaration,
-  type CapabilityItems,
-  type ToolDefinition,
-} from "@nylorun/harness";
+import { Agent, model, type CapabilityDeclaration, type CapabilityItems, type ToolDefinition } from "@nylorun/core/define";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   defineSkill,
@@ -16,6 +10,7 @@ import {
   SKILLS_USAGE,
 } from "../agents/skills/capability.js";
 import { SkillRoster } from "../agents/skills/roster.js";
+import { invokeTool } from "./support.js";
 
 const adapter = model(async () => ({
   output: [{ type: "text" as const, text: "ok" }],
@@ -69,17 +64,6 @@ function toolNamed(
   const found = items(declaration.tools).find((tool) => tool.name === name);
   if (!found) throw new Error(`Missing tool ${name}`);
   return found;
-}
-
-function context() {
-  return {
-    executionId: "session",
-    turnId: "turn",
-    stepId: "step",
-    callId: "call",
-    invocationId: "invocation",
-    signal: new AbortController().signal,
-  };
 }
 
 describe("SkillRoster", () => {
@@ -203,10 +187,9 @@ describe("skills()", () => {
       { "CHECKLIST.md": "- tests\n" }
     );
     const declaration = await skills({ directory: root });
-    const result = await toolNamed(declaration, "load_skill").execute(
-      { name: "code-review" },
-      context()
-    );
+    const result = await invokeTool(toolNamed(declaration, "load_skill"), {
+      name: "code-review",
+    });
     expect(result).toMatchObject({
       kind: "completed",
       output: {
@@ -242,10 +225,10 @@ describe("skills()", () => {
       "read_skill_resource",
     ]);
     await expect(
-      toolNamed(declaration, "read_skill_resource").execute(
-        { name: "code-review", path: "CHECKLIST.md" },
-        context()
-      )
+      invokeTool(toolNamed(declaration, "read_skill_resource"), {
+        name: "code-review",
+        path: "CHECKLIST.md",
+      })
     ).resolves.toEqual({
       kind: "completed",
       output: {

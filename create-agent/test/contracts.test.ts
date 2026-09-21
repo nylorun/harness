@@ -1,10 +1,5 @@
 import { z } from "zod";
-import {
-  tool,
-  Agent,
-  type BuiltAgent,
-  type ModelAdapter,
-} from "@nylorun/harness";
+import { tool, Agent, type BuiltAgent, type ModelAdapter } from "@nylorun/core/define";
 import type { RuntimeAgent } from "@nylorun/runtime";
 import { piModel } from "@nylorun/runtime/node";
 import { agentContract } from "../../runtime/test/contract-suite.js";
@@ -18,9 +13,9 @@ void adapter;
 agentContract(
   "Harness",
   (kind) => {
-    const builder = Agent({ id: "echo", name: "Echo" });
+    let builder = Agent({ id: "echo", name: "Echo" });
     if (kind)
-      builder.use({
+      builder = builder.use({
         id: "interaction",
         tools: [
           tool({

@@ -93,6 +93,7 @@ try {
   });
   const plan = await readJson(join(temporary, ".release/plan.json"));
   assert.deepEqual(Object.keys(plan.packages).sort(), [
+    "cli",
     "create-agent",
     "runtime",
   ]);

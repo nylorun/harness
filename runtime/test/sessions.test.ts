@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/core/define";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,7 @@ import {
   memorySessions,
   SessionHost,
   type StoredSession,
-} from "../src/index.js";
+} from "./legacy-api.js";
 import { localSessions } from "../src/node/local-sessions.js";
 import { Hono } from "hono";
 

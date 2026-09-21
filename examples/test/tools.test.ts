@@ -1,14 +1,10 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  Agent,
-  model,
-  type CapabilityItems,
-  type ToolDefinition,
-} from "@nylorun/harness";
+import { Agent, model, type CapabilityItems, type ToolDefinition } from "@nylorun/core/define";
 import { afterEach, describe, expect, it } from "vitest";
 import { tools } from "../agents/shared/tools/index.js";
+import { invokeTool } from "./support.js";
 
 const adapter = model(async () => ({
   output: [{ type: "text" as const, text: "ok" }],
@@ -28,17 +24,6 @@ function items<T>(value: CapabilityItems<T> | undefined): readonly T[] {
   return "items" in value ? value.items : value;
 }
 
-function context() {
-  return {
-    executionId: "session",
-    turnId: "turn",
-    stepId: "step",
-    callId: "call",
-    invocationId: "invocation",
-    signal: new AbortController().signal,
-  };
-}
-
 function catalogTool(
   name: string,
   declaration: Awaited<ReturnType<typeof tools>>
@@ -52,10 +37,9 @@ describe("tools()", () => {
   it("loads calculate from the tools catalog", async () => {
     const declaration = await tools();
     await expect(
-      catalogTool("calculate", declaration).execute(
-        { expression: "19 * 7" },
-        context()
-      )
+      invokeTool(catalogTool("calculate", declaration), {
+        expression: "19 * 7",
+      })
     ).resolves.toEqual({
       kind: "completed",
       output: { expression: "19 * 7", value: 133 },
@@ -66,16 +50,13 @@ describe("tools()", () => {
     const declaration = await tools();
     const convert = catalogTool("convert", declaration);
     await expect(
-      convert.execute(
-        { value: 25, from: "celsius", to: "fahrenheit" },
-        context()
-      )
+      invokeTool(convert, { value: 25, from: "celsius", to: "fahrenheit" })
     ).resolves.toEqual({
       kind: "completed",
       output: { value: 25, from: "celsius", to: "fahrenheit", result: 77 },
     });
     await expect(
-      convert.execute({ value: 1, from: "celsius", to: "meter" }, context())
+      invokeTool(convert, { value: 1, from: "celsius", to: "meter" })
     ).resolves.toEqual({
       kind: "failed",
       code: "convert.incompatible",
@@ -85,7 +66,7 @@ describe("tools()", () => {
 
   it("returns UTC iso and unixMs from now", async () => {
     const declaration = await tools();
-    const result = await catalogTool("now", declaration).execute({}, context());
+    const result = await invokeTool(catalogTool("now", declaration), {});
     expect(result).toMatchObject({
       kind: "completed",
       output: {

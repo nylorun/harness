@@ -1,10 +1,12 @@
+import { runAgent } from "./run-agent.js";
 import { describe, expect, it, vi } from "vitest";
-import { preparedModel, type ModelCall, type ObserveEvent } from "../src/index.js";
+import { type ModelCall, type ObserveEvent } from "@nylorun/core/define";
 import {
   chatCompletionsAdapter,
+  preparedModel,
   toMessages,
   toResponses,
-} from "../src/execution/model/adapters.js";
+} from "../src/loop/model/adapters.js";
 import { model, testAgent } from "./fixtures.js";
 
 const image = {
@@ -60,16 +62,16 @@ describe("media input", () => {
   });
 
   it("copies media references into serializable execution state", async () => {
-    const { Agent } = await import("../src/index.js");
+    const { Agent } = await import("@nylorun/core/define");
     const reference = { url: "https://cdn.example.test/seed.png" };
     const agent = Agent({ id: "a", name: "A" }).build();
-    const result = await agent.run({
+    const result = await runAgent(agent, {
       input: { content: [{ ...image, reference }] },
       onModelCall: async () => "done",
     });
     reference.url = "changed";
     expect(JSON.stringify(result.state)).toContain("https://cdn.example.test/seed.png");
-    const resumed = await agent.run({
+    const resumed = await runAgent(agent, {
       state: JSON.parse(JSON.stringify(result.state)),
       input: "next",
       onModelCall: async (call) => {
@@ -80,15 +82,13 @@ describe("media input", () => {
     expect(resumed.status).toBe("completed");
   });
   it("rejects malformed media before model invocation", async () => {
-    const { Agent } = await import("../src/index.js");
+    const { Agent } = await import("@nylorun/core/define");
     const invoke = vi.fn(async () => "done");
     await expect(
-      Agent({ id: "a", name: "A" })
-        .build()
-        .run({
-          input: { content: [{ type: "media", mediaType: "", reference: {} }] },
-          onModelCall: invoke,
-        }),
+      runAgent(Agent({ id: "a", name: "A" }).build(), {
+        input: { content: [{ type: "media", mediaType: "", reference: {} }] },
+        onModelCall: invoke,
+      }),
     ).rejects.toMatchObject({ code: "execution.invalid-input" });
     expect(invoke).not.toHaveBeenCalled();
   });
