@@ -67,10 +67,11 @@ export async function runProject(
   let studio: { close(): Promise<void>; address: string } | undefined;
   const connections: AgentConnection[] = [];
   let stopping: Promise<void> | undefined;
+  let intentionalStop = false;
   const close = () =>
     (stopping ??= (async () => {
-      await Promise.all(connections.map((c) => c.close()));
-      await studio?.close();
+      await Promise.allSettled(connections.map((c) => c.close()));
+      await studio?.close().catch(() => {});
       if (child?.exitCode === null && child.signalCode === null) {
         child.kill("SIGTERM");
         await new Promise<void>((resolve) => {
@@ -84,7 +85,10 @@ export async function runProject(
       for (const agent of agents) await (agent as any).close?.();
     })());
   const stop = () => {
-    void close();
+    intentionalStop = true;
+    void close().finally(() => {
+      process.exitCode = 0;
+    });
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
@@ -114,17 +118,29 @@ export async function runProject(
           reject(new Error("Local Runtime did not start within 20 seconds")),
         20000,
       );
-      child!.once("message", (message) => {
-        if ((message as any)?.type === "ready") {
-          clearTimeout(timer);
+      const onReady = (message: unknown) => {
+        if ((message as { type?: string })?.type === "ready") {
+          cleanup();
           resolve();
         }
-      });
-      child!.once("exit", (code) => {
-        clearTimeout(timer);
+      };
+      const onExit = (code: number | null) => {
+        cleanup();
         reject(new Error(`Local Runtime exited (${code})`));
-      });
-      child!.once("error", reject);
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        child!.off("message", onReady);
+        child!.off("exit", onExit);
+        child!.off("error", onError);
+      };
+      child!.on("message", onReady);
+      child!.once("exit", onExit);
+      child!.once("error", onError);
     });
     const client = createClient({ url, key: credentials.serverKey });
     for (let index = 0; index < agents.length; index++) {
@@ -161,7 +177,7 @@ export async function runProject(
     );
     await new Promise<void>((resolve) => {
       child!.once("exit", () => {
-        if (!stopping) process.exitCode = 1;
+        if (!intentionalStop && !stopping) process.exitCode = 1;
         resolve();
       });
       if (child!.exitCode !== null) resolve();
