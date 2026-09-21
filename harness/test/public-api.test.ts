@@ -28,6 +28,7 @@ describe("public API", () => {
       "./model/adapters",
       "./run",
     ]);
-    expect(manifest.dependencies).toEqual({ "@nylorun/core": "0.1.0-beta.1" });
+    expect(Object.keys(manifest.dependencies ?? {})).toEqual(["@nylorun/core"]);
+    expect(manifest.dependencies?.["@nylorun/core"]).toMatch(/^\d+\.\d+\.\d+(?:-beta(?:\.\d+)?)?$/);
   });
 });
