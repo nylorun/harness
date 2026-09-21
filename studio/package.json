@@ -42,7 +42,8 @@
     "build": "npm run clean && npm run typecheck && npm run build:server && npm run build:web",
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build",
-    "check": "npm run build && node scripts/check-package.mjs",
+    "check": "npm run build && node scripts/check-package.mjs && npm run test:events",
+    "test:events": "node --experimental-strip-types --test scripts/event-presentation.test.mjs",
     "typecheck": "node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
     "prepack": "npm run build"
