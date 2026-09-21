@@ -2,13 +2,13 @@
 
 Execution engine, checkpoints and durable host effects. Shared authoring and wire
 contracts live in `@nylorun/core`; applications use `@nylorun/agents`.
-OSS and Cloud hosts consume harness independently. See the
+OSS publishes harness for local Runtime; Cloud installs published packages from
+npm independently. See the
 [package architecture](../docs/design/package-architecture.md).
 
 Use `/run` for explicit execution, `/model/adapters` for provider format adapters,
 and `/compatibility` for checkpoint compatibility. Definitions and protocol
-schemas are no longer harness exports. Cloud's current packed artifact requires
-a separate coordinated migration; it has not been upgraded here.
+schemas are no longer harness exports.
 
 > **DX v5.6:** definition ⊥ engine. `model` is not on `Agent({})` — Runtime injects `onModelCall`. Host data stays `info` (not `user`); session memory is `state`.
 

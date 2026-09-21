@@ -4,7 +4,7 @@ Historical core-pass record. The subsequent local release migrated CLI/creator/S
 
 **Build/startup verification only; functional correctness and end-to-end behavior remain unverified.**
 
-New standalone implementation is `src/core/`, using `@nylorun/harness@0.14.0-beta.3` through the public workspace. It uses the same harness package as the vendored Cloud artifact; no package was published. Root handoff records the exact artifact digest. Node 24 is required for `node:sqlite`.
+New standalone implementation is `src/core/`, using `@nylorun/harness@0.14.0-beta.3` through the public workspace. Local candidate digests for this repo’s packs belong in the root handoff; Cloud upgrades via npm after publish, not via in-repo vendor artifacts. Node 24 is required for `node:sqlite`.
 
 Built in this pass:
 
@@ -16,7 +16,7 @@ Built in this pass:
 - Failed turns retain their failed checkpoint in the SQLite checkpoints table (keyed by session/turn/segment) and their effect/event journal, but restore the pre-turn session state for later messages so abandoned tool plans cannot run under a new turn.
 - Message, approval, response, cancellation and action-result commands; command retry identity ignores requestId but binds semantic payload to idempotencyKey.
 - Runtime-owned scripted provider and configured generic model gateway; health/readiness, launch command and lifecycle shutdown.
-- Removed root cloud/session convenience exports. Existing Hono/Studio/CLI host internals and their internal legacy cloud modules remain because current examples/starter/CLI import them. They are a deferred tooling boundary, not a compatibility layer in the new core execution path.
+- Local-only session host path. Cloud-specific Agents API client modules are not part of OSS Runtime.
 
 Pre-existing foundations: provider/media adapters, CLI launcher, Hono router, old session storage and Studio/example helpers. These are not represented as newly built standalone runtime capabilities.
 
@@ -28,7 +28,7 @@ Pre-existing foundations: provider/media adapters, CLI launcher, Hono router, ol
 | M3 durable session demonstration | Partial | Scoped SSE, lease renewal, uncertainty and startup runnable work | Reconciliation, timed sleep/wait-for wakeups, broader recovery acceptance | Reconnects, expiry, cancellation races, interrupted intents, approvals |
 | M4 coherent developer distribution | Deferred by scope | Existing build surfaces retained; standalone start added | Move CLI/starter/Studio to SDK and session-first host | New launch/package installation acceptance |
 | M5 portability and release discipline | Not started | Shared versions and manifest identity checked | Runtime conformance suite, checkpoint/session migration and support matrix | Cross-runtime behavior; migration/recovery gates |
-| M6 managed design-partner pilot | Deferred by scope | No managed operations added to OSS | Managed scope belongs to Cloud | Pilot acceptance is not implied |
+| M6 managed design-partner pilot | Deferred by scope | No managed operations added to OSS | Out of scope for this OSS repo | Not an OSS release gate |
 
 No milestone acceptance gate is marked complete by this table. The table maps the OSS portion of Target Architecture and Development Roadmap v1.1; the root handoff also covers shared harness and SDK work.
 

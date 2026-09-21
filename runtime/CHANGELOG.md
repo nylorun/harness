@@ -18,14 +18,10 @@
 
 ### Patch Changes
 
-- Add a proposed Cloud Agents API destination client (`AgentsApiClient` + cloud
-  `openSession` routing via `NYLORUN_URL` / `NYLORUN_SECRET_KEY`, optional
-  `NYLORUN_MODE=cloud` / `RuntimeConfig.cloud`) with mock HTTP/SSE contract
-  tests. Maps Runtime `info` to wire `user` at the HTTP edge; surfaces
-  `session_busy` without steering; classifies live sandbox `unauthorized` (401).
-  Fixture OpenAPI synced from https://sandbox.nylorun.dev/openapi.json. Optional
-  live smoke gated on `NYLORUN_SMOKE=1` + secret key. Local destination unchanged.
-  Wire contracts remain proposed until phase-0 freeze — no npm publish.
+- Remove the experimental Cloud Agents API destination client and related
+  `RuntimeConfig.cloud` / `NYLORUN_*` Cloud-mode wiring from OSS Runtime.
+  Local `openSession` remains the only destination. Cloud upgrades published
+  packages from npm independently.
 - Ignore Hono Node `context.env` stream bindings (`incoming`/`outgoing`) when
   resolving model environment so Node `nylorun dev` uses process `.env` /
   `piModel` instead of an empty portable HTTP adapter.

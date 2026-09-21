@@ -34,11 +34,6 @@ import {
   type SessionHandle,
 } from "../session/handle.js";
 import { installDefaultRuntimeFactory } from "../session/default.js";
-import {
-  AgentsApiClient,
-  createLazyCloudSessionHandle,
-  resolveCloudConfig,
-} from "../cloud/index.js";
 const randomUUID = () => crypto.randomUUID();
 
 type ChatContent =
@@ -121,15 +116,6 @@ export class Runtime {
     agent: BuiltAgent<any, any>,
     options?: OpenSessionOptions,
   ): SessionHandle {
-    const cloud =
-      this.config.cloud ??
-      resolveCloudConfig(
-        typeof process === "undefined" ? {} : process.env,
-      );
-    if (cloud) {
-      const client = new AgentsApiClient(cloud);
-      return createLazyCloudSessionHandle(client, agent, options);
-    }
     return createSessionHandle(this, agent, options);
   }
 

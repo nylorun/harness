@@ -1,8 +1,8 @@
 # Package architecture beta migration
 
-The [design document](docs/design/package-architecture.md) defines the new structure
-and the separate Cloud migration handoff. Upgrade the tested package combination
-in `create-agent/compatibility.json`.
+The [design document](docs/design/package-architecture.md) defines the new structure.
+Cloud upgrades published packages from npm independently. Upgrade the tested
+package combination in `create-agent/compatibility.json`.
 
 | Previous | Replacement |
 | --- | --- |
@@ -22,7 +22,7 @@ optional development tooling. Custom runtime host code keeps a direct runtime
 and core dependency. Do not copy private compiled definition objects: use
 `bindingFromAgent()` from `harness/run` for explicit execution.
 
-No Cloud artifact, npm release or deployment is performed by this migration.
+No npm release or deployment is performed by this migration.
 
 ## Earlier session-first migration
 

@@ -124,20 +124,11 @@ continuation. Run fresh starter, headless, Studio, watcher, compiled start,
 failure/shutdown and release-tooling checks with deterministic provider fixtures.
 Studio's browser build must exclude executor, engine, host and Node-only modules.
 
-## Cloud handoff
+## Cloud boundary
 
-Cloud's existing vendored harness artifact is not changed or validated here.
-Prepare matching versioned core and harness artifacts, update Cloud dependencies
-to include core, and replace authoring/contracts/hash imports using the table
-above. Retain harness execution imports. For offline packed validation, install
-both artifacts explicitly so harness's exact core dependency resolves locally.
-
-Before upgrading Cloud, run its build and tests and the same scenarios as OSS:
-manifest/hash identity, text and customer-tool execution, hooks, session history,
-event cursors, idempotent commands, scoped executor claims, cancellation, provider
-errors and checkpoint recovery. Verify protocol/definition/checkpoint compatibility
-against persisted data. Do not substitute a successful OSS smoke for Cloud
-conformance. Publication and deployment are separate release operations.
+This repository must not know Cloud. After OSS packages publish to npm, Cloud
+upgrades by installing those packages in its own repository. Vendor tarballs,
+digest coordination, and private Cloud acceptance are not OSS release gates.
 
 ## Source navigation
 

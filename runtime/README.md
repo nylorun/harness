@@ -1,6 +1,6 @@
 # @nylorun/runtime
 
-The independent OSS HTTP execution host consumes `@nylorun/harness/run` and `@nylorun/core/contracts`. Cloud consumes the harness independently. Client authoring, sessions and connected executors belong to `@nylorun/agents`.
+The independent OSS HTTP execution host consumes `@nylorun/harness/run` and `@nylorun/core/contracts`. Cloud installs published `@nylorun/harness` from npm and does not import this Runtime package. Client authoring, sessions and connected executors belong to `@nylorun/agents`.
 
 Requires Node 24+. Build from the repository root:
 
