@@ -5,7 +5,9 @@
     "@nylorun/runtime": "file:../runtime",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod-from-json-schema": "^0.5.6",
-    "@nylorun/agents": "file:../agents"
+    "@nylorun/agents": "file:../agents",
+    "@nylorun/core": "file:../core",
+    "@nylorun/cli": "file:../cli"
   },
   "devDependencies": {
     "@nylorun/studio": "file:../studio",

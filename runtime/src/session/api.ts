@@ -1,4 +1,4 @@
-import type { BuiltAgent } from "@nylorun/harness";
+import type { BuiltAgent } from "@nylorun/core/define";
 import {
   getDefaultRuntime,
   setDefaultRuntime,

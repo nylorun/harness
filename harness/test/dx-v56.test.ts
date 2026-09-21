@@ -1,17 +1,17 @@
 import { runAgent } from "./run-agent.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { checkCompatibility } from "../src/compatibility.js";
 import {
   Agent,
   ToolError,
-  checkCompatibility,
   hashManifest,
   tool,
   capability,
-  type ExecutionState,
   type Implementations,
-} from "../src/index.js";
-import { run as engineRun, bindingFromAgent } from "../src/engine/index.js";
+} from "@nylorun/core/define";
+import { type ExecutionState } from "../src/index.js";
+import { run as runBoundAgent, bindingFromAgent } from "../src/run/index.js";
 
 describe("DX v5.6 ergonomics", () => {
   it("Agent() is usable without .build(); .use() returns a new agent", async () => {
@@ -203,7 +203,7 @@ describe("DX v5.6 durable acceptance", () => {
       .build();
     const binding = bindingFromAgent(agent);
     const records: ExecutionState[] = [];
-    const first = await engineRun({
+    const first = await runBoundAgent({
       binding,
       input: "go",
       record: (state) => {
@@ -216,7 +216,7 @@ describe("DX v5.6 durable acceptance", () => {
     expect(first.status).toBe("paused");
     if (first.status !== "paused") throw new Error("pause");
     const serialized = JSON.parse(JSON.stringify(first.state)) as ExecutionState;
-    const second = await engineRun({
+    const second = await runBoundAgent({
       binding,
       state: serialized,
       input: {
@@ -249,7 +249,7 @@ describe("DX v5.6 durable acceptance", () => {
     const binding = bindingFromAgent(agent);
     const records: ExecutionState[] = [];
     let calls = 0;
-    const uninterrupted = await engineRun({
+    const uninterrupted = await runBoundAgent({
       binding,
       input: "go",
       record: (state) => {
@@ -268,7 +268,7 @@ describe("DX v5.6 durable acceptance", () => {
       state.plan?.calls.some((call) => call.status === "active"),
     );
     expect(active).toBeTruthy();
-    const resumed = await engineRun({
+    const resumed = await runBoundAgent({
       binding,
       state: active!,
       input: { kind: "continue" },

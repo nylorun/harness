@@ -1,7 +1,7 @@
 import { Agent, createClient, connectAgents } from "@nylorun/agents";
 import { createRuntime } from "@nylorun/runtime";
 import { piModel } from "@nylorun/runtime/node";
-import type { ModelAdapter } from "@nylorun/harness";
+import type { ModelAdapter } from "@nylorun/core/define";
 
 const model: ModelAdapter = piModel();
 void model;

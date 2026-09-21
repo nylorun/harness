@@ -4,6 +4,8 @@ import { starterFiles } from "../dist/scaffold.js";
 import type { Compatibility, CreatorDependencies } from "../src/contracts.js";
 
 const compatibility: Compatibility = {
+  core: "0.1.0-beta.1",
+  cli: "0.1.0-beta.1",
   harness: "1.2.3", agents: "2.3.4",
   studio: "4.5.6",
   runtime: "7.8.9",
@@ -14,7 +16,8 @@ describe("starter template", () => {
     const files = await starterFiles(compatibility, true);
     const manifest = JSON.parse(files["package.json"]!);
     expect(manifest.dependencies["@nylorun/agents"]).toBe("2.3.4");
-    expect(manifest.dependencies["@nylorun/runtime"]).toBe("7.8.9");
+    expect(manifest.dependencies["@nylorun/runtime"]).toBeUndefined();
+    expect(manifest.dependencies["@nylorun/cli"]).toBe(compatibility.cli);
     expect(manifest.devDependencies["@nylorun/studio"]).toBe("4.5.6");
     expect(manifest.scripts.dev).toBe("nylorun dev");
     expect(manifest.scripts["dev:app"]).toBeUndefined();

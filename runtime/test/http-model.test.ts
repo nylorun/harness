@@ -1,6 +1,6 @@
-import { run, bindingFromAgent } from "@nylorun/harness/engine";
+import { run, bindingFromAgent } from "@nylorun/harness/run";
 const runAgent = (agent: Parameters<typeof bindingFromAgent>[0], options: Omit<Parameters<typeof run>[0], "binding">) => run({ binding: bindingFromAgent(agent), ...options });
-import { Agent, type ModelAdapter } from "@nylorun/harness";
+import { Agent, type ModelAdapter } from "@nylorun/core/define";
 import { z } from "zod";
 import { expect, it, vi } from "vitest";
 import { httpModel } from "../src/model/http-model.js";

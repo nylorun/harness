@@ -24,7 +24,7 @@ test(
         type: "module",
         scripts: { dev: "node ../runtime/src/main.js" },
       });
-      for (const name of ["harness", "agents", "runtime"]) {
+      for (const name of ["core", "harness", "agents", "runtime", "cli"]) {
         await mkdir(join(repo, name, "src"), { recursive: true });
         await writeJson(join(repo, name, "package.json"), {
           type: "module",
@@ -36,11 +36,13 @@ test(
         await writeFile(
           join(repo, name, "build.mjs"),
           `import { mkdir, copyFile } from 'node:fs/promises'; await mkdir('dist', {recursive:true}); await copyFile('src/main.js', 'dist/${
-            name === "runtime" ? "cli" : "main"
+            name === "cli" ? "cli" : "main"
           }.js');`
         );
       }
       await writeFile(join(repo, "agents/src/main.js"), "export {};");
+      await writeFile(join(repo, "core/src/main.js"), "export {};");
+      await writeFile(join(repo, "cli/src/main.js"), 'import "../../runtime/dist/main.js";');
       const source = join(repo, "harness/src/main.js");
       await writeFile(source, 'export const name = "before";');
       await writeFile(

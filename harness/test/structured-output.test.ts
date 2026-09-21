@@ -1,7 +1,7 @@
 import { runAgent } from "./run-agent.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Agent, defineSchema, type ModelCandidate } from "../src/index.js";
+import { Agent, defineSchema, type ModelCandidate } from "@nylorun/core/define";
 
 describe("agent output contracts", () => {
   it("projects and validates the final schema through a tool loop", async () => {

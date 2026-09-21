@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HarnessError, isHarnessError } from "../src/index.js";
+import { HarnessError, isHarnessError } from "@nylorun/core/define";
 
 describe("HarnessError", () => {
   it("exposes an immutable code, safe details, and foreign cause", () => {

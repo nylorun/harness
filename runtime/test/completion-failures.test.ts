@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/core/define";
 import { Runtime, serveAgents } from "./legacy-api.js";
 
 it.each(["policy", "model"])(

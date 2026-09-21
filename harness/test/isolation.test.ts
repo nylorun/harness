@@ -1,6 +1,6 @@
 import { runAgent } from "./run-agent.js";
 import { expect, it } from "vitest";
-import { Agent } from "../src/index.js";
+import { Agent } from "@nylorun/core/define";
 
 it("isolates state, info, and execution identities in concurrent calls", async () => {
   const infos: unknown[] = [];

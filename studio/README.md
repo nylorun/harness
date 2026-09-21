@@ -8,6 +8,6 @@ Studio lists registered agents and sessions, sends text, displays completed assi
 
 The local Node host proxies a small allowlist of Runtime HTTP/SSE routes. It holds the server credential, stamps local ownership, and excludes executor claims/results. The browser never receives Runtime or executor credentials. Studio binds loopback and accepts only a loopback Runtime destination.
 
-Programmatic hosts use `startStudio({ runtimeUrl, serverKey, open: false })` and await the returned handle's `close()`. Studio uses the SDK; its browser bundle contains no harness engine. The CLI belongs to `@nylorun/runtime`.
+Programmatic hosts use `startStudio({ runtimeUrl, serverKey, open: false })` and await the returned handle's `close()`. Studio uses `@nylorun/agents/client`; its browser bundle contains no harness engine. The CLI belongs to `@nylorun/cli`.
 
 For repository development and publication, see [CONTRIBUTING](../CONTRIBUTING.md) and [RELEASING](../RELEASING.md).

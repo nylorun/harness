@@ -6,34 +6,28 @@ describe("public API", () => {
   it("exports the documented construction helpers and model adapters subpath", () => {
     expect(Object.keys(api)).toEqual(
       expect.arrayContaining([
-        "Agent",
-        "AgentBuilder",
-        "AgentBuildError",
-        "AgentLifecycleError",
-        "tool",
-        "capability",
-        "ToolError",
-        "defineSchema",
-        "model",
-        "middleware",
+        "run",
+        "runDurable",
+        "createRunState",
+        "createDurableCheckpoint",
+        "createExecutionState",
         "checkCompatibility",
-        "hashManifest",
       ]),
     );
+    expect(api).not.toHaveProperty("Agent");
+    expect(api).not.toHaveProperty("tool");
     expect(api).not.toHaveProperty("bindAgent");
     expect(api).not.toHaveProperty("BuiltAgent");
     expect(api).not.toHaveProperty("defineToolFamily");
     expect(manifest.exports).toHaveProperty(".");
     expect(manifest.exports).toHaveProperty("./model/adapters");
-    expect(manifest.exports).toHaveProperty("./engine");
+    expect(manifest.exports).toHaveProperty("./run");
     expect(Object.keys(manifest.exports).sort()).toEqual([
       ".",
       "./compatibility",
-      "./contracts",
-      "./define",
-      "./engine",
       "./model/adapters",
+      "./run",
     ]);
-    expect(manifest.dependencies).toEqual({ "@noble/hashes": "^1.8.0" });
+    expect(manifest.dependencies).toEqual({ "@nylorun/core": "0.1.0-beta.1" });
   });
 });

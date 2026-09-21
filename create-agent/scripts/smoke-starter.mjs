@@ -21,7 +21,7 @@ let browser;
 const tarballs = process.env.NYLORUN_STACK_TARBALLS
   ? JSON.parse(await readFile(process.env.NYLORUN_STACK_TARBALLS, "utf8"))
   : {};
-const names = ["harness", "agents", "runtime", "studio", "create-agent"];
+const names = ["core", "harness", "agents", "runtime", "studio", "cli", "create-agent"];
 try {
   const artifacts = join(temporary, "artifacts");
   await mkdir(artifacts);
@@ -67,7 +67,7 @@ try {
     }
     const manifest = JSON.parse(files["package.json"]);
     // Pin the entire release combination, including the SDK's transitive harness, to exact packed artifacts.
-    for (const name of ["harness", "agents", "runtime"])
+    for (const name of ["core", "harness", "agents", "runtime", "cli"])
       manifest.dependencies[`@nylorun/${name}`] = `file:${tarballs[name]}`;
     if (studio)
       manifest.devDependencies["@nylorun/studio"] = `file:${tarballs.studio}`;

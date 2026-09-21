@@ -74,6 +74,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm run check --workspace @nylorun/core
+      - run: npm run check --workspace @nylorun/cli
       - run: npm run check --workspace @nylorun/harness
       - run: npm run check --workspace @nylorun/agents
       - run: npm run check --workspace @nylorun/runtime

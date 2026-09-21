@@ -4,6 +4,16 @@
 
 ### Minor Changes
 
+- Breaking beta: replace `/engine` with `/run`; rename hosted execution to durable execution.
+  Use `runDurable`, `createDurableCheckpoint`, `DurableCheckpoint`, `DurableResult`,
+  `DurableHost`, `RunBinding`, `BoundRunOptions`, and `createRunState`. No aliases remain.
+  Persisted checkpoint fields and the `hosted-1` compatibility pin are unchanged.
+
+- Breaking beta: the package root is now an alias of `/define`. Import
+  `createExecutionState` / `validateExecutionState` from `@nylorun/harness/run` and
+  `preparedModel` from `@nylorun/harness/model/adapters`. Authoring and wire-contract specifiers remain unchanged.
+- Internal source folder `execution/` is now `loop/` (one `run()` invocation). The
+  `/model/adapters` specifier is unchanged.
 - DX v5.6: Agent usable without `.build()`; `.use()` returns a new agent; top-level `tools` /
   `instructions` (no `model` on `Agent({})`). `tool()` accepts `input` / `output` / `run`; plain
   returns complete; export `ToolError`; tool `approval` / `effects`; `ctx.idempotencyKey`,
@@ -13,7 +23,7 @@
   `checkCompatibility`; identity by manifest hash (not WeakMap-only). Session memory on
   `ExecutionState.state`. Capability `model` is no longer projected into the published manifest.
 - Dynamics: `beforeModelCall` / `afterModelCall` with `Patch` / `Decision`; middleware deprecated
-  but kept through 1.0. Export `@nylorun/harness/engine` for run-from-checkpoint; `agent.run` is a
+  but kept through 1.0. Export `@nylorun/harness/run` for run-from-checkpoint; `agent.run` is a
   1.0 alias. Export type-only `Session` / `Turn` / `Event` / `Result`.
 
 ## 0.13.0-beta

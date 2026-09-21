@@ -7,7 +7,8 @@ import type {
   RuntimeAgent,
   UserContentPart,
 } from "../contracts.js";
-import type { BuiltAgent, ExecutionInput, ModelAdapter } from "@nylorun/harness";
+import type { BuiltAgent, ModelAdapter } from "@nylorun/core/define"
+import type { ExecutionInput } from "@nylorun/harness";
 import { agUiEvents } from "./ag-ui.js";
 import { EventDelivery } from "./delivery.js";
 import { scrub } from "../redact.js";

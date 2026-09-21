@@ -7,7 +7,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { Tabs as TabsPrimitive } from "radix-ui";
-import { createClient } from "@nylorun/agents";
+import { createClient } from "@nylorun/agents/client";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AgentManifestPanel } from "@/components/agent-manifest-panel";
 import { EventDetails } from "@/components/event-details";
@@ -40,12 +40,6 @@ const client = () =>
     key: "studio-proxy",
     fetch: (url, init) => fetch(url, init),
   });
-async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(base() + path, { signal });
-  if (!response.ok)
-    throw new Error(`Runtime request failed (${response.status})`);
-  return response.json();
-}
 const pretty = (value: unknown) =>
   typeof value === "string" ? value : JSON.stringify(value, null, 2);
 
@@ -76,14 +70,8 @@ function Workspace() {
   const refresh = useCallback(async () => {
     try {
       const [definitions, sessions] = await Promise.all([
-        get<{
-          agents: {
-            manifest: AgentManifest["manifest"] & { id: string; name: string };
-          }[];
-        }>("/v1/agents"),
-        get<{ sessions: { id: string; agentId: string; status: string }[] }>(
-          "/v1/sessions",
-        ),
+        client().listAgents(),
+        client().listSessions(),
       ]);
       const grouped: Connection["sessionsByAgent"] = {};
       for (const s of sessions.sessions)

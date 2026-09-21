@@ -5,10 +5,12 @@
   "type": "module",
   "license": "Apache-2.0",
   "workspaces": [
+    "core",
     "harness",
     "agents",
     "runtime",
     "studio",
+    "cli",
     "create-agent"
   ],
   "engines": {

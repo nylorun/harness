@@ -2,11 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  ModelAdapterContext,
-  ModelCall,
-  ModelRequest,
-} from "@nylorun/harness";
+import type { ModelAdapterContext, ModelCall, ModelRequest } from "@nylorun/core/define";
 import { createOpenAIImageEditor } from "../agents/interior-design/image-editor.js";
 import { MediaStore, piModel } from "@nylorun/runtime/node";
 

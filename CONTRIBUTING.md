@@ -4,8 +4,10 @@
 
 | Directory | Responsibility |
 |---|---|
-| `harness/` | Agent engine and capabilities |
-| `runtime/` | Providers, hosting, persistence, and `nylorun` |
+| `core/` | Shared definitions and contracts |
+| `harness/` | Agent execution engine |
+| `cli/` | Local `nylorun` orchestration |
+| `runtime/` | Providers, hosting and persistence |
 | `studio/` | Dashboard and programmatic startup |
 | `create-agent/` | Starter, renderer, compatibility pins, and stack tests |
 | `examples/` | Generated application shell and authored demonstrations |
@@ -28,7 +30,7 @@ npm run configure
 npm run dev
 ```
 
-Setup installs both lockfiles and builds packages. The five packages compile with the TypeScript 7 native compiler; `typescript` is aliased to the TypeScript 6 bridge for scripts that use the compiler API. It does not configure models,
+Setup installs both lockfiles and builds packages. The seven packages compile with the TypeScript 7 native compiler; `typescript` is aliased to the TypeScript 6 bridge for scripts that use the compiler API. It does not configure models,
 regenerate examples, or change local credentials/data. Package consumer Node
 support remains separate from the pinned contributor toolchain.
 
@@ -46,7 +48,7 @@ Run `npm run configure` before startup. Provider settings and API keys live in
 | `npm run dev -- --no-studio` | Run only the agent server |
 | `npm run dev -- --port 4200 --studio-port 4201` | Choose different ports |
 | `npm run dev:starter` | Preview a fresh starter against local packages |
-| `npm run build` | Build all five packages |
+| `npm run build` | Build all seven packages |
 | `npm test` | Run package, tooling, and examples tests after setup |
 | `npm run check` | Build and run the standard repository checks |
 | `npm run check:stack` | Check generated starter contracts and built example assets |

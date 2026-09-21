@@ -3,7 +3,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { expect, it, vi } from "vitest";
 import { z } from "zod";
-import { Agent, type ExecutionState } from "../src/index.js";
+import { Agent } from "@nylorun/core/define";
+import { type ExecutionState } from "../src/index.js";
 
 const make = (execute = vi.fn(async () => ({ kind: "deferred" as const, token: "job" }))) =>
   Agent({ id: "a", name: "A" })
@@ -33,7 +34,7 @@ const pause = () =>
 it("continues in a separate Node process using only JSON and rebuilt definitions", async () => {
   const first = await pause();
   if (first.status !== "paused") throw new Error("Expected pause");
-  const script = `import {Agent} from './dist/index.js'; import {run,bindingFromAgent} from './dist/engine/index.js'; import {z} from 'zod';
+  const script = `import {Agent} from '@nylorun/core/define'; import {run,bindingFromAgent} from './dist/run/index.js'; import {z} from 'zod';
     const state = JSON.parse(process.argv[1]);
     const agent = Agent({id:'a',name:'A'}).use({id:'c',tools:['job','done'].map(name=>({name,inputSchema:z.object({}),execute:async()=>{throw new Error('must not redispatch')}}))}).build();
     const result = await run({binding:bindingFromAgent(agent),state,input:{kind:'settle',invocationId:state.plan.calls[0].invocationId,outcome:{kind:'completed',output:'done'}},onModelCall:async()=> 'restored'});
@@ -79,7 +80,7 @@ it("restores an approval in a fresh process without redispatching its settled si
   });
   expect(first.status).toBe("paused");
   if (first.status !== "paused") throw new Error("Expected pause");
-  const script = `import {Agent} from './dist/index.js'; import {run,bindingFromAgent} from './dist/engine/index.js'; import {z} from 'zod';
+  const script = `import {Agent} from '@nylorun/core/define'; import {run,bindingFromAgent} from './dist/run/index.js'; import {z} from 'zod';
     const state = JSON.parse(process.argv[1]);
     const agent = Agent({id:'approval',name:'Approval'}).use({id:'tools',tools:['approved','done'].map(name=>({name,inputSchema:z.object({}),execute:async(_, {info,resume})=>{if(name==='done')throw new Error('must not redispatch');if(resume.token.resource!=='original')throw new Error('lost original resource');return {kind:'completed',output:info.principal};}}))}).build();
     const call=state.plan.calls.find(call=>call.interaction);

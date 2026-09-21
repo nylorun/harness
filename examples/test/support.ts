@@ -1,12 +1,5 @@
 import { join } from "node:path";
-import {
-  isToolError,
-  type JsonValue,
-  type ToolDefinition,
-  type ToolExecutionContext,
-  type ToolOutcome,
-  type ToolRunResult,
-} from "@nylorun/harness";
+import { isToolError, type JsonValue, type ToolDefinition, type ToolExecutionContext, type ToolOutcome, type ToolRunResult } from "@nylorun/core/define";
 import {
   Runtime,
   serveAgents,

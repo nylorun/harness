@@ -6,8 +6,8 @@ import {
   type BuiltAgent,
   type JsonValue,
   type ToolExecutionContext,
-} from "@nylorun/harness/define";
-import type { Action, ActionOutcome } from "@nylorun/harness/contracts";
+} from "@nylorun/core/define";
+import type { Action, ActionOutcome } from "@nylorun/core/contracts";
 class Suspend {
   constructor(readonly outcome: unknown) {}
 }

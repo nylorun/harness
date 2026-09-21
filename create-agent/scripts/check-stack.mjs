@@ -4,7 +4,7 @@ import {starterFiles} from '../dist/scaffold.js';
 const pins=JSON.parse(await readFile(new URL('../compatibility.json',import.meta.url),'utf8'));
 for(const enabled of [true,false]){
  const files=await starterFiles(pins,enabled);const p=JSON.parse(files['package.json']);
- assert.equal(p.dependencies['@nylorun/agents'],pins.agents);assert.equal(p.dependencies['@nylorun/runtime'],pins.runtime);
+ assert.equal(p.dependencies['@nylorun/agents'],pins.agents);assert.equal(p.dependencies['@nylorun/cli'],pins.cli);assert.equal(p.dependencies['@nylorun/runtime'],undefined);
  assert.equal(p.dependencies.hono,undefined);assert.equal(p.dependencies['@nylorun/harness'],undefined);
  assert.equal(files['src/index.ts'],undefined);assert.match(files['agents/assistant/agent.ts'],/lookup_order/);
  assert.equal(p.scripts.dev,enabled?'nylorun dev':'nylorun dev --no-studio');

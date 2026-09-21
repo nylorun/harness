@@ -8,7 +8,7 @@ export {
   tool,
   defineSchema,
   ToolError,
-} from "@nylorun/harness/define";
+} from "@nylorun/core/define";
 export type {
   AgentOptions,
   AgentManifest,
@@ -20,13 +20,13 @@ export type {
   Decision,
   JsonValue,
   JsonObject,
-} from "@nylorun/harness/define";
+} from "@nylorun/core/define";
 export type {
   LiveEvent,
   SessionCommand,
   Action,
   ActionOutcome,
-} from "@nylorun/harness/contracts";
+} from "@nylorun/core/contracts";
 export { AgentsClient, SessionClient, createClient } from "./client.js";
 export type { AgentSource, SessionView, CommandOptions } from "./client.js";
 export { connectAgents } from "./executor.js";

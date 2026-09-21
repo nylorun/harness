@@ -1,5 +1,5 @@
-import type { JsonObject, JsonValue } from "./shared.js";
-import type { MessageInput } from "./transcript.js";
+import type { JsonObject, JsonValue } from "@nylorun/core/define";
+import type { MessageInput } from "@nylorun/core/define";
 import type { SavedToolCall } from "./execution.js";
 
 /**

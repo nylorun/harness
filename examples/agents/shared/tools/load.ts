@@ -1,7 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ToolDefinition } from "@nylorun/harness";
+import type { ToolDefinition } from "@nylorun/agents/define";
 
 export async function loadToolsFromDirectory(
   root: string

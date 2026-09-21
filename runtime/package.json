@@ -1,7 +1,7 @@
 {
   "name": "@nylorun/runtime",
   "version": "0.5.0-beta",
-  "description": "SQLite agent Runtime, model providers, and the Nylorun local CLI.",
+  "description": "SQLite agent execution host and model providers.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -11,9 +11,6 @@
   },
   "engines": {
     "node": ">=24.0.0"
-  },
-  "bin": {
-    "nylorun": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -27,6 +24,11 @@
     "./core": {
       "types": "./dist/core/runtime.d.ts",
       "import": "./dist/core/runtime.js"
+    },
+    "./server": "./dist/core/main.js",
+    "./configuration": {
+      "types": "./dist/configuration.d.ts",
+      "import": "./dist/configuration.js"
     }
   },
   "files": [
@@ -52,7 +54,7 @@
     "@earendil-works/pi-ai": "0.85.1",
     "@hono/node-server": "^2.1.1",
     "@nylorun/harness": "0.14.0-beta.3",
-    "@nylorun/agents": "0.1.0-beta.1"
+    "@nylorun/core": "0.1.0-beta.1"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",

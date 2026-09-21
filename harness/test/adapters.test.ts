@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HarnessError } from "../src/errors.js";
+import { HarnessError } from "@nylorun/core/define";
 import {
   anthropicAdapter,
   chatCompletionsAdapter,
@@ -10,8 +10,8 @@ import {
   toChatCompletions,
   toMessages,
   toResponses,
-} from "../src/execution/model/adapters.js";
-import type { ModelAdapterContext, ModelCall, ModelRequest } from "../src/types/model.js";
+} from "../src/loop/model/adapters.js";
+import type { ModelAdapterContext, ModelCall, ModelRequest } from "@nylorun/core/define";
 
 const call: ModelCall = {
   executionId: "session-1",

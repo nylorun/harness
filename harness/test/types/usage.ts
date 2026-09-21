@@ -1,20 +1,17 @@
-import { run, bindingFromAgent } from "../../src/engine/index.js";
+import { run, bindingFromAgent, createExecutionState } from "../../src/run/index.js";
 import { z } from "zod";
 import {
   Agent,
-  createExecutionState,
   type BuiltAgent,
   type ModelRequest,
   type ToolDescriptor,
   tool,
   type CapabilityDeclaration,
-  type ExecutionState,
-  type RunResult,
   type StepRequest,
-  type Session,
-} from "../../src/index.js";
+} from "@nylorun/core/define";
+import { type ExecutionState, type RunResult, type Session } from "../../src/index.js";
 // @ts-expect-error Private binding implementation is not public.
-import { bindAgent } from "../../src/index.js";
+import { bindAgent } from "@nylorun/core/define";
 
 type Info = { tenantId: string };
 const _sessionTypeCheck: Session | undefined = undefined;
@@ -128,16 +125,16 @@ scoped.registry;
 scoped.middleware;
 // @ts-expect-error Bound output validation is internal.
 typed.output;
-// @ts-expect-error Compiled middleware is not a public contract.
-import type { BoundMiddleware } from "../../src/index.js";
+// Core binding declarations are public data; engine compilation remains private.
+import type { BoundMiddleware } from "@nylorun/core/define";
 // @ts-expect-error Step input is internal.
-import type { StepInput } from "../../src/index.js";
+import type { StepInput } from "@nylorun/core/define";
 // @ts-expect-error Bound schemas are internal.
-import type { BoundToolSchema } from "../../src/index.js";
-// @ts-expect-error Executable bound definitions are internal.
-import type { BoundToolDefinition } from "../../src/index.js";
+import type { BoundToolSchema } from "@nylorun/core/define";
+// Tool snapshots cross the explicit local binding interface.
+import type { BoundToolDefinition } from "@nylorun/core/define";
 // @ts-expect-error Sealed calls are internal.
-import type { SealedToolCall } from "../../src/index.js";
+import type { SealedToolCall } from "@nylorun/core/define";
 declare const modelRequest: ModelRequest;
 const descriptor: ToolDescriptor = modelRequest.tools[0]!;
 const descriptionSchema = descriptor.inputSchema.jsonSchema;
@@ -150,3 +147,37 @@ descriptor.source;
 descriptor.inputSchema.validate({});
 // @ts-expect-error The configuration view also contains only descriptors.
 modelRequest.configuration.tools[0]!.execute({}, {});
+
+// Public execution and durable host types must also work from the packed subpath.
+import {
+  createRunState,
+  createDurableCheckpoint,
+  runDurable,
+  type RunBinding,
+  type BoundRunOptions,
+  type DurableCheckpoint,
+  type DurableResult,
+  type DurableHost,
+} from "../../src/run/index.js";
+const renamedAgent = Agent({ id: "renamed", name: "Renamed" }).build();
+const renamedBinding: RunBinding = bindingFromAgent(renamedAgent);
+const renamedOptions: BoundRunOptions = {
+  binding: renamedBinding,
+  input: "go",
+  onModelCall: async () => "done",
+};
+void run(renamedOptions);
+void createRunState(renamedBinding);
+const durableCheckpoint: DurableCheckpoint = createDurableCheckpoint({
+  manifest: renamedAgent.manifest,
+  sessionId: "session",
+  turnId: "turn",
+  input: "go",
+});
+const durableHost: DurableHost = { resolveEffect: async () => ({ status: "pending" }) };
+const durableResult: Promise<DurableResult> = runDurable({
+  manifest: renamedAgent.manifest,
+  checkpoint: durableCheckpoint,
+  host: durableHost,
+});
+void durableResult;

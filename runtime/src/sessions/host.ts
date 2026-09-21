@@ -1,17 +1,11 @@
-import { HarnessError, isHarnessError } from "@nylorun/harness";
-import type {
-  BuiltAgent,
-  ExecutionInput,
-  ExecutionState,
-  JsonObject,
-  ModelAdapter,
-  RunResult,
-} from "@nylorun/harness";
+import { HarnessError, isHarnessError } from "@nylorun/core/define";
+import type { BuiltAgent, JsonObject, ModelAdapter } from "@nylorun/core/define"
+import type { ExecutionInput, ExecutionState, RunResult } from "@nylorun/harness";
 import {
   bindingFromAgent,
-  createEngineState,
+  createRunState,
   run,
-} from "@nylorun/harness/engine";
+} from "@nylorun/harness/run";
 import { scrub } from "../redact.js";
 import type {
   CanonicalEvent,
@@ -406,7 +400,7 @@ function ensureEngineState(
       state: { ...(existing.state ?? {}), ...sessionState },
     };
   }
-  return createEngineState(binding, {
+  return createRunState(binding, {
     ...(sessionState ? { state: sessionState } : {}),
   });
 }

@@ -1,13 +1,11 @@
 # Releasing npm packages
 
-Packages have independent versions. Every Harness, SDK, Runtime, or Studio release
-also releases creator with updated compatibility pins. A creator-only release
-preserves its existing pins. A Harness version change also releases its SDK and Runtime consumers; an SDK change advances Runtime and Studio. Dependency versions are pinned to the tested combination. Nothing publishes on merge or tag push.
+Packages have independent versions. Core changes advance its pinned engine/SDK/host consumers; engine changes advance Runtime; SDK changes advance Studio and CLI; Runtime changes advance CLI. Every package release updates the creator compatibility combination. Internal dependencies use exact tested pins. Nothing publishes on merge or tag push.
 
 ## Administrator setup
 
 - Use the toolchain and setup in [CONTRIBUTING.md](./CONTRIBUTING.md).
-- Confirm npm organization access for all five `@nylorun` packages.
+- Confirm npm organization access for all seven `@nylorun` packages.
 - Configure each package's npm trusted publisher for this repository,
   workflow `publish.yml`, and GitHub environment `npm`, allowing publication.
 - Protect the `npm` environment with administrator reviewers and restrict its

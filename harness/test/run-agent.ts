@@ -1,6 +1,6 @@
-import { run, bindingFromAgent } from "../src/engine/index.js";
-import type { BuiltAgent } from "../src/types/agent.js";
-import type { AgentBuilder } from "../src/definition/builder.js";
+import { run, bindingFromAgent } from "../src/run/index.js";
+import type { BuiltAgent } from "@nylorun/core/define";
+import type { AgentBuilder } from "@nylorun/core/define";
 import type { RunOptions } from "../src/types/execution.js";
 /** Test-only spelling migration. Production definitions have no executable facade. */
 export function runAgent(

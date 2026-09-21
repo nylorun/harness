@@ -1,9 +1,4 @@
-import type {
-  ModelAdapter,
-  ModelCandidate,
-  PromptContentPart,
-  JsonObject,
-} from "@nylorun/harness";
+import type { ModelAdapter, ModelCandidate, PromptContentPart, JsonObject } from "@nylorun/core/define";
 import type { ModelFactoryOptions } from "./defaults.js";
 
 export type ModelEnvironment = Readonly<Record<string, string | undefined>>;

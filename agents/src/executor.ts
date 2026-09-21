@@ -3,8 +3,8 @@ import {
   ActionSchema,
   ActionClaimResponseSchema,
   type Action,
-} from "@nylorun/harness/contracts";
-import type { BuiltAgent } from "@nylorun/harness/define";
+} from "@nylorun/core/contracts";
+import type { BuiltAgent } from "@nylorun/core/define";
 import type { AgentSource } from "./client.js";
 import {
   Transport,

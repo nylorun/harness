@@ -1,4 +1,4 @@
-import { tool } from "@nylorun/harness";
+import { tool } from "@nylorun/agents/define";
 import { z } from "zod";
 import type { JsonlNotes } from "./notes-store.js";
 

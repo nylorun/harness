@@ -1,8 +1,4 @@
-import {
-  tool,
-  type CapabilityDeclaration,
-  type ToolDefinition,
-} from "@nylorun/harness";
+import { tool, type CapabilityDeclaration, type ToolDefinition } from "@nylorun/agents/define";
 import { z } from "zod";
 import { CodeRunError, renderToolsSdk, runCodeProgram } from "./executor.js";
 import { TOOLS_CATALOG } from "../shared/tools/index.js";

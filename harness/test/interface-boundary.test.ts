@@ -1,13 +1,9 @@
 import { runAgent } from "./run-agent.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import {
-  Agent,
-  AgentBuilder,
-  createExecutionState,
-  type ExecutionEvent,
-  type ModelRequest,
-} from "../src/index.js";
+import { createExecutionState } from "../src/run/index.js";
+import { Agent, AgentBuilder, type ModelRequest } from "@nylorun/core/define";
+import { type ExecutionEvent } from "../src/index.js";
 
 function expectDataOnly(value: unknown): void {
   expect(typeof value).not.toBe("function");
@@ -21,7 +17,14 @@ describe("public interface boundaries", () => {
     const builder = Agent({ id: "a", name: "A" });
     const agent = builder.build();
     expect(builder.build()).toBe(agent);
-    expect(Reflect.ownKeys(agent).sort()).toEqual(["hash", "id", "manifest", "name", "toJSON"]);
+    expect(Reflect.ownKeys(agent).sort()).toEqual([
+      "getBinding",
+      "hash",
+      "id",
+      "manifest",
+      "name",
+      "toJSON",
+    ]);
     for (const field of ["registry", "middleware", "output"]) {
       expect(field in agent).toBe(false);
     }
@@ -63,7 +66,7 @@ describe("public interface boundaries", () => {
     });
     expect(result).toMatchObject({ status: "completed", output: { count: 2 } });
     expect(state.turnCount).toBe(0);
-    expect(() => createExecutionState({ ...agent })).toThrow(/original agent/);
+    expect(() => createExecutionState({ ...agent })).toThrow(/getBinding/);
   });
 
   it("projects tool metadata before adapters run while keeping dispatch and events intact", async () => {

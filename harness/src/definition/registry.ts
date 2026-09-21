@@ -1,8 +1,8 @@
-import type { BoundMiddleware, BoundToolDefinition } from "./bound.js";
-import { bindTool } from "./bind-tool.js";
-import { HarnessError } from "../errors.js";
-import { canonical } from "../utils/canonical.js";
-import { copyJson } from "../utils/immutable.js";
+import type { BoundMiddleware, BoundToolDefinition } from "@nylorun/core/define";
+import { bindTool } from "@nylorun/core/define";
+import { HarnessError } from "@nylorun/core/define";
+import { canonical } from "@nylorun/core/define";
+import { copyJson } from "@nylorun/core/define";
 
 import type { ToolReference } from "../types/execution.js";
 
@@ -11,7 +11,7 @@ export class ToolRegistry {
   private readonly tools = new Map<string, BoundToolDefinition>();
   private readonly owners = new WeakMap<object, string>();
 
-  constructor(middleware: readonly BoundMiddleware[]) {
+  constructor(middleware: readonly BoundMiddleware[], snapshots?: readonly BoundToolDefinition[]) {
     for (const capability of middleware) {
       for (const tool of capability.tools ?? []) {
         const key = JSON.stringify([capability.id, tool.name]);
@@ -20,7 +20,11 @@ export class ToolRegistry {
             "tool.invalid",
             `Duplicate registered tool '${tool.name}' in '${capability.id}'`,
           );
-        this.tools.set(key, bindTool(tool, { middlewareId: capability.id, slot: capability.id }));
+        this.tools.set(
+          key,
+          snapshots?.find((snapshot) => snapshot.source === tool) ??
+            bindTool(tool, { middlewareId: capability.id, slot: capability.id }),
+        );
         this.owners.set(tool, capability.id);
       }
     }

@@ -1,4 +1,4 @@
-import type { BuiltAgent } from "@nylorun/harness";
+import type { BuiltAgent } from "@nylorun/agents/define";
 import type { MediaStore } from "@nylorun/runtime/node";
 import type { ImageEditor } from "../interior-design/image-editor.js";
 

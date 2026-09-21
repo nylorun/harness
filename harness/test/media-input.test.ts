@@ -1,11 +1,12 @@
 import { runAgent } from "./run-agent.js";
 import { describe, expect, it, vi } from "vitest";
-import { preparedModel, type ModelCall, type ObserveEvent } from "../src/index.js";
+import { type ModelCall, type ObserveEvent } from "@nylorun/core/define";
 import {
   chatCompletionsAdapter,
+  preparedModel,
   toMessages,
   toResponses,
-} from "../src/execution/model/adapters.js";
+} from "../src/loop/model/adapters.js";
 import { model, testAgent } from "./fixtures.js";
 
 const image = {
@@ -61,7 +62,7 @@ describe("media input", () => {
   });
 
   it("copies media references into serializable execution state", async () => {
-    const { Agent } = await import("../src/index.js");
+    const { Agent } = await import("@nylorun/core/define");
     const reference = { url: "https://cdn.example.test/seed.png" };
     const agent = Agent({ id: "a", name: "A" }).build();
     const result = await runAgent(agent, {
@@ -81,7 +82,7 @@ describe("media input", () => {
     expect(resumed.status).toBe("completed");
   });
   it("rejects malformed media before model invocation", async () => {
-    const { Agent } = await import("../src/index.js");
+    const { Agent } = await import("@nylorun/core/define");
     const invoke = vi.fn(async () => "done");
     await expect(
       runAgent(Agent({ id: "a", name: "A" }).build(), {

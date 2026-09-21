@@ -1,7 +1,7 @@
-import { run, bindingFromAgent } from "@nylorun/harness/engine";
+import { run, bindingFromAgent } from "@nylorun/harness/run";
 const runAgent = (agent: Parameters<typeof bindingFromAgent>[0], options: Omit<Parameters<typeof run>[0], "binding">) => run({ binding: bindingFromAgent(agent), ...options });
 import { afterEach, expect, it, vi } from "vitest";
-import { Agent, tool } from "@nylorun/harness";
+import { Agent, tool } from "@nylorun/core/define";
 import { piModel } from "@nylorun/runtime/node";
 import { z } from "zod";
 

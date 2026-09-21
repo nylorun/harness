@@ -1,4 +1,6 @@
 export type Compatibility = Readonly<{
+  core: string;
+  cli: string;
   harness: string;
   agents: string;
   studio: string;

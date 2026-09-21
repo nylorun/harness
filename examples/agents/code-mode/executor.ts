@@ -1,13 +1,6 @@
 import { createContext, Script } from "node:vm";
 import { z } from "zod";
-import {
-  isToolError,
-  type JsonValue,
-  type ToolDefinition,
-  type ToolExecutionContext,
-  type ToolOutcome,
-  type ToolRunResult,
-} from "@nylorun/harness";
+import { isToolError, type JsonValue, type ToolDefinition, type ToolExecutionContext, type ToolOutcome, type ToolRunResult } from "@nylorun/agents/define";
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const SYNC_TIMEOUT_MS = 1_000;

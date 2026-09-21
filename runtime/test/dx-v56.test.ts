@@ -1,6 +1,6 @@
 import { openSession, setDefaultRuntime, listSessions, getSession, deleteSession } from "../src/session/api.js";
 import { describe, expect, it, vi } from "vitest";
-import { Agent, tool } from "@nylorun/harness";
+import { Agent, tool } from "@nylorun/core/define";
 import { z } from "zod";
 import {
   Runtime,
@@ -10,7 +10,7 @@ import {
 } from "./legacy-api.js";
 
 describe("Runtime DX v5.6", () => {
-  it("seeds ExecutionState with manifestHash via engine createEngineState", async () => {
+  it("seeds ExecutionState with manifestHash via createRunState", async () => {
     const host = new SessionHost(memorySessions());
     const agent = Agent({ id: "a", name: "A" }).build();
     await host.submit(agent, "s", "hi", {

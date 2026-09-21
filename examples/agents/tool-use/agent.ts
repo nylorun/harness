@@ -1,4 +1,4 @@
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/agents/define";
 import { tools } from "../shared/tools/index.js";
 import {
   exampleInstructions,

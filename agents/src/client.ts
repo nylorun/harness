@@ -2,13 +2,13 @@ import type {
   AgentManifest,
   BuiltAgent,
   JsonValue,
-} from "@nylorun/harness/define";
+} from "@nylorun/core/define";
 import {
   LiveEventSchema,
   SessionItemsResponseSchema,
   type AcceptedResponse,
   type SessionCommand,
-} from "@nylorun/harness/contracts";
+} from "@nylorun/core/contracts";
 import { Transport, id, segment, type Destination } from "./http.js";
 import { observeSSE } from "./sse.js";
 export interface AgentSource {
@@ -29,6 +29,24 @@ export class AgentsClient {
   readonly transport: Transport;
   constructor(destination: Destination = {}) {
     this.transport = new Transport(destination);
+  }
+  listAgents(
+    options: { signal?: AbortSignal } = {}
+  ): Promise<{ agents: { manifest: AgentManifest }[] }> {
+    return this.transport.json("/v1/agents", "GET", undefined, options.signal);
+  }
+  listSessions(
+    options: { agentId?: string; signal?: AbortSignal } = {}
+  ): Promise<{ sessions: SessionView[] }> {
+    const query = options.agentId
+      ? `?agentId=${encodeURIComponent(options.agentId)}`
+      : "";
+    return this.transport.json(
+      `/v1/sessions${query}`,
+      "GET",
+      undefined,
+      options.signal
+    );
   }
   saveAgent(
     agent: AgentSource,
@@ -158,3 +176,7 @@ export class SessionClient {
 export function createClient(destination: Destination = {}) {
   return new AgentsClient(destination);
 }
+
+export { RuntimeError } from "./http.js";
+export type { Destination } from "./http.js";
+export type { LiveEvent } from "@nylorun/core/contracts";

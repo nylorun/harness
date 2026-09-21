@@ -1,15 +1,5 @@
-import type {
-  BuiltAgent,
-  ExecutionInput,
-  InputAccepted,
-  JsonObject,
-  JsonValue,
-  MessageInput,
-  ModelAdapter,
-  Event,
-  Result,
-  Session,
-} from "@nylorun/harness";
+import type { BuiltAgent, JsonObject, JsonValue, MessageInput, ModelAdapter } from "@nylorun/core/define"
+import type { ExecutionInput, InputAccepted, Event, Result, Session } from "@nylorun/harness";
 import type { RuntimeConfig } from "../config.js";
 import type { CanonicalEvent } from "../sessions/store.js";
 import type { SessionHost } from "../sessions/host.js";

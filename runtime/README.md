@@ -1,20 +1,20 @@
 # @nylorun/runtime
 
-The independent OSS HTTP execution host consumes `@nylorun/harness/engine` and shared `/contracts`. Cloud consumes the harness independently. Client authoring, sessions and connected executors belong to `@nylorun/agents`.
+The independent OSS HTTP execution host consumes `@nylorun/harness/run` and `@nylorun/core/contracts`. Cloud consumes the harness independently. Client authoring, sessions and connected executors belong to `@nylorun/agents`.
 
 Requires Node 24+. Build from the repository root:
 
 ```sh
 npm install
+npm run build --workspace @nylorun/core
 npm run build --workspace @nylorun/harness
-npm run build --workspace @nylorun/agents
 npm run build --workspace @nylorun/runtime
 NYLORUN_SERVER_KEY='<separate-secret-at-least-16-characters>' npm start --workspace @nylorun/runtime
 ```
 
 Default address: `http://127.0.0.1:8787`. `HOST`, `PORT`, and `NYLORUN_SQLITE_PATH` configure binding and storage. Missing server credentials fail startup. The default model is a credential-free scripted development response. It does not simulate conversations, tools or provider compatibility.
 
-`NYLORUN_EXECUTORS_JSON` is an array of `{token, agentId, manifestHash, implementationVersion}`. Each secret must differ from the application server key and every other executor token. The manifest hash is available from `/compatibility` or saved definition registration. SDK clients use `NYLORUN_RUNTIME_URL`, `NYLORUN_SERVER_KEY`, and `NYLORUN_EXECUTOR_KEY`; runtime executor scope is configured explicitly, never broadened by client input.
+`NYLORUN_EXECUTORS_JSON` is an array of `{token, agentId, manifestHash, implementationVersion}`. Each secret must differ from the application server key and every other executor token. The manifest hash is available from `@nylorun/core/compatibility` or saved definition registration. SDK clients use `NYLORUN_RUNTIME_URL`, `NYLORUN_SERVER_KEY`, and `NYLORUN_EXECUTOR_KEY`; runtime executor scope is configured explicitly, never broadened by client input.
 
 For a model gateway, set `NYLORUN_MODEL_GATEWAY_URL`, `NYLORUN_MODEL_GATEWAY_KEY`, and `NYLORUN_MODEL`. The gateway receives `{model, call, context}` and returns a harness ModelCandidate or string. Provider credentials remain host configuration. The generic gateway requires an implementation of this envelope; it does not claim arbitrary provider wire compatibility. Alternatively supply a `ModelProvider` to `startRuntime`.
 
@@ -38,7 +38,7 @@ One process owns each SQLite database. A local PID lock rejects concurrent owner
 
 ## Local project workflow
 
-Use `npm run configure`, then `nylorun dev` in a generated project. It loads the exported `agents` registry from `agents/index.ts`, starts this Runtime in a separate process, registers manifests, connects scoped SDK executors, and opens Studio. Use `--no-studio` or `--no-open` as needed. Runtime binds loopback on port 8787 (`PORT` override). The CLI creates separate server and executor credentials with mode 0600 in `.nylorun/local-credentials.json`; SQLite defaults to `.nylorun/runtime.sqlite`.
+Install `@nylorun/cli` (generated projects already include it). Use `npm run configure`, then `nylorun dev` in a generated project. It loads the exported `agents` registry from `agents/index.ts`, starts this Runtime in a separate process, registers manifests, connects scoped SDK executors, and opens Studio. Use `--no-studio` or `--no-open` as needed. Runtime binds loopback on port 8787 (`PORT` override). The CLI creates separate server and executor credentials with mode 0600 in `.nylorun/local-credentials.json`; SQLite defaults to `.nylorun/runtime.sqlite`.
 
 `nylorun start [entry]` loads `dist/agents/index.js` by default and runs without Studio/watch. `nylorun studio --runtime-url http://127.0.0.1:8787` attaches using the project's local server credential (or `NYLORUN_SERVER_KEY`). Provider selection uses the existing `MODEL_PROVIDER`, `MODEL`, `MODEL_PROVIDER_API_KEY`, and optional `MODEL_PROVIDER_BASE_URL` configuration. No provider request occurs during configuration.
 

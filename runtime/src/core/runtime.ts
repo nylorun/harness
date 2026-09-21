@@ -25,15 +25,15 @@ import {
   type ExecutorScope,
   type SessionCommand,
   type LiveEvent,
-} from "@nylorun/harness/contracts";
+} from "@nylorun/core/contracts";
 import {
-  createHostedCheckpoint,
-  runHosted,
-  type HostedCheckpoint,
+  createDurableCheckpoint,
+  runDurable,
+  type DurableCheckpoint,
   type HostEffect,
   type EffectResolution,
-} from "@nylorun/harness/engine";
-import { hashManifest } from "@nylorun/harness/compatibility";
+} from "@nylorun/harness/run";
+import { hashManifest } from "@nylorun/core/compatibility";
 import { Store, canonical } from "./store.js";
 import { scriptedModel, type ModelProvider } from "./provider.js";
 export interface RuntimeOptions {
@@ -53,7 +53,7 @@ interface Session {
   info?: any;
   status: string;
   activeTurnId: string | null;
-  checkpoint?: HostedCheckpoint;
+  checkpoint?: DurableCheckpoint;
   state?: any;
   turnStartState?: any;
   waits?: unknown;
@@ -241,7 +241,7 @@ export class CoreRuntime {
     const controller = new AbortController();
     this.running.set(id, controller);
     try {
-      const result = await runHosted({
+      const result = await runDurable({
         manifest: s.manifest,
         checkpoint: s.checkpoint,
         signal: controller.signal,
@@ -591,7 +591,7 @@ export class CoreRuntime {
             fail(409, "Session has active or unresolved work");
           s.turnStartState = s.state;
           s.activeTurnId = randomUUID();
-          s.checkpoint = createHostedCheckpoint({
+          s.checkpoint = createDurableCheckpoint({
             manifest: s.manifest,
             sessionId: id,
             turnId: s.activeTurnId,
@@ -625,7 +625,7 @@ export class CoreRuntime {
                   interactionId: command.interactionId,
                   value: command.value,
                 };
-          s.checkpoint = createHostedCheckpoint({
+          s.checkpoint = createDurableCheckpoint({
             manifest: s.manifest,
             sessionId: id,
             turnId: s.activeTurnId!,

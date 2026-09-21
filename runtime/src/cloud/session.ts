@@ -1,12 +1,5 @@
-import type {
-  BuiltAgent,
-  Event,
-  InputAccepted,
-  JsonObject,
-  JsonValue,
-  MessageInput,
-  Result,
-} from "@nylorun/harness";
+import type { BuiltAgent, JsonObject, JsonValue, MessageInput } from "@nylorun/core/define"
+import type { Event, InputAccepted, Result } from "@nylorun/harness";
 import type { AgentsApiClient } from "./client.js";
 import { AgentsApiError } from "./errors.js";
 import type { AgentsApiSseEvent, HistoryResponse } from "./types.js";
@@ -289,7 +282,7 @@ function mapSseEvent(
         turnId,
         ...(event.options
           ? {
-              options: event.options as unknown as import("@nylorun/harness").JsonObject,
+              options: event.options as unknown as import("@nylorun/core/define").JsonObject,
             }
           : {}),
       };

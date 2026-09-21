@@ -1,4 +1,4 @@
-import { tool } from "@nylorun/harness";
+import { tool } from "@nylorun/agents/define";
 import { z } from "zod";
 import { CodexWorkspace } from "./codex.js";
 

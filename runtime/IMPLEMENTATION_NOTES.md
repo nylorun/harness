@@ -23,7 +23,7 @@ Pre-existing foundations: provider/media adapters, CLI launcher, Hono router, ol
 | Target area / milestone | Implementation status | Built evidence | Pending implementation | Verification required |
 |---|---|---|---|---|
 | M0 consolidate shared contracts / definition imports | Partial | Shared contracts and engine imports in core | Public legacy tooling migration and final cross-repo audit | Contract conformance; incompatible definition rejection |
-| M1 public engine in both execution hosts | Built | runHosted and persisted individual model/tool/hook effects | See primary harness handoff for engine gaps | History, tools/hooks, schema/output and checkpoint behavior |
+| M1 public execution API in both execution hosts | Built | runDurable and persisted individual model/tool/hook effects | See primary harness handoff for engine gaps | History, tools/hooks, schema/output and checkpoint behavior |
 | M2 customer tools and basic action recovery | Partial | SQLite transactions, commands, claims, history, SSE | Administrative reconciliation, scalable indexes and bounded history pagination | Command retries, duplicate outcomes, fencing, transaction/event ordering |
 | M3 durable session demonstration | Partial | Scoped SSE, lease renewal, uncertainty and startup runnable work | Reconciliation, timed sleep/wait-for wakeups, broader recovery acceptance | Reconnects, expiry, cancellation races, interrupted intents, approvals |
 | M4 coherent developer distribution | Deferred by scope | Existing build surfaces retained; standalone start added | Move CLI/starter/Studio to SDK and session-first host | New launch/package installation acceptance |

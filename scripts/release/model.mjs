@@ -79,10 +79,10 @@ export async function prepareVersions(repo, channel) {
         calculated.plan.compatibility.harness;
       await writeJson(runtimeManifestPath, runtimeManifest);
     }
-    for (const name of ["agents", "runtime", "studio"]) {
+    for (const name of packages) {
       const path = join(repo, name, "package.json");
       const manifest = await readJson(path);
-      for (const dependency of ["harness", "agents"]) {
+      for (const dependency of ["core", "harness", "agents", "runtime"]) {
         if (manifest.dependencies?.[`@nylorun/${dependency}`])
           manifest.dependencies[`@nylorun/${dependency}`] =
             calculated.plan.compatibility[dependency];
@@ -151,7 +151,7 @@ export async function validatePlan(plan, repo) {
       throw new Error(`Release version differs from ${name}/package.json.`);
   }
   const actual = await readJson(join(repo, "create-agent/compatibility.json"));
-  for (const name of ["harness", "agents", "runtime", "studio"]) {
+  for (const name of ["core", "harness", "agents", "runtime", "studio", "cli"]) {
     const version = plan.compatibility?.[name];
     if (
       !semver.valid(version) ||
@@ -160,17 +160,16 @@ export async function validatePlan(plan, repo) {
     )
       throw new Error(`Invalid compatibility pin for ${name}.`);
   }
-  const runtime = await readJson(join(repo, "runtime/package.json"));
-  if (
-    runtime.dependencies?.["@nylorun/harness"] &&
-    runtime.dependencies["@nylorun/harness"] !== plan.compatibility.harness
-  )
+  for (const name of packages) {
+    const manifest = await readJson(join(repo, name, "package.json"));
+    for (const [dependency, version] of Object.entries(manifest.dependencies ?? {})) {
+      if (dependency.startsWith("@nylorun/") && version !== plan.compatibility[dependency.slice(9)])
+        throw new Error(`${name}'s ${dependency} dependency must match its compatibility pin.`);
+    }
+  }
+  if (Object.keys(plan.compatibility).length !== 6)
     throw new Error(
-      "Runtime's Harness dependency must match the creator compatibility pin.",
-    );
-  if (Object.keys(plan.compatibility).length !== 4)
-    throw new Error(
-      "Compatibility must contain exactly Harness, Agents, Runtime, and Studio.",
+      "Compatibility must contain exactly Core, Harness, Agents, Runtime, Studio, and CLI.",
     );
 }
 
@@ -209,7 +208,7 @@ export async function publishCandidates(
       report(`${name}@${version}: already published with matching integrity`);
     } else {
       if (name === "create-agent") {
-        for (const engine of ["harness", "agents", "runtime", "studio"]) {
+        for (const engine of ["core", "harness", "agents", "runtime", "studio", "cli"]) {
           if (!(await registry.lookup(engine, plan.compatibility[engine])))
             throw new Error(
               `Creator pin is unavailable: ${engine}@${plan.compatibility[engine]}`,

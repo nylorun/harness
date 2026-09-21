@@ -1,7 +1,7 @@
 {
   "name": "@nylorun/harness",
   "version": "0.14.0-beta.3",
-  "description": "Nylorun's TypeScript agent runtime. See github.com/nylorun/harness.",
+  "description": "Nylorun's TypeScript agent execution engine. See github.com/nylorun/harness.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -28,25 +28,17 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./engine": {
-      "types": "./dist/engine/index.d.ts",
-      "import": "./dist/engine/index.js"
+    "./run": {
+      "types": "./dist/run/index.d.ts",
+      "import": "./dist/run/index.js"
     },
     "./model/adapters": {
-      "types": "./dist/execution/model/adapters.d.ts",
-      "import": "./dist/execution/model/adapters.js"
-    },
-    "./contracts": {
-      "types": "./dist/contracts/index.d.ts",
-      "import": "./dist/contracts/index.js"
-    },
-    "./define": {
-      "types": "./dist/define/index.d.ts",
-      "import": "./dist/define/index.js"
+      "types": "./dist/loop/model/adapters.d.ts",
+      "import": "./dist/loop/model/adapters.js"
     },
     "./compatibility": {
-      "types": "./dist/compatibility/index.d.ts",
-      "import": "./dist/compatibility/index.js"
+      "types": "./dist/compatibility.d.ts",
+      "import": "./dist/compatibility.js"
     }
   },
   "files": [
@@ -83,10 +75,10 @@
     "vitest": "^5.0.0",
     "zod": "^4.1.12"
   },
+  "dependencies": {
+    "@nylorun/core": "0.1.0-beta.1"
+  },
   "peerDependencies": {
     "zod": "^4.5.4"
-  },
-  "dependencies": {
-    "@noble/hashes": "^1.8.0"
   }
 }

@@ -1,4 +1,4 @@
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/agents/define";
 import { approvalFor } from "../interactions/approval.js";
 import { sandboxTools } from "./capability.js";
 import {

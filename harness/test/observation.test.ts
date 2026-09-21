@@ -1,7 +1,8 @@
 import { runAgent } from "./run-agent.js";
 import { expect, it, vi } from "vitest";
 import { z } from "zod";
-import { Agent, type ExecutionEvent } from "../src/index.js";
+import { Agent } from "@nylorun/core/define";
+import { type ExecutionEvent } from "../src/index.js";
 
 it("emits causal correlated events and independent observer-failure diagnostics", async () => {
   const events: ExecutionEvent[] = [];

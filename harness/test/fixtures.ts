@@ -1,7 +1,7 @@
 import { runAgent } from "./run-agent.js";
 import { z } from "zod";
+import { createExecutionState } from "../src/run/index.js";
 import {
-  createExecutionState,
   Agent,
   AgentBuildError,
   model as typedModel,
@@ -15,7 +15,7 @@ import {
   type ToolDefinition,
   type ToolExecutionContext,
   type ToolOutcome,
-} from "../src/index.js";
+} from "@nylorun/core/define";
 export const objectSchema = z.object({}).passthrough();
 
 /** Test-only convenience for existing pipeline assertions. All execution uses Promise run(). */

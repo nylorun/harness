@@ -1,12 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  Agent,
-  model,
-  type CapabilityItems,
-  type ToolDefinition,
-} from "@nylorun/harness";
+import { Agent, model, type CapabilityItems, type ToolDefinition } from "@nylorun/core/define";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CODE_MODE_RULE,

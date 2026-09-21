@@ -1,4 +1,4 @@
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/core/define";
 import { z } from "zod";
 import { expect, it } from "vitest";
 import { Hono } from "hono";

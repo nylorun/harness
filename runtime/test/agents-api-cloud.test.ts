@@ -1,6 +1,6 @@
 import { Runtime } from "../src/server/host.js";
 import { describe, expect, it } from "vitest";
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/core/define";
 import {
   AgentsApiClient,
   AgentsApiError,

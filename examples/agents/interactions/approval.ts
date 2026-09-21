@@ -1,4 +1,4 @@
-import { middleware } from "@nylorun/harness";
+import { middleware } from "@nylorun/agents/define";
 
 /** Candidate review is the policy layer; services and tools do not self-authorize writes. */
 export function approvalFor(...names: readonly string[]) {

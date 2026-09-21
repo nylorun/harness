@@ -1,5 +1,5 @@
-import { run, bindingFromAgent, type RunOptions } from "@nylorun/harness/engine";
-import { Agent, model } from "@nylorun/harness";
+import { run, bindingFromAgent, type RunOptions } from "@nylorun/harness/run";
+import { Agent, model } from "@nylorun/core/define";
 import { describe, expect, it } from "vitest";
 import {
   inputGuardrail,

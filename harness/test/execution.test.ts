@@ -1,7 +1,9 @@
 import { runAgent } from "./run-agent.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { Agent, validateExecutionState, type ExecutionState } from "../src/index.js";
+import { validateExecutionState } from "../src/run/index.js";
+import { Agent } from "@nylorun/core/define";
+import { type ExecutionState } from "../src/index.js";
 
 const candidate = (name: string, id = "call") => ({
   output: [{ type: "tool-call" as const, id, name, args: {} }],

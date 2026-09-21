@@ -1,6 +1,6 @@
 import { projectAsset } from "@nylorun/runtime/node";
 import { join } from "node:path";
-import type { CapabilityDeclaration } from "@nylorun/harness";
+import type { CapabilityDeclaration } from "@nylorun/agents/define";
 import { loadToolsFromDirectory } from "./load.js";
 
 export const TOOLS_CATALOG = projectAsset("agents/shared/tools/catalog");

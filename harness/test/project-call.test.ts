@@ -6,8 +6,8 @@ import {
   type ModelCall,
   type ModelRequest,
   type ModelConfigurationSnapshot,
-} from "../src/index.js";
-import { projectModelCall } from "../src/execution/model/project.js";
+} from "@nylorun/core/define";
+import { projectModelCall } from "../src/loop/model/project.js";
 import { testAgent, execution, model, offer, tool, toolCalls, turn } from "./fixtures.js";
 
 function configuration(

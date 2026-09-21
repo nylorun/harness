@@ -1,4 +1,4 @@
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/agents/define";
 import { delegateTo } from "./capability.js";
 import { createInstructions } from "../instructions/agent.js";
 import { createSkills } from "../skills/agent.js";

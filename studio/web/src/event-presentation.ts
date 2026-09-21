@@ -1,4 +1,4 @@
-import type { LiveEvent } from "@nylorun/agents";
+import type { LiveEvent } from "@nylorun/agents/client";
 
 /** Studio row: Runtime LiveEvent plus delivery provenance. */
 export type StudioEvent = LiveEvent &

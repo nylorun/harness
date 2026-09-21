@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { testAgent, offer, model, tool } from "./fixtures.js";
-import type { ModelCall, ModelOutputBlock } from "../src/index.js";
+import type { ModelCall, ModelOutputBlock } from "@nylorun/core/define";
 
 it("preserves opaque block metadata through normalization, canonicalization and conversation projection", async () => {
   const metadata = {

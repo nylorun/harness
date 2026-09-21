@@ -1,13 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  Agent,
-  model,
-  type CapabilityDeclaration,
-  type CapabilityItems,
-  type ToolDefinition,
-} from "@nylorun/harness";
+import { Agent, model, type CapabilityDeclaration, type CapabilityItems, type ToolDefinition } from "@nylorun/core/define";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   defineSkill,

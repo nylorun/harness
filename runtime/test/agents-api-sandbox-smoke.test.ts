@@ -15,7 +15,7 @@ import { Runtime } from "../src/server/host.js";
  * Does not fail CI when secrets are absent.
  */
 import { describe, expect, it } from "vitest";
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/core/define";
 import {
   AgentsApiClient,
   SANDBOX_AGENTS_API_URL,

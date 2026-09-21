@@ -1,5 +1,11 @@
 # OSS release implementation handoff
 
+Package architecture follow-up: [design and Cloud handoff](docs/design/package-architecture.md).
+Definitions/contracts now live in core and the local launcher lives in CLI. SDK
+and OSS host dependencies follow that document. The historical artifact digest
+and Cloud qualification limits below still apply; no Cloud artifact was replaced.
+
+
 2026-09-20. Latest scope: the minimal local developer release, against **Target Architecture and Development Roadmap v1.1**. Private Cloud code and its handoff were not changed in this pass.
 
 The preceding core-runtime pass was **Build/startup verification only; functional correctness and end-to-end behavior remain unverified.** This follow-up adds the focused local acceptance results below. Those results supersede that restriction only for the exercised local workflow; they do not complete M0–M6 functional gates.

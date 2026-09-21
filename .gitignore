@@ -4,5 +4,9 @@ dist/
 coverage/
 *.tgz
 .tmp/
-docs/
+docs/*
+!docs/responsibility-boundaries.md
+!docs/design/
+docs/design/*
+!docs/design/package-architecture.md
 .cursor/

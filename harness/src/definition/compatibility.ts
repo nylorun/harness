@@ -1,7 +1,7 @@
-import { HarnessError } from "../errors.js";
-import type { AgentManifest } from "../types/manifest.js";
+import { HarnessError } from "@nylorun/core/define";
+import type { AgentManifest } from "@nylorun/core/define";
 import type { ExecutionState } from "../types/execution.js";
-import { hashManifest } from "../utils/hash.js";
+import { hashManifest } from "@nylorun/core/define";
 
 export type CompatibilityResult =
   { readonly ok: true } | { readonly ok: false; readonly error: HarnessError };

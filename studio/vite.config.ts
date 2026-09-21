@@ -6,10 +6,10 @@ import { defineConfig } from "vite";
 export default defineConfig({
   root: "web",
   plugins: [react(), tailwindcss(), {
-    name: "exclude-harness-engine",
+    name: "exclude-harness-run",
     moduleParsed(info) {
-      if (/harness[/\\](?:dist|src)[/\\](?:engine|execution)[/\\]/.test(info.id)) {
-        this.error("Studio must not bundle harness engine modules: " + info.id);
+      if (/[/\\](?:harness|runtime|cli)[/\\](?:dist|src)[/\\]/.test(info.id) || /agents[/\\](?:dist|src)[/\\](?:executor|execute-action)\./.test(info.id)) {
+        this.error("Studio must not bundle harness execution modules: " + info.id);
       }
     },
   }],

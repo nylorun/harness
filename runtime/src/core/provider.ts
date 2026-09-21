@@ -1,4 +1,4 @@
-import type { HostEffect } from "@nylorun/harness/engine";
+import type { HostEffect } from "@nylorun/harness/run";
 /** Providers are runtime-owned; neither credentials nor model selection enter manifests. */
 export type ModelProvider = (
   effect: HostEffect,
@@ -38,7 +38,7 @@ export function gatewayModel(options: {
 /** Deterministic release fixture; still uses the real engine and remote customer tool. */
 export function toolFixtureModel(): ModelProvider {
   return async (effect) => {
-    const call = effect.input as import("@nylorun/harness/engine").ModelCall;
+    const call = effect.input as import("@nylorun/harness/run").ModelCall;
     const last = call.prompt.at(-1);
     if (last?.kind === "tool-result")
       return {

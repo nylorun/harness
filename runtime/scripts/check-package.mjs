@@ -14,18 +14,13 @@ const output = execFileSync(
 rmSync(cache, { recursive: true, force: true });
 const files = JSON.parse(output)[0].files.map((entry) => entry.path);
 for (const path of [
-  "dist/cli.js",
-  "dist/dev.js",
-  "dist/launcher.js",
-  "dist/dev-entry.js",
-  "dist/environment.js",
+  "dist/configuration.js",
   "dist/index.js",
   "dist/index.d.ts",
   "dist/node/index.js",
   "dist/node/local-sessions.js",
   "dist/core/runtime.js",
   "dist/core/main.js",
-  "dist/project-runner.js",
   "README.md",
   "CHANGELOG.md",
   "LICENSE",

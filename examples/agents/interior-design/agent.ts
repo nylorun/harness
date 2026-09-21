@@ -1,4 +1,4 @@
-import { Agent } from "@nylorun/harness";
+import { Agent } from "@nylorun/agents/define";
 import { interiorDesign } from "./capability.js";
 import {
   modelSelection,

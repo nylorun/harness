@@ -1,4 +1,4 @@
-import type { ModelAdapter } from "@nylorun/harness";
+import type { ModelAdapter } from "@nylorun/core/define";
 import type { SessionStore } from "./sessions/store.js";
 import type { RuntimeMedia } from "./media.js";
 import type { ModelEnvironment } from "./model/http-model.js";

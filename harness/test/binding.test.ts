@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Agent } from "../src/index.js";
+import { Agent } from "@nylorun/core/define";
 import { expectBuildError, model, testAgent, tool, turn } from "./fixtures.js";
 
 describe("build", () => {

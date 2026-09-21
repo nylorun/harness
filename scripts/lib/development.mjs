@@ -26,7 +26,7 @@ export function developmentOptions(args) {
       options[flag === "--port" ? "port" : "studioPort"] = value;
     } else
       throw new Error(
-        `Unknown option: ${flag}. Use --no-studio, --no-open, --port, --studio-port.`,
+        `Unknown option: ${flag}. Use --no-studio, --no-open, --port, --studio-port.`
       );
   }
   if (options.studio && options.port === options.studioPort)
@@ -40,9 +40,9 @@ export async function availablePort(port = 0) {
     server.once("error", (error) =>
       reject(
         new Error(
-          `Port ${port} is unavailable (${error.code}). Stop the other service or choose another port.`,
-        ),
-      ),
+          `Port ${port} is unavailable (${error.code}). Stop the other service or choose another port.`
+        )
+      )
     );
     server.listen(port, "127.0.0.1", resolve);
   });
@@ -60,7 +60,7 @@ export async function develop(
     log = console.log,
     signal,
     built = false,
-  } = {},
+  } = {}
 ) {
   let stopping = false;
   let runtime, studio, watcher;
@@ -90,20 +90,21 @@ export async function develop(
   };
   async function build(name, initial = false) {
     const cwd = join(repo, name);
-    if (!initial) await command(`${name}:typecheck`, ["run", name === "agents" ? "check" : "typecheck"], cwd);
-    await command(
-      `${name}:build`,
-      ["run", "build"],
-      cwd,
-    );
+    if (!initial)
+      await command(
+        `${name}:typecheck`,
+        ["run", name === "agents" ? "check" : "typecheck"],
+        cwd
+      );
+    await command(`${name}:build`, ["run", "build"], cwd);
   }
   async function startRuntime() {
     if (stopping) return;
     runtime = group.start(
       "runtime",
       process.execPath,
-      [join(repo, "runtime/dist/cli.js"), "dev", "--no-studio"],
-      { cwd: project, env: { ...process.env, PORT: String(options.port) } },
+      [join(repo, "cli/dist/cli.js"), "dev", "--no-studio"],
+      { cwd: project, env: { ...process.env, PORT: String(options.port) } }
     );
     await runtime.ready(`http://127.0.0.1:${options.port}/ready`);
   }
@@ -120,19 +121,41 @@ export async function develop(
         String(open),
         project,
       ],
-      { cwd: repo },
+      { cwd: repo }
     );
     await studio.ready(
-      `http://127.0.0.1:${options.studioPort}/nylo-studio.config.json`,
+      `http://127.0.0.1:${options.studioPort}/nylo-studio.config.json`
     );
   }
-  async function rebuild(names) {
+  async function rebuild(changed) {
+    const selected = new Set(changed);
+    const dependencies = {
+      core: [],
+      harness: ["core"],
+      agents: ["core"],
+      runtime: ["core", "harness"],
+      studio: ["agents"],
+      cli: ["agents", "runtime"],
+    };
+    for (const [name, deps] of Object.entries(dependencies))
+      if (
+        (name !== "studio" || options.studio) &&
+        deps.some((dep) => selected.has(dep))
+      )
+        selected.add(name);
+    const names = Object.keys(dependencies).filter((name) =>
+      selected.has(name)
+    );
     try {
       for (const name of names) await build(name);
       if (stopping) return;
-      if (names.some((name) => name === "harness" || name === "agents" || name === "runtime")) {
+      if (
+        names.some((name) =>
+          ["core", "harness", "agents", "runtime", "cli"].includes(name)
+        )
+      ) {
         log(
-          "[dev] Restarting Runtime; active sessions end after package changes.",
+          "[dev] Restarting Runtime; active sessions end after package changes."
         );
         await runtime.stop();
         await startRuntime();
@@ -162,31 +185,49 @@ export async function develop(
     if (options.studio) await availablePort(options.studioPort);
     if (!built)
       for (const name of [
+        "core",
         "harness",
         "agents",
         "runtime",
+        "cli",
         ...(options.studio ? ["studio"] : []),
       ])
         await build(name, true);
     await startRuntime();
     await startStudio(options.open);
     log(
-      `[dev] Runtime http://127.0.0.1:${options.port}${options.studio ? ` · Studio http://127.0.0.1:${options.studioPort}` : ""}`,
+      `[dev] Runtime http://127.0.0.1:${options.port}${
+        options.studio ? ` · Studio http://127.0.0.1:${options.studioPort}` : ""
+      }`
     );
     log(
-      `[dev] Live conversations require provider setup: npm run configure --prefix ${JSON.stringify(project)}`,
+      `[dev] Live conversations require provider setup: npm run configure --prefix ${JSON.stringify(
+        project
+      )}`
     );
     if (stopping) throw new Error("Development stopped.");
     watcher = watch(
-      ["harness", "agents", "runtime", ...(options.studio ? ["studio"] : [])].map(
-        (name) => join(repo, name, name === "studio" ? "" : "src"),
-      ),
-      { ignoreInitial: true },
+      [
+        "core",
+        "harness",
+        "agents",
+        "runtime",
+        "cli",
+        ...(options.studio ? ["studio"] : []),
+      ].map((name) => join(repo, name, name === "studio" ? "" : "src")),
+      { ignoreInitial: true }
     );
     watcher.on("all", (_event, path) => {
       if (stopping) return;
-      const name = ["harness", "agents", "runtime", "studio"].find((name) =>
-        path.startsWith(join(repo, name, name === "studio" ? "" : "src")),
+      const name = [
+        "core",
+        "harness",
+        "agents",
+        "runtime",
+        "studio",
+        "cli",
+      ].find((name) =>
+        path.startsWith(join(repo, name, name === "studio" ? "" : "src"))
       );
       if (!name || /[/\\](dist|node_modules)[/\\]/.test(path)) return;
       pending.add(name);

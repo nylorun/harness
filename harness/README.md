@@ -1,15 +1,21 @@
 # `@nylorun/harness`
 
-Shared definitions, session/action contracts, execution engine, and compatibility metadata. Author applications through `@nylorun/agents`; hosts consume this package directly. The OSS and Cloud runtimes are independent and share the same engine.
+Execution engine, checkpoints and durable host effects. Shared authoring and wire
+contracts live in `@nylorun/core`; applications use `@nylorun/agents`.
+OSS and Cloud hosts consume harness independently. See the
+[package architecture](../docs/design/package-architecture.md).
 
-Use `/define` for execution-free authoring, `/contracts` for wire schemas, `/engine` for explicit execution and the durable host interface, and `/compatibility` for compatibility/version metadata. See [HOST_CONTRACT.md](HOST_CONTRACT.md). Cloud consumes a locally packed artifact directly; it does not depend on the OSS Runtime.
+Use `/run` for explicit execution, `/model/adapters` for provider format adapters,
+and `/compatibility` for checkpoint compatibility. Definitions and protocol
+schemas are no longer harness exports. Cloud's current packed artifact requires
+a separate coordinated migration; it has not been upgraded here.
 
 > **DX v5.6:** definition ⊥ engine. `model` is not on `Agent({})` — Runtime injects `onModelCall`. Host data stays `info` (not `user`); session memory is `state`.
 
 ## Compose an agent
 
 ```ts
-import { Agent, tool, ToolError, capability } from "@nylorun/harness/define";
+import { Agent, tool, ToolError, capability } from "@nylorun/agents/define";
 import { z } from "zod";
 
 const lookup = tool({
@@ -46,7 +52,7 @@ Agent.from(supportAgent.toJSON(), implementations);
 Taught path for hosts/Runtime:
 
 ```ts
-import { run, bindingFromAgent } from "@nylorun/harness/engine";
+import { run, bindingFromAgent } from "@nylorun/harness/run";
 
 const result = await run({
   binding: bindingFromAgent(supportAgent.build()),
@@ -57,7 +63,7 @@ const result = await run({
 });
 ```
 
-This is a breaking beta: `agent.run()` has been removed. Application execution uses SDK sessions. Hosted execution uses `createHostedCheckpoint` and `runHosted` with individually persisted model/tool/hook effects; a suspended checkpoint requires its effect journal.
+This is a breaking beta: `agent.run()` has been removed. Application execution uses SDK sessions. Durable execution uses `createDurableCheckpoint` and `runDurable` with individually persisted model/tool/hook effects; a suspended checkpoint requires its effect journal.
 
 ## Tools
 
@@ -74,7 +80,7 @@ Definitions must not import `@nylorun/runtime`.
 
 `beforeModelCall` → `Patch` (capabilities/tools/instructions/state/block — no `model`).
 `afterModelCall` → `Decision` (text/deny/approve/retry/block).
-Local explicit engine execution retains middleware. Hosted manifests reject arbitrary middleware closures; use before/after hooks.
+Local explicit engine execution retains middleware. Durable manifests reject arbitrary middleware closures; use before/after hooks.
 
 ## Checkpoint / durability
 
@@ -82,4 +88,4 @@ Local explicit engine execution retains middleware. Hosted manifests reject arbi
 
 ## Client types
 
-The authoritative session/action wire schemas live in `/contracts` and do not import engine checkpoint types. Use `@nylorun/agents` for the session client and SSE executor. Historical root client types remain for deferred local tooling; they are not the new wire contract.
+The authoritative session/action wire schemas live in `/contracts` and do not import durable checkpoint types. Use `@nylorun/agents` for the session client and SSE executor. Historical root client types remain for deferred local tooling; they are not the new wire contract.

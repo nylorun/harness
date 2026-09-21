@@ -4,7 +4,7 @@
 npm create @nylorun/agent@beta my-agent
 ```
 
-Creates a Node 24 project with `@nylorun/agents`, `@nylorun/runtime`, Zod, and optional Studio. The registry in `agents/index.ts` exports agent definitions. The starter includes one ordinary `lookup_order` tool; ask “Look up order demo-123”.
+Creates a Node 24 project with `@nylorun/agents`, `@nylorun/cli`, Zod, and optional Studio. The registry in `agents/index.ts` exports agent definitions. The starter includes one ordinary `lookup_order` tool; ask “Look up order demo-123”.
 
 Creation installs dependencies, runs provider configuration, and starts development. Use `-- --no-studio` for headless development or `-- --no-open` to suppress browser opening. Noninteractive creation requires `-- --skip-config`; configure the retained project before running it. Without provider settings startup reports `nylorun configure`. `--yes` affects installation only.
 
@@ -18,7 +18,7 @@ npm start
 
 Development restarts the Runtime and connected executor on source changes. Compiled start uses `dist/agents/index.js` and runs headless. Studio can attach separately. Local Runtime credentials and SQLite are stored in gitignored `.nylorun/`. Model selection remains Runtime configuration in `.env`; definitions have no model provider or `agent.run()`.
 
-`starter/` is the canonical template. `compatibility.json` pins harness, SDK, Runtime and Studio. The examples recipe adds local package dependencies. Run `npm run examples:sync` after template changes, then `npm install --prefix examples`. Sync preserves authored agents, tests, credentials, and local state; it rejects conflicting edits to generated files.
+`starter/` is the canonical template. `compatibility.json` pins core, harness, SDK, Runtime, Studio and CLI. The examples recipe adds local package dependencies. Run `npm run examples:sync` after template changes, then `npm install --prefix examples`. Sync preserves authored agents, tests, credentials, and local state; it rejects conflicting edits to generated files.
 
 The default examples registry contains the release starter. Advanced examples remain outside that registry for later migration.
 

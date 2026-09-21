@@ -1,8 +1,13 @@
-import type { ModelAdapter } from "./model.js";
-import type { InputEvent, MessageInput, TranscriptEntry } from "./transcript.js";
-import type { ObserveEvent } from "./observe.js";
-import type { JsonObject, JsonValue, Tripwire } from "./shared.js";
-import type { RequiredInteraction, ToolExecutionResume, ToolOutcome, ToolResult } from "./tool.js";
+import type { ModelAdapter } from "@nylorun/core/define";
+import type { InputEvent, MessageInput, TranscriptEntry } from "@nylorun/core/define";
+import type { ObserveEvent } from "@nylorun/core/define";
+import type { JsonObject, JsonValue, Tripwire } from "@nylorun/core/define";
+import type {
+  RequiredInteraction,
+  ToolExecutionResume,
+  ToolOutcome,
+  ToolResult,
+} from "@nylorun/core/define";
 
 export type ExecutionInput =
   | MessageInput

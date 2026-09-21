@@ -31,6 +31,8 @@ export async function starterFiles(
         files[templatePath(relative(root, absolute))] = (
           await readFile(absolute, "utf8")
         )
+          .replaceAll("{{CORE_VERSION}}", compatibility.core)
+          .replaceAll("{{CLI_VERSION}}", compatibility.cli)
           .replaceAll("{{HARNESS_VERSION}}", compatibility.harness)
           .replaceAll("{{AGENTS_VERSION}}", compatibility.agents)
           .replaceAll("{{RUNTIME_VERSION}}", compatibility.runtime)
