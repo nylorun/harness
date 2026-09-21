@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "creatorVersion": "0.6.0-beta",
+  "creatorVersion": "0.7.0-beta",
   "compatibility": {
-    "harness": "0.14.0-beta.3",
-    "studio": "0.5.0-beta",
-    "runtime": "0.5.0-beta",
-    "agents": "0.1.0-beta.1",
-    "core": "0.1.0-beta.1",
-    "cli": "0.1.0-beta.1"
+    "harness": "0.15.0-beta",
+    "studio": "0.6.0-beta",
+    "runtime": "0.6.0-beta",
+    "agents": "0.2.0-beta",
+    "core": "0.1.1-beta",
+    "cli": "0.1.1-beta"
   },
   "templateHash": "095ab987cc83d3303199deba9bf1468d79d03348b455b92efc673babbf9b5700",
   "files": {
