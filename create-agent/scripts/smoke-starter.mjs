@@ -146,11 +146,15 @@ try {
     .getByRole("textbox", { name: "Message" })
     .fill("What did I ask earlier?");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await page.getByText(/I remember:/).waitFor();
+  // Chat column only — the Events table also summarizes the same reply text.
+  const transcript = page.locator("section").filter({
+    has: page.getByRole("textbox", { name: "Message" }),
+  });
+  await transcript.getByText(/I remember:/).waitFor();
   const sessionUrl = page.url();
   const sessionId = sessionUrl.split("/").at(-1);
   await page.reload();
-  await page.getByText(/I remember:/).waitFor();
+  await transcript.getByText(/I remember:/).waitFor();
   assert.match(await page.locator("main").innerText(), /demo-123/);
   assert.deepEqual(errors, []);
   await mkdir(join(root, ".tmp/release-local"), { recursive: true });

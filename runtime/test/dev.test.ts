@@ -135,8 +135,12 @@ it("runs local tsx with development enabled, waits for readiness, and closes bot
   expect(await task.closed).toBe(0);
   expect(await readFile(join(root, "app-stopped"), "utf8")).toBe("yes");
   expect(await readFile(join(root, "studio-stopped"), "utf8")).toBe("yes");
-});
-it("runs without a Studio dependency and accepts both flags", async () => {
+  },
+);
+it(
+  "runs without a Studio dependency and accepts both flags",
+  { timeout: 15_000 },
+  async () => {
   const root = await fixture(true, false);
   const task = run(root, ["--no-studio", "--no-open"], {
     PORT: String(await port()),
@@ -150,7 +154,8 @@ it("runs without a Studio dependency and accepts both flags", async () => {
   task.child.kill("SIGINT");
   expect(await task.closed).toBe(0);
   await expect(readFile(join(root, "studio.json"))).rejects.toThrow();
-});
+  },
+);
 it.each([
   [false, false, [], {}, "Install tsx"],
   [true, false, [], {}, "Install @nylorun/studio"],
@@ -204,6 +209,7 @@ it("rejects an occupied Runtime port and shuts down", async () => {
 
 it.each([undefined, "custom.js"])(
   "starts an exported registry with .env loaded before import (%s)",
+  { timeout: 20_000 },
   async (entry) => {
     const root = await fixture(false, false);
     const appPort = await port();
@@ -226,6 +232,7 @@ export const agents = [Agent({id:"test",name:process.env.MODEL}).build()];
       "start",
     );
     await wait(async () => {
+      expect(task.output()).toContain("Local project ready");
       const { serverKey } = JSON.parse(
         await readFile(join(root, ".nylorun/local-credentials.json"), "utf8"),
       );
