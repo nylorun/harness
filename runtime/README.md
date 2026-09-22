@@ -46,4 +46,4 @@ Install `@nylorun/cli` (generated projects already include it). Use `npm run con
 
 Definitions have no `agent.run()`; applications use `@nylorun/agents`. Remove old Hono `src/index.ts`, `Runtime`, `serveAgents`, and `openSession` usage from supported starters. Historical implementations remain internal for regression coverage and advanced examples; they are not root exports or supported hosting alternatives.
 
-Source changes restart the local stack. Start a new session after definition or implementation edits; live upgrades are deferred. `GET /v1/agents` and `GET /v1/sessions?agentId=...` are server-authenticated local discovery conveniences. See the repository handoff for verification and remaining scope.
+Source changes restart the local stack. Start a new session after definition or implementation edits; live upgrades are deferred. `GET /v1/agents` and `GET /v1/sessions?agentId=...` are server-authenticated local discovery conveniences.

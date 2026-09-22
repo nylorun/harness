@@ -4,7 +4,7 @@ Observable, portable, composable TypeScript agent execution. Harness is state-in
 
 This repository contains core (definitions/contracts), harness (engine), agents (SDK), runtime (OSS host), CLI, Studio and the project creator. Cloud lives in the private agents-api repository. See the [package architecture](docs/design/package-architecture.md) for dependency and process diagrams.
 
-For the new core-runtime beta, start with [the SDK](agents/README.md), [standalone Runtime](runtime/README.md), [host contract](harness/HOST_CONTRACT.md), and [implementation handoff](IMPLEMENTATION_HANDOFF.md). The local starter/Studio workflow uses this architecture. The packed-package text/tool workflow is covered by the focused release smoke; broader recovery and conformance gates remain open.
+For the new core-runtime beta, start with [the SDK](agents/README.md), [standalone Runtime](runtime/README.md), and [host contract](harness/HOST_CONTRACT.md). The local starter/Studio workflow uses this architecture. The packed-package text/tool workflow is covered by the focused release smoke; broader recovery and conformance gates remain open.
 
 > **Experimental beta.** Public APIs may change before 1.0. Prefer the `@beta` dist-tag for installs until then.
 
