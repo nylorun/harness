@@ -15,7 +15,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "zod": "^4.5.4",
+    "zod": "^4.6.5",
     "@nylorun/agents": "{{AGENTS_VERSION}}",
     "@nylorun/cli": "{{CLI_VERSION}}"
   },

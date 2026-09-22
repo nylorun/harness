@@ -1,6 +1,14 @@
-import type { ZodType } from "zod";
+import type { z } from "zod";
 import type { DeferredOutcome, JsonObject, JsonValue } from "./shared.js";
 import type { ModelAdapter } from "./model.js";
+
+/**
+ * Zod classic schemas accepted as tool contracts.
+ * Use core `$ZodType` so concrete schemas (e.g. ZodObject) stay assignable on
+ * zod 4.6+, where ZodType gained validate/validateAsync methods that break
+ * ZodObject → ZodType assignability in some TypeScript configurations.
+ */
+type ZodToolSchema<T = unknown> = z.core.$ZodType<T, unknown>;
 
 export interface SchemaIssue {
   readonly path: readonly (string | number)[];
@@ -44,11 +52,14 @@ export interface StandardSchemaIssue {
 }
 
 export type ToolSchemaSource<T = unknown> =
-  | ZodType<T>
+  | ZodToolSchema<T>
   | StandardToolSchema<any, T>
   | ToolSchema<T>;
 
-export type SchemaOutput<Schema> = Schema extends ZodType<infer Value>
+export type SchemaOutput<Schema> = Schema extends z.core.$ZodType<
+  infer Value,
+  any
+>
   ? Value
   : Schema extends StandardToolSchema<any, infer Value>
   ? Value

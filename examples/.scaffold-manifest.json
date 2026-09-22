@@ -9,11 +9,11 @@
     "core": "0.1.1-beta",
     "cli": "0.1.1-beta"
   },
-  "templateHash": "095ab987cc83d3303199deba9bf1468d79d03348b455b92efc673babbf9b5700",
+  "templateHash": "bbba542b5a081663c2c6e65f0219dc82800d64a29bae3b3ba2f149fdec4da9c9",
   "files": {
     ".env.example": "43b4ad5715cd8a6b6d95ebc4b3de35e704b4be91aec07ca80984ff9550307a57",
     ".gitignore": "35d28e69221a58d60f19655637c7d99310a6dd6e0fda5f51c544d876ad19a3a0",
-    "package.json": "d685c16953dd5f7dbacf8ec6415d320a58a86e60d9840c4c360a59dfd7140c11",
+    "package.json": "8f8e4987011676ade5ab890059b678ca98d1aa437f35fa4775a41fba83902f6c",
     "src/index.ts": "d61a6b97f77f2f813384e82ded8f7a2905f98f2b75399b32510d6f266d057b8e",
     "tsconfig.build.json": "0210063cd78016582d5c14a7627a703258910a20ff9c57db7951e5c2a9d62c7d",
     "tsconfig.json": "912b9cdf9eac674c7f8e47c51c78594fbf09ba6372cf3131acfa4acb390b4d6a"

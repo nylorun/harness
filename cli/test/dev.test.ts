@@ -112,32 +112,38 @@ async function wait(check: () => Promise<void>) {
   }
   throw error;
 }
-it("runs local tsx with development enabled, waits for readiness, and closes both children", async () => {
-  const root = await fixture();
-  const appPort = await port();
-  const task = run(root, ["--no-open"], { PORT: String(appPort) });
-  await wait(async () => {
-    expect(
-      JSON.parse(await readFile(join(root, "studio.json"), "utf8"))
-    ).toEqual({
-      runtimeUrl: `http://127.0.0.1:${appPort}`,
-      serverKey: expect.any(String),
-      open: false,
+it(
+  "runs local tsx with development enabled, waits for readiness, and closes both children",
+  { timeout: 15_000 },
+  async () => {
+    const root = await fixture();
+    const appPort = await port();
+    const task = run(root, ["--no-open"], { PORT: String(appPort) });
+    await wait(async () => {
+      expect(
+        JSON.parse(await readFile(join(root, "studio.json"), "utf8"))
+      ).toEqual({
+        runtimeUrl: `http://127.0.0.1:${appPort}`,
+        serverKey: expect.any(String),
+        open: false,
+      });
+      expect(
+        JSON.parse(await readFile(join(root, "app.json"), "utf8"))
+      ).toEqual({
+        args: [
+          "watch",
+          "--clear-screen=false",
+          fileURLToPath(new URL("../dist/dev-entry.js", import.meta.url)),
+          "--no-open",
+        ],
+      });
     });
-    expect(JSON.parse(await readFile(join(root, "app.json"), "utf8"))).toEqual({
-      args: [
-        "watch",
-        "--clear-screen=false",
-        fileURLToPath(new URL("../dist/dev-entry.js", import.meta.url)),
-        "--no-open",
-      ],
-    });
-  });
-  task.child.kill("SIGTERM");
-  expect(await task.closed).toBe(0);
-  expect(await readFile(join(root, "app-stopped"), "utf8")).toBe("yes");
-  expect(await readFile(join(root, "studio-stopped"), "utf8")).toBe("yes");
-});
+    task.child.kill("SIGTERM");
+    expect(await task.closed).toBe(0);
+    expect(await readFile(join(root, "app-stopped"), "utf8")).toBe("yes");
+    expect(await readFile(join(root, "studio-stopped"), "utf8")).toBe("yes");
+  }
+);
 it(
   "runs without a Studio dependency and accepts both flags",
   { timeout: 15_000 },

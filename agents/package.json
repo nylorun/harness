@@ -38,12 +38,12 @@
     "@nylorun/core": "0.1.1-beta"
   },
   "peerDependencies": {
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "@types/node": "^24.0.0",
-    "vitest": "^5.0.0"
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^5.0.1"
   },
   "engines": {
     "node": ">=24"
