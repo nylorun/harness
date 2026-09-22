@@ -28,7 +28,46 @@ export class Store {
       CREATE TABLE IF NOT EXISTS effects(id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, body TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS events_session ON events(session_id, sequence);`);
+      CREATE INDEX IF NOT EXISTS events_session ON events(session_id, sequence);
+      CREATE TABLE IF NOT EXISTS vaults(
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        owner_user_id TEXT NOT NULL,
+        metadata_json TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS vaults_owner ON vaults(owner_user_id);
+      CREATE TABLE IF NOT EXISTS vault_credentials(
+        id TEXT PRIMARY KEY,
+        vault_id TEXT NOT NULL REFERENCES vaults(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        binding_json TEXT NOT NULL,
+        expires_at TEXT,
+        created_at TEXT NOT NULL,
+        rotated_at TEXT,
+        kek_id TEXT NOT NULL,
+        nonce BLOB NOT NULL,
+        ciphertext BLOB NOT NULL,
+        wrapped_dek BLOB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS vault_credentials_vault ON vault_credentials(vault_id);
+      CREATE TABLE IF NOT EXISTS vault_audit(
+        id TEXT PRIMARY KEY,
+        at TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        action TEXT NOT NULL,
+        vault_id TEXT,
+        credential_id TEXT,
+        session_id TEXT,
+        target TEXT,
+        outcome TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS vault_idempotency(
+        id TEXT PRIMARY KEY,
+        body_hash TEXT NOT NULL,
+        response TEXT NOT NULL
+      );`);
   }
   tx<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
@@ -85,6 +124,12 @@ export class Store {
       .prepare("UPDATE events SET body=? WHERE sequence=?")
       .run(JSON.stringify(event), result.lastInsertRowid);
     return event;
+  }
+  credentialCount(): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS n FROM vault_credentials")
+      .get() as { n: number };
+    return Number(row.n);
   }
   history(
     sessionId: string,

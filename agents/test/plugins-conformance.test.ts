@@ -1,0 +1,322 @@
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Agent } from "@nylorun/core/define";
+import { expect, it } from "vitest";
+import { prepareStdioLaunch } from "../src/plugins/launch.js";
+import { loadPlugin, PluginError } from "../src/plugins/load.js";
+import { plugin } from "../src/plugins/plugin.js";
+
+const PLUGIN_SCHEMA =
+  "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+const MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
+
+function root(): string {
+  return mkdtempSync(join(tmpdir(), "nylorun-plugin-"));
+}
+
+function write(directory: string, path: string, contents: string): void {
+  const file = join(directory, path);
+  mkdirSync(join(file, ".."), { recursive: true });
+  writeFileSync(file, contents);
+}
+
+function manifest(name: string, extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    $schema: PLUGIN_SCHEMA,
+    name,
+    ...extra,
+  });
+}
+
+it("rejects an unsupported schema before discovering components", () => {
+  const directory = root();
+  write(directory, "plugin.json", JSON.stringify({ $schema: "https://example.com/other", name: "demo" }));
+  write(directory, "skills/triage/SKILL.md", "not a skill");
+  expect(() => loadPlugin(directory)).toThrow(PluginError);
+  try {
+    loadPlugin(directory);
+  } catch (error) {
+    expect(error).toBeInstanceOf(PluginError);
+    expect((error as PluginError).code).toBe("plugin.schema-unsupported");
+    expect((error as PluginError).message).not.toMatch(/SKILL.md/);
+  }
+});
+
+it("reports unknown manifest fields and ignores a non-object extensions value", () => {
+  const directory = root();
+  write(
+    directory,
+    "plugin.json",
+    manifest("demo", { extra: true, extensions: ["nope"] })
+  );
+  write(
+    directory,
+    "skills/triage/SKILL.md",
+    "---\nname: triage\ndescription: Triage an issue.\n---\nRead the issue.\n"
+  );
+  const loaded = loadPlugin(directory);
+  expect(loaded.skills.triage?.instructions).toContain("Read the issue.");
+  expect(loaded.diagnostics.map((item) => item.code)).toEqual(
+    expect.arrayContaining(["plugin.unknown-field", "plugin.extensions-ignored"])
+  );
+});
+
+it("ignores unimplemented extension namespaces without reading their values", () => {
+  const directory = root();
+  write(
+    directory,
+    "plugin.json",
+    manifest("demo", {
+      extensions: { "com.nylorun.agents": { hooks: true }, "com.example.client": 1 },
+    })
+  );
+  const loaded = loadPlugin(directory);
+  expect(loaded.diagnostics.map((item) => item.message).join("\n")).toMatch(
+    /com\.nylorun\.agents/
+  );
+  expect(loaded.diagnostics.map((item) => item.message).join("\n")).toMatch(
+    /com\.example\.client/
+  );
+});
+
+it("treats missing component locations as valid and isolates a wrong filesystem kind", () => {
+  const missing = root();
+  write(missing, "plugin.json", manifest("bare"));
+  expect(loadPlugin(missing)).toMatchObject({ skills: {}, mcpServers: {} });
+
+  const wrong = root();
+  write(wrong, "plugin.json", manifest("mixed"));
+  write(wrong, "skills", "not a directory");
+  write(
+    wrong,
+    "mcp.json",
+    JSON.stringify({
+      $schema: MCP_SCHEMA,
+      mcpServers: {
+        github: { type: "streamable-http", url: "https://mcp.example.com/github" },
+      },
+    })
+  );
+  const loaded = loadPlugin(wrong);
+  expect(loaded.skills).toEqual({});
+  expect(loaded.mcpServers.github?.type).toBe("streamable-http");
+  expect(loaded.diagnostics.some((item) => item.code === "plugin.skills-invalid")).toBe(true);
+});
+
+it("skips an invalid skill and keeps its sibling and MCP servers", () => {
+  const directory = root();
+  write(directory, "plugin.json", manifest("docs"));
+  write(directory, "skills/broken/SKILL.md", "no frontmatter");
+  write(
+    directory,
+    "skills/triage/SKILL.md",
+    "---\nname: triage\ndescription: Triage an issue.\n---\nBody stays stored.\n"
+  );
+  write(
+    directory,
+    "skills/triage/references/labels.md",
+    "# Labels\n"
+  );
+  write(
+    directory,
+    "mcp.json",
+    JSON.stringify({
+      $schema: MCP_SCHEMA,
+      mcpServers: {
+        bad: { type: "stdio", command: "has space" },
+        github: { type: "streamable-http", url: "https://mcp.example.com/github" },
+        local: { type: "streamable-http", url: "http://localhost:9/mcp" },
+        insecure: { type: "streamable-http", url: "http://example.com/mcp" },
+        secret: { type: "streamable-http", url: "https://user:pw@example.com/mcp" },
+      },
+    })
+  );
+  const loaded = loadPlugin(directory);
+  expect(Object.keys(loaded.skills)).toEqual(["triage"]);
+  expect(loaded.skills.triage?.resources?.["references/labels.md"]).toBe("# Labels\n");
+  expect(Object.keys(loaded.mcpServers).sort()).toEqual(["github", "local"]);
+  expect(loaded.diagnostics.some((item) => item.message.includes("broken"))).toBe(true);
+  expect(loaded.diagnostics.some((item) => item.message.includes("bad"))).toBe(true);
+});
+
+it("disables MCP when mcp.json does not match the plugin schema and still loads skills", () => {
+  const directory = root();
+  write(directory, "plugin.json", manifest("docs"));
+  write(
+    directory,
+    "skills/triage/SKILL.md",
+    "---\nname: triage\ndescription: Triage an issue.\n---\nRead it.\n"
+  );
+  write(directory, "mcp.json", "{");
+  const invalid = loadPlugin(directory);
+  expect(invalid.skills.triage?.name).toBe("triage");
+  expect(invalid.mcpServers).toEqual({});
+
+  const mismatch = root();
+  write(mismatch, "plugin.json", manifest("docs"));
+  write(
+    mismatch,
+    "mcp.json",
+    JSON.stringify({
+      $schema: "https://agent-plugins.org/schemas/9.9.9/mcp.schema.json",
+      mcpServers: {
+        github: { type: "streamable-http", url: "https://mcp.example.com/github" },
+      },
+    })
+  );
+  expect(loadPlugin(mismatch).mcpServers).toEqual({});
+});
+
+it("skips a skill whose SKILL.md resolves outside the package", () => {
+  const directory = root();
+  const outside = root();
+  write(directory, "plugin.json", manifest("docs"));
+  write(outside, "SKILL.md", "---\nname: triage\ndescription: Outside.\n---\nSecret.\n");
+  mkdirSync(join(directory, "skills", "triage"), { recursive: true });
+  symlinkSync(join(outside, "SKILL.md"), join(directory, "skills", "triage", "SKILL.md"));
+  const loaded = loadPlugin(directory);
+  expect(loaded.skills).toEqual({});
+  expect(loaded.diagnostics.some((item) => item.code === "plugin.skill-skipped")).toBe(true);
+});
+
+it("composes skills and MCP into one agent without putting the skill body in the prompt", async () => {
+  const tools = root();
+  const docs = root();
+  write(tools, "plugin.json", manifest("repository-tools", { description: "Repository MCP" }));
+  write(
+    tools,
+    "mcp.json",
+    JSON.stringify({
+      $schema: MCP_SCHEMA,
+      mcpServers: {
+        github: {
+          type: "streamable-http",
+          url: "https://mcp.example.com/github",
+          headers: { "X-Tenant": "public" },
+        },
+      },
+    })
+  );
+  write(docs, "plugin.json", manifest("documentation"));
+  write(
+    docs,
+    "skills/triage/SKILL.md",
+    "---\nname: triage\ndescription: Triage an issue. Use when labeling.\n---\nBody stays stored.\n"
+  );
+  write(docs, "skills/triage/references/labels.md", "# Labels\n");
+  const agent = Agent({
+    id: "assistant",
+    name: "Order assistant",
+    instructions: "Use lookup_order for orders.",
+  })
+    .use(plugin(tools))
+    .use(plugin(docs))
+    .build();
+  const repository = agent.manifest.capabilities.find((item) => item.id === "repository-tools");
+  const documentation = agent.manifest.capabilities.find((item) => item.id === "documentation");
+  expect(repository).toMatchObject({
+    type: "agent-plugin",
+    description: "Repository MCP",
+    mcpServers: {
+      github: {
+        name: "github",
+        type: "streamable-http",
+        url: "https://mcp.example.com/github",
+      },
+    },
+  });
+  expect(documentation?.type).toBe("agent-plugin");
+  expect(documentation?.instructions?.join("\n")).toContain("<name>triage</name>");
+  expect(documentation?.instructions?.join("\n")).not.toContain("Body stays stored.");
+  expect(documentation?.skills?.triage).toEqual({
+    name: "triage",
+    description: "Triage an issue. Use when labeling.",
+  });
+  expect(agent.getBinding().declarations.find((item) => item.id === "repository-tools")?.pluginRoot).toBe(
+    realpathSync(tools),
+  );
+  expect(JSON.stringify(agent.manifest)).not.toContain(realpathSync(tools));
+  expect(JSON.stringify(agent.manifest)).not.toContain("Body stays stored.");
+  expect(JSON.stringify(agent.manifest)).not.toContain("# Labels");
+  const load = agent.getBinding().tools.find((item) => item.name === "load_skill");
+  const read = agent.getBinding().tools.find((item) => item.name === "read_skill_resource");
+  expect(load).toBeDefined();
+  const loaded = await load!.execute({ name: "triage" }, {} as never);
+  expect(loaded).toMatchObject({
+    name: "triage",
+    content: expect.stringContaining("Body stays stored."),
+    resources: ["references/labels.md"],
+  });
+  const resource = await read!.execute(
+    { name: "triage", path: "references/labels.md" },
+    {} as never
+  );
+  expect(resource).toMatchObject({
+    kind: "completed",
+    output: { content: "# Labels\n" },
+  });
+});
+
+it("advertises one load_skill for every plugin skill", async () => {
+  const first = root();
+  const second = root();
+  write(first, "plugin.json", manifest("first-plugin"));
+  write(second, "plugin.json", manifest("second-plugin"));
+  write(first, "skills/triage/SKILL.md", "---\nname: triage\ndescription: Triage an issue.\n---\nFirst.\n");
+  write(second, "skills/summary/SKILL.md", "---\nname: summary\ndescription: Summarize a thread.\n---\nSecond.\n");
+  const agent = Agent({ id: "assistant", instructions: "Help." })
+    .use(plugin(first))
+    .use(plugin(second))
+    .build();
+  const loads = agent.getBinding().tools.filter((item) => item.name === "load_skill");
+  expect(loads).toHaveLength(1);
+  const summary = await loads[0]!.execute({ name: "summary" }, {} as never);
+  expect(summary).toMatchObject({ content: expect.stringContaining("Second.") });
+});
+
+it("rejects duplicate skill names across plugins", () => {
+  const first = root();
+  const second = root();
+  const skill = "---\nname: triage\ndescription: Triage an issue.\n---\nOne.\n";
+  write(first, "plugin.json", manifest("first-plugin"));
+  write(second, "plugin.json", manifest("second-plugin"));
+  write(first, "skills/triage/SKILL.md", skill);
+  write(second, "skills/triage/SKILL.md", skill);
+  expect(() =>
+    Agent({ id: "assistant", instructions: "Help." })
+      .use(plugin(first))
+      .use(plugin(second))
+      .build()
+  ).toThrow(/Duplicate skill 'triage'/);
+});
+
+it("expands only the two placeholders and supplies PLUGIN_ROOT after env", () => {
+  const directory = root();
+  const data = join(directory, "data");
+  const launch = prepareStdioLaunch(
+    {
+      name: "local",
+      type: "stdio",
+      command: "npx",
+      args: ["--config", "${PLUGIN_ROOT}/config.json", "${PLUGIN_DATA}/db"],
+      env: { DATA_DIR: "${PLUGIN_DATA}/database", PATH: "/from-plugin" },
+      cwd: "${PLUGIN_ROOT}",
+    },
+    {
+      pluginRoot: `${directory}/${"${PLUGIN_DATA}"}`,
+      pluginData: data,
+      baseEnv: { LANG: "en" },
+    }
+  );
+  expect(launch.command).toBe("npx");
+  expect(launch.args[1]).toBe(`${directory}/${"${PLUGIN_DATA}"}/config.json`);
+  expect(launch.args[1]).toContain("${PLUGIN_DATA}");
+  expect(launch.args[2]).toBe(`${data}/db`);
+  expect(launch.cwd).toBe(`${directory}/${"${PLUGIN_DATA}"}`);
+  expect(launch.env.DATA_DIR).toBe(`${data}/database`);
+  expect(launch.env.PLUGIN_ROOT).toBe(`${directory}/${"${PLUGIN_DATA}"}`);
+  expect(launch.env.PLUGIN_DATA).toBe(data);
+  expect(launch.env.LANG).toBe("en");
+  expect(launch.env.PATH).toBe("/from-plugin");
+});

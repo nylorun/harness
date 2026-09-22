@@ -66,8 +66,10 @@ export async function applyBeforeModelCall(
     }
     if (patch.tools) {
       for (const [name, on] of Object.entries(patch.tools)) {
-        const known = ctx.agent.manifest.capabilities.some((cap) =>
-          cap.tools?.some((tool) => tool.name === name),
+        const known = ctx.agent.manifest.capabilities.some(
+          (cap) =>
+            cap.tools?.some((tool) => tool.name === name) ||
+            ctx.agent.implementations[cap.id]?.tools?.[name] !== undefined,
         );
         if (!known)
           throw new HarnessError(
@@ -75,9 +77,10 @@ export async function applyBeforeModelCall(
             `beforeModelCall referenced unknown tool '${name}'`,
           );
         if (!agentLevel) {
-          const owned = ctx.agent.manifest.capabilities
+          const declared = ctx.agent.manifest.capabilities
             .find((cap) => cap.id === id)
             ?.tools?.some((tool) => tool.name === name);
+          const owned = declared || ctx.agent.implementations[id]?.tools?.[name] !== undefined;
           if (!owned)
             throw new HarnessError(
               "configuration.invalid",

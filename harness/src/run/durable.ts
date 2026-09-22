@@ -61,6 +61,14 @@ export type DurableResult =
       readonly checkpoint: DurableCheckpoint;
       readonly result: RunResult<unknown>;
     };
+/** Discovered tool advertised for this execution. It is not part of the hashed manifest. */
+export interface DurableSessionTool {
+  readonly capabilityId: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly inputSchema: JsonObject;
+  readonly outputSchema?: JsonObject;
+}
 export function createDurableCheckpoint(input: {
   manifest: AgentManifest;
   sessionId: string;
@@ -92,6 +100,7 @@ export async function runDurable(options: {
   checkpoint: DurableCheckpoint;
   host: DurableHost;
   signal?: AbortSignal;
+  sessionTools?: readonly DurableSessionTool[];
 }): Promise<DurableResult> {
   const { manifest, checkpoint, host } = options;
   AgentManifestSchema.parse(manifest);
@@ -149,60 +158,71 @@ export async function runDurable(options: {
     return result.outcome;
   };
   let patchTail: Promise<void> = Promise.resolve();
+  const hostedTool = (
+    capabilityId: string,
+    tool: {
+      readonly name: string;
+      readonly description?: string;
+      readonly inputSchema: JsonObject;
+      readonly outputSchema?: JsonObject;
+    },
+  ) => ({
+    name: tool.name,
+    ...(tool.description === undefined ? {} : { description: tool.description }),
+    inputSchema: schemaFromJSON(tool.inputSchema),
+    ...(tool.outputSchema ? { outputSchema: schemaFromJSON(tool.outputSchema) } : {}),
+    async execute(args: unknown, ctx: any) {
+      const previous = patchTail;
+      let release!: () => void;
+      patchTail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      try {
+        const outcome = await effect(
+          "tool",
+          args,
+          {
+            executionId: ctx.executionId,
+            turnId: ctx.turnId,
+            stepId: ctx.stepId,
+            callId: ctx.callId,
+            invocationId: ctx.invocationId,
+            idempotencyKey: ctx.idempotencyKey,
+            info: ctx.info,
+            state: ctx.state.entries(),
+            resume: ctx.resume,
+          },
+          capabilityId,
+          tool.name,
+          ctx.invocationId,
+        );
+        // Apply concurrently resolved patches in manifest call order, independent of host I/O timing.
+        await previous;
+        for (const [key, value] of Object.entries(outcome.statePatch ?? {}))
+          ctx.state.set(key, value);
+        const value = outcome.value as any;
+        return value?.kind === "interaction-required"
+          ? {
+              ...value,
+              interaction: {
+                ...value.interaction,
+                id: `${checkpoint.turnId}:${checkpoint.segment}:interaction:${ctx.invocationId}`,
+              },
+            }
+          : value;
+      } finally {
+        await previous;
+        release();
+      }
+    },
+  });
   const implementations: Record<string, Implementations[string]> = {};
+  const sessionTools = options.sessionTools ?? [];
   for (const capability of manifest.capabilities) {
     const tools: Record<string, any> = {};
-    for (const tool of capability.tools ?? [])
-      tools[tool.name] = {
-        name: tool.name,
-        ...(tool.description === undefined ? {} : { description: tool.description }),
-        inputSchema: schemaFromJSON(tool.inputSchema),
-        ...(tool.outputSchema ? { outputSchema: schemaFromJSON(tool.outputSchema) } : {}),
-        async execute(args: unknown, ctx: any) {
-          const previous = patchTail;
-          let release!: () => void;
-          patchTail = new Promise<void>((resolve) => {
-            release = resolve;
-          });
-          try {
-            const outcome = await effect(
-              "tool",
-              args,
-              {
-                executionId: ctx.executionId,
-                turnId: ctx.turnId,
-                stepId: ctx.stepId,
-                callId: ctx.callId,
-                invocationId: ctx.invocationId,
-                idempotencyKey: ctx.idempotencyKey,
-                info: ctx.info,
-                state: ctx.state.entries(),
-                resume: ctx.resume,
-              },
-              capability.id,
-              tool.name,
-              ctx.invocationId,
-            );
-            // Apply concurrently resolved patches in manifest call order, independent of host I/O timing.
-            await previous;
-            for (const [key, value] of Object.entries(outcome.statePatch ?? {}))
-              ctx.state.set(key, value);
-            const value = outcome.value as any;
-            return value?.kind === "interaction-required"
-              ? {
-                  ...value,
-                  interaction: {
-                    ...value.interaction,
-                    id: `${checkpoint.turnId}:${checkpoint.segment}:interaction:${ctx.invocationId}`,
-                  },
-                }
-              : value;
-          } finally {
-            await previous;
-            release();
-          }
-        },
-      };
+    for (const tool of capability.tools ?? []) tools[tool.name] = hostedTool(capability.id, tool);
+    for (const tool of sessionTools)
+      if (tool.capabilityId === capability.id) tools[tool.name] = hostedTool(capability.id, tool);
     implementations[capability.id] = {
       tools,
       ...(capability.beforeModelCall
@@ -220,7 +240,20 @@ export async function runDurable(options: {
         : {}),
     };
   }
-  const definition = definitionFor(agentFrom(manifest, implementations));
+  const definition = definitionFor(
+    agentFrom(
+      manifest,
+      implementations,
+      sessionTools.length === 0
+        ? undefined
+        : {
+            sessionTools: sessionTools.map((tool) => ({
+              capabilityId: tool.capabilityId,
+              name: tool.name,
+            })),
+          },
+    ),
+  );
   // Manifest reconstruction must retain definition identity, including schemas and instructions.
   if (definition.hash !== checkpoint.manifestHash)
     throw new HarnessError("execution.incompatible", "Reconstructed definition hash mismatch");

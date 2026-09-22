@@ -41,12 +41,35 @@ export function compileDeclaration<State>(
   return {
     bound: {
       id: declaration.id,
+      ...(declaration.name === undefined ? {} : { name: declaration.name }),
+      ...(declaration.description === undefined
+        ? {}
+        : { description: declaration.description }),
       handle,
       hasMiddleware: declaration.middleware !== undefined,
       tools: tools?.items,
       ...(contributions === undefined ? {} : { contributions }),
       ...(declaration.beforeModelCall ? { beforeModelCall: true } : {}),
       ...(declaration.afterModelCall ? { afterModelCall: true } : {}),
+      ...(declaration.type === undefined ? {} : { manifestType: declaration.type }),
+      ...(declaration.metadata === undefined
+        ? {}
+        : { metadata: declaration.metadata }),
+      ...(declaration.skills === undefined ||
+      Object.keys(declaration.skills).length === 0
+        ? {}
+        : { skills: declaration.skills }),
+      ...(declaration.skillRecords === undefined ||
+      Object.keys(declaration.skillRecords).length === 0
+        ? {}
+        : { skillRecords: declaration.skillRecords }),
+      ...(declaration.mcpServers === undefined ||
+      Object.keys(declaration.mcpServers).length === 0
+        ? {}
+        : { mcpServers: declaration.mcpServers }),
+      ...(declaration.pluginRoot === undefined
+        ? {}
+        : { pluginRoot: declaration.pluginRoot }),
     },
     ...(declaration.beforeModelCall
       ? { beforeModelCall: declaration.beforeModelCall }

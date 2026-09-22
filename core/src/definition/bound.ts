@@ -1,3 +1,6 @@
+import type { JsonObject } from "../types/shared.js";
+import type { McpServerManifest, SkillManifest } from "../types/manifest.js";
+import type { SkillRecord } from "../types/middleware.js";
 import type {
   MiddlewareContributions,
   StepMiddleware,
@@ -34,10 +37,21 @@ export interface BoundToolDefinition<Info = unknown>
 
 export interface BoundMiddleware {
   readonly id: string;
+  readonly name?: string;
+  readonly description?: string;
   readonly handle: StepMiddleware;
   readonly hasMiddleware: boolean;
   readonly tools?: readonly ToolDefinition<any, any, any>[];
+  /** Execution-only tools. Advertised for this run and omitted from the manifest. */
+  readonly sessionTools?: readonly ToolDefinition<any, any, any>[];
   readonly contributions?: MiddlewareContributions;
   readonly beforeModelCall?: boolean;
   readonly afterModelCall?: boolean;
+  readonly manifestType?: "agent" | "agent-plugin";
+  readonly metadata?: JsonObject;
+  readonly skills?: Readonly<Record<string, SkillManifest>>;
+  readonly skillRecords?: Readonly<Record<string, SkillRecord>>;
+  readonly mcpServers?: Readonly<Record<string, McpServerManifest>>;
+  /** Package directory for a plugin capability. Not a manifest field. */
+  readonly pluginRoot?: string;
 }

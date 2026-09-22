@@ -6,52 +6,85 @@ export const PROTOCOL_VERSION = 1;
 export const RequestIdSchema = z.string().min(1);
 export const IdempotencyKeySchema = z.string().min(1).max(256);
 const jsonObject = z.record(z.string(), z.unknown());
+const mcpServerSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      name: z.string().min(1),
+      type: z.literal("stdio"),
+      command: z.string().min(1),
+      args: z.array(z.string()).optional(),
+      env: z.record(z.string(), z.string()).optional(),
+      cwd: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      name: z.string().min(1),
+      type: z.literal("streamable-http"),
+      url: z.string().min(1),
+      headers: z.record(z.string(), z.string()).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      name: z.string().min(1),
+      type: z.literal("sse"),
+      url: z.string().min(1),
+      headers: z.record(z.string(), z.string()).optional(),
+    })
+    .strict(),
+]);
+const skillManifestSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+  })
+  .strict();
+const toolManifestSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    inputSchema: jsonObject,
+    outputSchema: jsonObject.optional(),
+  })
+  .strict();
 export const AgentManifestSchema = z
   .object({
-    schemaVersion: z.literal(2),
+    manifestSchemaVersion: z.literal(3),
     id: z.string().min(1),
-    name: z.string().min(1),
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    metadata: jsonObject.optional(),
     outputSchema: jsonObject.optional(),
     capabilities: z.array(
       z
         .object({
           id: z.string().min(1),
-          kind: z.enum(["agent", "capability", "middleware"]),
-          hasMiddleware: z.boolean(),
+          type: z.enum(["agent", "agent-plugin"]),
+          name: z.string().min(1).optional(),
+          description: z.string().optional(),
+          metadata: jsonObject.optional(),
           instructions: z.array(z.string()).optional(),
-          tools: z
-            .array(
-              z
-                .object({
-                  name: z.string().min(1),
-                  description: z.string().optional(),
-                  inputSchema: jsonObject,
-                  outputSchema: jsonObject.optional(),
-                })
-                .strict()
-            )
-            .optional(),
+          skills: z.record(z.string(), skillManifestSchema).optional(),
+          tools: z.array(toolManifestSchema).optional(),
+          mcpServers: z.record(z.string(), mcpServerSchema).optional(),
           beforeModelCall: z.boolean().optional(),
           afterModelCall: z.boolean().optional(),
         })
         .strict()
     ),
+    runtime: z.object({}).strict().optional(),
   })
   .strict()
   .superRefine((manifest, ctx) => {
     const ids = new Set<string>();
     const names = new Set<string>();
+    const servers = new Set<string>();
+    const skills = new Set<string>();
     for (const capability of manifest.capabilities) {
       if (ids.has(capability.id))
         ctx.addIssue({ code: "custom", message: "Duplicate capability id" });
       ids.add(capability.id);
-      // Arbitrary middleware closures cannot be transported. Hooks are explicit remote actions.
-      if (capability.hasMiddleware)
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "Hosted definitions support declarative capabilities and before/after hooks, not middleware closures",
-        });
       for (const tool of capability.tools ?? []) {
         if (names.has(tool.name))
           ctx.addIssue({
@@ -60,25 +93,178 @@ export const AgentManifestSchema = z
           });
         names.add(tool.name);
       }
+      if (capability.skills && Object.keys(capability.skills).length === 0)
+        ctx.addIssue({
+          code: "custom",
+          message: "skills must be omitted when a capability declares no skills",
+        });
+      for (const [key, skill] of Object.entries(capability.skills ?? {})) {
+        if (key !== skill.name)
+          ctx.addIssue({
+            code: "custom",
+            message: `skills key '${key}' must equal the skill name`,
+          });
+        if (skills.has(skill.name))
+          ctx.addIssue({
+            code: "custom",
+            message: `Duplicate skill '${skill.name}'`,
+          });
+        skills.add(skill.name);
+      }
+      if (capability.mcpServers && Object.keys(capability.mcpServers).length === 0)
+        ctx.addIssue({
+          code: "custom",
+          message: "mcpServers must be omitted when a capability declares no servers",
+        });
+      for (const [key, server] of Object.entries(capability.mcpServers ?? {})) {
+        if (key !== server.name)
+          ctx.addIssue({
+            code: "custom",
+            message: `mcpServers key '${key}' must equal the server name`,
+          });
+        if (servers.has(server.name))
+          ctx.addIssue({
+            code: "custom",
+            message: `Duplicate MCP server '${server.name}'`,
+          });
+        servers.add(server.name);
+      }
     }
   }) as unknown as z.ZodType<AgentManifest>;
+const absolutePath = z.string().min(1).refine(
+  (value) => value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value),
+  { message: "plugin root must be an absolute path" },
+);
 export const PutAgentRequestSchema = z
   .object({
     requestId: RequestIdSchema,
     manifest: AgentManifestSchema,
     implementationVersion: z.string().min(1),
+    pluginRoots: z.record(z.string(), absolutePath).optional(),
   })
   .strict();
 export type PutAgentRequest = z.infer<typeof PutAgentRequestSchema>;
+export const CredentialSelectionSchema = z
+  .object({
+    serverName: z.string().min(1),
+    credentialId: z.string().min(1),
+  })
+  .strict();
+export type CredentialSelection = z.infer<typeof CredentialSelectionSchema>;
 export const PutSessionRequestSchema = z
   .object({
     requestId: RequestIdSchema,
     agentId: z.string().min(1),
     ownerUserId: z.string().min(1),
     info: jsonObject.optional(),
+    vaultIds: z.array(z.string().min(1)).optional(),
+    credentialSelections: z.array(CredentialSelectionSchema).optional(),
   })
   .strict();
 export type PutSessionRequest = z.infer<typeof PutSessionRequestSchema>;
+const vaultWriteBase = {
+  requestId: RequestIdSchema,
+  idempotencyKey: IdempotencyKeySchema,
+};
+const tokenEndpointAuthSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("none") }).strict(),
+  z
+    .object({
+      type: z.literal("client_secret_basic"),
+      clientSecret: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("client_secret_post"),
+      clientSecret: z.string().min(1),
+    })
+    .strict(),
+]);
+const oauthRefreshSchema = z
+  .object({
+    tokenEndpoint: z.string().min(1),
+    clientId: z.string().min(1),
+    refreshToken: z.string().min(1),
+    tokenEndpointAuth: tokenEndpointAuthSchema,
+  })
+  .strict();
+export const CreateVaultRequestSchema = z
+  .object({
+    ...vaultWriteBase,
+    name: z.string().min(1),
+    ownerUserId: z.string().min(1),
+    metadata: z.record(z.string(), z.string()).optional(),
+  })
+  .strict();
+export type CreateVaultRequest = z.infer<typeof CreateVaultRequestSchema>;
+export const CreateCredentialRequestSchema = z
+  .object({
+    ...vaultWriteBase,
+    name: z.string().min(1),
+    auth: z.discriminatedUnion("type", [
+      z
+        .object({
+          type: z.literal("bearer"),
+          url: z.string().min(1),
+          token: z.string().min(1),
+        })
+        .strict(),
+      z
+        .object({
+          type: z.literal("oauth"),
+          url: z.string().min(1),
+          accessToken: z.string().min(1),
+          expiresAt: z.string().min(1).nullable().optional(),
+          refresh: oauthRefreshSchema.optional(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+export type CreateCredentialRequest = z.infer<
+  typeof CreateCredentialRequestSchema
+>;
+export const RotateCredentialRequestSchema = z
+  .object({
+    ...vaultWriteBase,
+    auth: z.discriminatedUnion("type", [
+      z
+        .object({
+          type: z.literal("bearer"),
+          token: z.string().min(1),
+        })
+        .strict(),
+      z
+        .object({
+          type: z.literal("oauth"),
+          accessToken: z.string().min(1),
+          expiresAt: z.string().min(1).nullable().optional(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+export type RotateCredentialRequest = z.infer<
+  typeof RotateCredentialRequestSchema
+>;
+export interface VaultInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly ownerUserId: string;
+  readonly metadata?: Readonly<Record<string, string>>;
+  readonly createdAt: string;
+}
+export interface CredentialInfo {
+  readonly id: string;
+  readonly vaultId: string;
+  readonly name: string;
+  readonly type: "bearer" | "oauth";
+  readonly binding: { readonly url: string };
+  readonly expiresAt?: string;
+  readonly createdAt: string;
+  readonly rotatedAt?: string;
+}
 const commandBase = {
   requestId: RequestIdSchema,
   idempotencyKey: IdempotencyKeySchema,
@@ -180,6 +366,8 @@ export const ActionSchema = z.object({
   kind: z.enum(["tool", "beforeModelCall", "afterModelCall"]),
   capabilityId: z.string(),
   toolName: z.string().optional(),
+  inputSchema: jsonObject.optional(),
+  outputSchema: jsonObject.optional(),
   input: z.unknown(),
   context: jsonObject,
   status: z.enum(["pending", "claimed", "completed", "uncertain", "cancelled"]),
@@ -191,7 +379,6 @@ export type Action = z.infer<typeof ActionSchema>;
 export const ActionClaimRequestSchema = z
   .object({
     requestId: RequestIdSchema,
-    manifestHash: z.string().min(1),
     implementationVersion: z.string().min(1),
   })
   .strict();
@@ -211,7 +398,7 @@ export const ActionClaimResponseSchema = z.object({
 export type ActionClaim = z.infer<typeof ActionClaimResponseSchema>;
 export interface ExecutorScope {
   readonly agentId: string;
-  readonly manifestHash: string;
+  readonly manifestHash?: string;
   readonly implementationVersion: string;
 }
 export const ExecutorNotificationSchema = z.object({

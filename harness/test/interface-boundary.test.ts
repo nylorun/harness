@@ -19,7 +19,6 @@ describe("public interface boundaries", () => {
     expect(builder.build()).toBe(agent);
     expect(Reflect.ownKeys(agent).sort()).toEqual([
       "getBinding",
-      "hash",
       "id",
       "manifest",
       "name",

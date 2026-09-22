@@ -1,12 +1,14 @@
 import type { BoundMiddleware } from "./bound.js";
 import type { BuiltAgent } from "../types/agent.js";
-import type { AgentManifest } from "../types/manifest.js";
-import type { BuildDiagnostic } from "../types/shared.js";
+import type { AgentManifest, RuntimeManifest } from "../types/manifest.js";
+import type { BuildDiagnostic, JsonObject } from "../types/shared.js";
 import type { ToolSchemaSource } from "../types/tool.js";
 import type { AfterModelCallFn, BeforeModelCallFn } from "../types/dynamics.js";
 import type { StepMiddleware } from "../types/middleware.js";
+import type { SkillRecord } from "../types/middleware.js";
 import { bindAgent } from "./bind-agent.js";
 import { createManifest } from "./manifest.js";
+import { createSkillTools } from "./skill-tools.js";
 
 type BuildResult<Agent> =
   | {
@@ -32,8 +34,11 @@ export function assembleAgent(
   middleware: readonly BoundMiddleware[],
   identity: Readonly<{
     id: string;
-    name: string;
+    name?: string;
+    description?: string;
+    metadata?: JsonObject;
     outputSchema?: ToolSchemaSource;
+    runtime?: RuntimeManifest;
   }>,
   dynamics: ReadonlyMap<string, CapabilityDynamics> = new Map()
 ): BuildResult<BuiltAgent> {
@@ -44,7 +49,10 @@ export function assembleAgent(
       diagnostic("agent.invalid-id", "Agent id must be a non-empty string")
     );
   }
-  if (typeof identity.name !== "string" || identity.name.length === 0) {
+  if (
+    identity.name !== undefined &&
+    (typeof identity.name !== "string" || identity.name.length === 0)
+  ) {
     diagnostics.push(
       diagnostic("agent.invalid-name", "Agent name must be a non-empty string")
     );
@@ -71,11 +79,22 @@ export function assembleAgent(
           `Middleware '${item.id}' must provide a function`
         )
       );
+    else if (item.name !== undefined && item.name.length === 0)
+      diagnostics.push(
+        diagnostic(
+          "middleware.invalid",
+          `Capability '${item.id}' name must be a non-empty string`
+        )
+      );
     else {
       middlewareIds.add(item.id);
       frozen.push(
         Object.freeze({
           id: item.id,
+          ...(item.name === undefined ? {} : { name: item.name }),
+          ...(item.description === undefined
+            ? {}
+            : { description: item.description }),
           handle: item.handle,
           hasMiddleware: item.hasMiddleware,
           ...(item.tools === undefined ? {} : { tools: item.tools }),
@@ -84,23 +103,103 @@ export function assembleAgent(
             : { contributions: item.contributions }),
           ...(item.beforeModelCall ? { beforeModelCall: true } : {}),
           ...(item.afterModelCall ? { afterModelCall: true } : {}),
+          ...(item.manifestType === undefined
+            ? {}
+            : { manifestType: item.manifestType }),
+          ...(item.metadata === undefined ? {} : { metadata: item.metadata }),
+          ...(item.mcpServers === undefined
+            ? {}
+            : { mcpServers: item.mcpServers }),
+          ...(item.skills === undefined ? {} : { skills: item.skills }),
+          ...(item.skillRecords === undefined
+            ? {}
+            : { skillRecords: item.skillRecords }),
+          ...(item.sessionTools === undefined
+            ? {}
+            : { sessionTools: item.sessionTools }),
+          ...(item.pluginRoot === undefined ? {} : { pluginRoot: item.pluginRoot }),
         })
       );
     }
   }
+
+  const skilled = attachSkillTools(frozen);
+  diagnostics.push(...skilled.diagnostics);
 
   if (diagnostics.length)
     return Object.freeze({
       ok: false,
       diagnostics: Object.freeze(diagnostics),
     });
-  const frozenMiddleware = Object.freeze(frozen);
+  const frozenMiddleware = Object.freeze(
+    skilled.items.map((item) => Object.freeze(item))
+  );
   const manifest = createManifest({
     id: identity.id,
     name: identity.name,
+    description: identity.description,
+    metadata: identity.metadata,
     outputSchema: identity.outputSchema,
+    runtime: identity.runtime,
     middleware: frozenMiddleware,
   });
   const agent = bindAgent(frozenMiddleware, manifest, identity, dynamics);
   return Object.freeze({ ok: true, agent, manifest });
+}
+
+const SKILL_TOOL_NAMES = new Set(["load_skill", "read_skill_resource"]);
+
+function attachSkillTools(items: readonly BoundMiddleware[]): {
+  readonly items: BoundMiddleware[];
+  readonly diagnostics: readonly BuildDiagnostic[];
+} {
+  const skills = new Map<string, SkillRecord>();
+  const diagnostics: BuildDiagnostic[] = [];
+  const seen = new Set<string>();
+  let ownerId: string | undefined;
+  for (const item of items) {
+    for (const [key, skill] of Object.entries(item.skills ?? {})) {
+      if (key !== skill.name || seen.has(skill.name)) {
+        diagnostics.push(
+          diagnostic(
+            "skill.duplicate-name",
+            `Duplicate skill '${skill.name}' on capability '${item.id}'`
+          )
+        );
+        continue;
+      }
+      seen.add(skill.name);
+    }
+    for (const [key, skill] of Object.entries(item.skillRecords ?? {})) {
+      if (key !== skill.name || skills.has(skill.name)) {
+        diagnostics.push(
+          diagnostic(
+            "skill.duplicate-name",
+            `Duplicate skill '${skill.name}' on capability '${item.id}'`
+          )
+        );
+        continue;
+      }
+      skills.set(skill.name, skill);
+      ownerId ??= item.id;
+    }
+  }
+  if (diagnostics.length > 0 || ownerId === undefined)
+    return { items: [...items], diagnostics };
+  const skillTools = createSkillTools(skills);
+  const next = items.map((item) => {
+    if (item.id !== ownerId) return item;
+    const tools = [
+      ...(item.tools ?? []).filter((entry) => !SKILL_TOOL_NAMES.has(entry.name)),
+      ...skillTools,
+    ];
+    const advertised = [...tools, ...(item.sessionTools ?? [])];
+    const handle: StepMiddleware = async (request, next) =>
+      item.handle(request, async () => {
+        request.configuration.tools.set(item.id, advertised);
+        return next();
+      });
+    return { ...item, tools, handle };
+  });
+  return { items: next, diagnostics };
 }

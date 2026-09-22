@@ -15,7 +15,6 @@ try {
       {
         token: "startup-executor-key-only",
         agentId: agent.id,
-        manifestHash: agent.hash,
         implementationVersion: "dev",
       },
     ],

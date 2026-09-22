@@ -86,7 +86,7 @@ function Workspace() {
         url: "Local Runtime",
         agents: definitions.agents.map((a) => ({
           id: a.manifest.id,
-          name: a.manifest.name,
+          name: a.manifest.name ?? a.manifest.id,
           manifest: a.manifest,
         })),
         sessionsByAgent: grouped,

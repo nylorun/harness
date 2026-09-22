@@ -42,8 +42,6 @@ export type StudioManifestTool = Readonly<{
 
 export type StudioCapabilityManifest = Readonly<{
   id: string;
-  kind?: "agent" | "capability" | "middleware";
-  hasMiddleware?: boolean;
   instructions?: readonly string[];
   tools?: readonly StudioManifestTool[];
   model?: Readonly<{

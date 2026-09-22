@@ -1,0 +1,545 @@
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { McpServerManifest, SkillRecord } from "@nylorun/core/define";
+import { expandPluginPlaceholders } from "./launch.js";
+
+export const PLUGIN_SCHEMA =
+  "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+export const MCP_SCHEMA =
+  "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
+
+const PLUGIN_FIELDS = new Set([
+  "$schema",
+  "name",
+  "version",
+  "description",
+  "author",
+  "homepage",
+  "repository",
+  "license",
+  "keywords",
+  "extensions",
+]);
+const AUTHOR_FIELDS = new Set(["name", "email", "url"]);
+const RESERVED_ENV = new Set(["PLUGIN_ROOT", "PLUGIN_DATA"]);
+const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export interface PluginDiagnostic {
+  readonly severity: "info" | "warning";
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+}
+
+export class PluginError extends Error {
+  readonly code: string;
+  readonly diagnostics: readonly PluginDiagnostic[];
+
+  constructor(
+    code: string,
+    message: string,
+    diagnostics: readonly PluginDiagnostic[] = []
+  ) {
+    super(message);
+    this.name = "PluginError";
+    this.code = code;
+    this.diagnostics = diagnostics;
+  }
+}
+
+export interface LoadedPlugin {
+  readonly root: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly skills: Readonly<Record<string, SkillRecord>>;
+  readonly mcpServers: Readonly<Record<string, McpServerManifest>>;
+  readonly diagnostics: readonly PluginDiagnostic[];
+}
+
+export function loadPlugin(directory: string): LoadedPlugin {
+  const root = resolveRoot(directory);
+  const manifestPath = join(root, "plugin.json");
+  const manifestReal = realInside(root, manifestPath);
+  if (!manifestReal || !existsSync(manifestReal) || !statSync(manifestReal).isFile())
+    throw new PluginError(
+      "plugin.manifest-missing",
+      `plugin.json must be a file inside ${root}`,
+      [{ severity: "warning", code: "plugin.manifest-missing", message: "plugin.json is missing or escapes the package root", path: manifestPath }]
+    );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(manifestReal, "utf8"));
+  } catch {
+    throw new PluginError("plugin.manifest-invalid", "plugin.json is not valid JSON");
+  }
+  if (!isRecord(parsed))
+    throw new PluginError("plugin.manifest-invalid", "plugin.json must be a JSON object");
+  const diagnostics: PluginDiagnostic[] = [];
+  for (const key of Object.keys(parsed)) {
+    if (!PLUGIN_FIELDS.has(key))
+      diagnostics.push({
+        severity: "warning",
+        code: "plugin.unknown-field",
+        message: `Ignored unknown plugin.json field '${key}'`,
+        path: manifestPath,
+      });
+  }
+  if (parsed.$schema !== PLUGIN_SCHEMA)
+    throw new PluginError(
+      "plugin.schema-unsupported",
+      "plugin.json $schema must be the Agent Plugins 1.0.0 plugin schema",
+      diagnostics
+    );
+  if (!isPluginName(parsed.name))
+    throw new PluginError(
+      "plugin.name-invalid",
+      "plugin.json name must be 1-64 characters of lowercase letters, digits, hyphens, and periods",
+      diagnostics
+    );
+  validateMetadata(parsed, diagnostics);
+  const extensions = parsed.extensions;
+  if (extensions !== undefined && !isRecord(extensions))
+    diagnostics.push({
+      severity: "warning",
+      code: "plugin.extensions-ignored",
+      message: "Ignored non-object extensions field",
+      path: manifestPath,
+    });
+  else if (isRecord(extensions)) {
+    for (const namespace of Object.keys(extensions))
+      diagnostics.push({
+        severity: "info",
+        code: "plugin.extension-ignored",
+        message: `Ignored unimplemented extension namespace '${namespace}'`,
+        path: manifestPath,
+      });
+  }
+  const skills = loadSkills(root, diagnostics);
+  const mcpServers = loadMcp(root, parsed.name, diagnostics);
+  return {
+    root,
+    name: parsed.name,
+    ...(typeof parsed.description === "string" ? { description: parsed.description } : {}),
+    skills,
+    mcpServers,
+    diagnostics,
+  };
+}
+
+function resolveRoot(directory: string): string {
+  const resolved = resolve(directory);
+  if (!existsSync(resolved))
+    throw new PluginError("plugin.missing", `Plugin directory does not exist: ${directory}`);
+  const real = realpathSync(resolved);
+  if (!statSync(real).isDirectory())
+    throw new PluginError("plugin.missing", `Plugin path is not a directory: ${directory}`);
+  return real;
+}
+
+function validateMetadata(manifest: Record<string, unknown>, diagnostics: PluginDiagnostic[]): void {
+  for (const field of ["version", "description", "homepage", "repository", "license"] as const) {
+    if (manifest[field] !== undefined && typeof manifest[field] !== "string")
+      throw new PluginError("plugin.manifest-invalid", `plugin.json ${field} must be a string`, diagnostics);
+  }
+  if (manifest.keywords !== undefined) {
+    if (!Array.isArray(manifest.keywords) || manifest.keywords.some((item) => typeof item !== "string"))
+      throw new PluginError("plugin.manifest-invalid", "plugin.json keywords must be an array of strings", diagnostics);
+  }
+  if (manifest.author !== undefined) {
+    if (!isRecord(manifest.author))
+      throw new PluginError("plugin.manifest-invalid", "plugin.json author must be an object", diagnostics);
+    for (const key of Object.keys(manifest.author)) {
+      if (!AUTHOR_FIELDS.has(key) || typeof manifest.author[key] !== "string")
+        throw new PluginError("plugin.manifest-invalid", "plugin.json author contains an invalid field", diagnostics);
+    }
+  }
+}
+
+function loadSkills(
+  root: string,
+  diagnostics: PluginDiagnostic[]
+): Readonly<Record<string, SkillRecord>> {
+  const location = join(root, "skills");
+  if (!existsSync(location)) return {};
+  const real = realInside(root, location);
+  if (!real || !statSync(real).isDirectory()) {
+    diagnostics.push({
+      severity: "warning",
+      code: "plugin.skills-invalid",
+      message: "skills/ is not a directory inside the package",
+      path: location,
+    });
+    return {};
+  }
+  const skills: Record<string, SkillRecord> = {};
+  for (const entry of readdirSync(real, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const directory = join(real, entry.name);
+    const directoryReal = realInside(root, directory);
+    if (!directoryReal) {
+      diagnostics.push({
+        severity: "warning",
+        code: "plugin.skill-skipped",
+        message: `Skipped skill '${entry.name}' because its directory escapes the package`,
+        path: directory,
+      });
+      continue;
+    }
+    const skillFile = join(directoryReal, "SKILL.md");
+    if (!existsSync(skillFile)) continue;
+    const skillReal = realInside(root, skillFile);
+    if (!skillReal || !statSync(skillReal).isFile()) {
+      diagnostics.push({
+        severity: "warning",
+        code: "plugin.skill-skipped",
+        message: `Skipped skill '${entry.name}' because SKILL.md escapes the package`,
+        path: skillFile,
+      });
+      continue;
+    }
+    const parsed = parseSkill(readFileSync(skillReal, "utf8"), entry.name);
+    if (!parsed) {
+      diagnostics.push({
+        severity: "warning",
+        code: "plugin.skill-skipped",
+        message: `Skipped skill '${entry.name}' because SKILL.md is not a valid Agent Skill`,
+        path: skillFile,
+      });
+      continue;
+    }
+    if (skills[parsed.name]) {
+      diagnostics.push({
+        severity: "warning",
+        code: "plugin.skill-skipped",
+        message: `Skipped duplicate skill '${parsed.name}'`,
+        path: skillFile,
+      });
+      continue;
+    }
+    const resources = readResources(root, directoryReal, diagnostics);
+    skills[parsed.name] = {
+      name: parsed.name,
+      description: parsed.description,
+      instructions: parsed.instructions,
+      ...(Object.keys(resources).length === 0 ? {} : { resources }),
+    };
+  }
+  return skills;
+}
+
+function parseSkill(
+  text: string,
+  directoryName: string
+): { name: string; description: string; instructions: string } | undefined {
+  const match = /^-{3}\r?\n([\s\S]*?)\r?\n-{3}(?:\r?\n|$)/.exec(text);
+  if (!match) return undefined;
+  const fields: Record<string, string> = {};
+  for (const raw of (match[1] ?? "").split(/\r?\n/)) {
+    if (!raw.trim() || raw.trimStart().startsWith("#")) continue;
+    const line = /^([\w-]+)\s*:\s*(.*)$/.exec(raw);
+    if (!line || line[1] === "metadata") continue;
+    fields[line[1]!] = unquote(line[2] ?? "");
+  }
+  const name = fields.name?.trim() ?? "";
+  const description = fields.description?.trim() ?? "";
+  if (!name || !description || description.length > 1024) return undefined;
+  if (name.length > 64 || !SKILL_NAME.test(name) || name !== directoryName) return undefined;
+  return { name, description, instructions: text.slice(match[0].length).replace(/^\r?\n/, "") };
+}
+
+function readResources(
+  root: string,
+  directory: string,
+  diagnostics: PluginDiagnostic[]
+): Record<string, string> {
+  const resources: Record<string, string> = {};
+  const walk = (current: string, depth: number) => {
+    if (depth > 6) return;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) {
+        const real = realInside(root, full);
+        if (!real) continue;
+        walk(real, depth + 1);
+        continue;
+      }
+      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+      if (depth === 0 && entry.name === "SKILL.md") continue;
+      const real = realInside(root, full);
+      if (!real || !statSync(real).isFile()) {
+        diagnostics.push({
+          severity: "warning",
+          code: "plugin.resource-denied",
+          message: `Denied resource outside the package: ${entry.name}`,
+          path: full,
+        });
+        continue;
+      }
+      const bytes = readFileSync(real);
+      if (bytes.includes(0)) continue;
+      const rel = relative(directory, real).split(sep).join("/");
+      if (!rel || rel.startsWith("..")) continue;
+      resources[rel] = bytes.toString("utf8");
+    }
+  };
+  walk(directory, 0);
+  return resources;
+}
+
+function loadMcp(
+  root: string,
+  pluginName: string,
+  diagnostics: PluginDiagnostic[]
+): Readonly<Record<string, McpServerManifest>> {
+  const location = join(root, "mcp.json");
+  if (!existsSync(location)) return {};
+  const real = realInside(root, location);
+  if (!real || !statSync(real).isFile()) {
+    diagnostics.push({
+      severity: "warning",
+      code: "plugin.mcp-invalid",
+      message: "mcp.json is not a file inside the package",
+      path: location,
+    });
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(real, "utf8"));
+  } catch {
+    diagnostics.push({
+      severity: "warning",
+      code: "plugin.mcp-invalid",
+      message: "mcp.json is not valid JSON",
+      path: location,
+    });
+    return {};
+  }
+  if (!isRecord(parsed) || Object.keys(parsed).some((key) => key !== "$schema" && key !== "mcpServers")) {
+    diagnostics.push({
+      severity: "warning",
+      code: "plugin.mcp-invalid",
+      message: "mcp.json must contain only $schema and mcpServers",
+      path: location,
+    });
+    return {};
+  }
+  if (parsed.$schema !== MCP_SCHEMA) {
+    diagnostics.push({
+      severity: "warning",
+      code: "plugin.mcp-invalid",
+      message: "mcp.json $schema does not match the plugin schema version",
+      path: location,
+    });
+    return {};
+  }
+  if (!isRecord(parsed.mcpServers)) {
+    diagnostics.push({
+      severity: "warning",
+      code: "plugin.mcp-invalid",
+      message: "mcp.json mcpServers must be an object",
+      path: location,
+    });
+    return {};
+  }
+  const pluginData = join(dirname(root), ".nylorun", "plugin-data", pluginName);
+  const servers: Record<string, McpServerManifest> = {};
+  for (const [name, value] of Object.entries(parsed.mcpServers)) {
+    const server = validateServer(name, value, root, pluginData);
+    if (!server) {
+      diagnostics.push({
+        severity: "warning",
+        code: "plugin.mcp-server-skipped",
+        message: `Skipped invalid MCP server '${name}'`,
+        path: location,
+      });
+      continue;
+    }
+    if (server.type === "stdio") mkdirSync(pluginData, { recursive: true });
+    servers[name] = server;
+  }
+  return servers;
+}
+
+function validateServer(
+  name: string,
+  value: unknown,
+  root: string,
+  pluginData: string
+): McpServerManifest | undefined {
+  if (!isRecord(value) || typeof value.type !== "string") return undefined;
+  if (value.type === "stdio") return validateStdio(name, value, root, pluginData);
+  if (value.type === "streamable-http" || value.type === "sse")
+    return validateRemote(name, value);
+  return undefined;
+}
+
+function validateStdio(
+  name: string,
+  value: Record<string, unknown>,
+  root: string,
+  pluginData: string
+): McpServerManifest | undefined {
+  const allowed = new Set(["type", "command", "args", "env", "cwd"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) return undefined;
+  if (typeof value.command !== "string" || !isCommandToken(value.command)) return undefined;
+  if (value.command.startsWith("./") && !commandStaysInside(root, value.command))
+    return undefined;
+  let args: string[] | undefined;
+  if (value.args !== undefined) {
+    if (!Array.isArray(value.args) || value.args.some((item) => typeof item !== "string"))
+      return undefined;
+    args = value.args;
+  }
+  let env: Record<string, string> | undefined;
+  if (value.env !== undefined) {
+    if (!isRecord(value.env)) return undefined;
+    env = {};
+    for (const [key, item] of Object.entries(value.env)) {
+      if (typeof item !== "string" || RESERVED_ENV.has(key)) return undefined;
+      env[key] = item;
+    }
+  }
+  let cwd: string | undefined;
+  if (value.cwd !== undefined) {
+    if (typeof value.cwd !== "string" || !isCwdForm(value.cwd)) return undefined;
+    const expanded = expandPluginPlaceholders(value.cwd, root, pluginData);
+    const absolute = expanded.startsWith("/") || /^[A-Za-z]:[\\/]/.test(expanded)
+      ? expanded
+      : resolve(root, expanded);
+    const boundary = value.cwd === "${PLUGIN_DATA}" || value.cwd.startsWith("${PLUGIN_DATA}/")
+      ? pluginData
+      : root;
+    if (!isInside(boundary, absolute)) return undefined;
+    cwd = value.cwd;
+  }
+  return {
+    name,
+    type: "stdio",
+    command: value.command,
+    ...(args === undefined ? {} : { args }),
+    ...(env === undefined ? {} : { env }),
+    ...(cwd === undefined ? {} : { cwd }),
+  };
+}
+
+function validateRemote(
+  name: string,
+  value: Record<string, unknown>
+): McpServerManifest | undefined {
+  const allowed = new Set(["type", "url", "headers"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) return undefined;
+  if (typeof value.url !== "string" || !isRemoteUrl(value.url)) return undefined;
+  let headers: Record<string, string> | undefined;
+  if (value.headers !== undefined) {
+    if (!isRecord(value.headers)) return undefined;
+    const seen = new Set<string>();
+    headers = {};
+    for (const [key, item] of Object.entries(value.headers)) {
+      if (typeof item !== "string" || !isHeaderName(key) || /[\r\n\0]/.test(item))
+        return undefined;
+      const folded = key.toLowerCase();
+      if (seen.has(folded)) return undefined;
+      seen.add(folded);
+      headers[key] = item;
+    }
+  }
+  return {
+    name,
+    type: value.type as "streamable-http" | "sse",
+    url: value.url,
+    ...(headers === undefined ? {} : { headers }),
+  };
+}
+
+function commandStaysInside(root: string, command: string): boolean {
+  const lexical = resolve(root, command);
+  if (!isInside(root, lexical)) return false;
+  return !existsSync(lexical) || realInside(root, lexical) !== undefined;
+}
+
+function isCommandToken(command: string): boolean {
+  if (!command || /\s/.test(command)) return false;
+  if (command.startsWith("./")) return !command.split("/").includes("..");
+  return !command.includes("/") && !command.includes("\\") && !command.includes("${");
+}
+
+function isCwdForm(cwd: string): boolean {
+  return (
+    cwd.startsWith("./") ||
+    cwd === "${PLUGIN_ROOT}" ||
+    cwd.startsWith("${PLUGIN_ROOT}/") ||
+    cwd === "${PLUGIN_DATA}" ||
+    cwd.startsWith("${PLUGIN_DATA}/")
+  );
+}
+
+function isRemoteUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.username || url.password || url.hash) return false;
+  if (url.protocol === "https:") return true;
+  if (url.protocol !== "http:") return false;
+  return isLoopback(url.hostname);
+}
+
+function isLoopback(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "::1") return true;
+  const match = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!match) return false;
+  return match.slice(1).every((part) => Number(part) <= 255);
+}
+
+function isHeaderName(name: string): boolean {
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
+}
+
+function isPluginName(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 64) return false;
+  if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value) && value.length !== 1)
+    return false;
+  if (value.length === 1) return /^[a-z0-9]$/.test(value);
+  return !value.includes("--") && !value.includes("..");
+}
+
+function realInside(root: string, candidate: string): string | undefined {
+  if (!existsSync(candidate)) return undefined;
+  try {
+    const real = realpathSync(candidate);
+    return isInside(root, real) ? real : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isInside(root: string, target: string): boolean {
+  const rel = relative(root, target);
+  return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function unquote(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  )
+    return trimmed.slice(1, -1);
+  return trimmed;
+}

@@ -71,7 +71,7 @@ No live provider requests, crash qualification, cross-runtime conformance or npm
 
 Tested local versions: harness **0.14.0-beta.3**, SDK **0.1.0-beta.1**, Runtime **0.5.0-beta**, Studio **0.5.0-beta**, creator **0.6.0-beta**. These are local candidate bytes, not republished versions. Changesets advance release versions and exact dependency pins before publication. Local artifact digests and browser screenshot are recorded under `.tmp/release-local/`. The verified local harness artifact SHA-256 is `f04f17322fab9b0cec5638e596de96817fd92acb8624cb4ae25f104ec3d5c7ee`.
 
-Cloud upgrades by installing published npm packages in its own repository. This OSS handoff does not track private vendor tarballs or digest sync. Package versions remain distinct from protocol 1, definition schema 2, hosted checkpoint 1 and engine hosted-1.
+Cloud upgrades by installing published npm packages in its own repository. This OSS handoff does not track private vendor tarballs or digest sync. Package versions remain distinct from protocol 1, definition schema 3, hosted checkpoint 1 and engine hosted-1.
 
 ## Remaining implementation and testing handoff
 

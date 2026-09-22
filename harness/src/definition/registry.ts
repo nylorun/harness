@@ -13,7 +13,7 @@ export class ToolRegistry {
 
   constructor(middleware: readonly BoundMiddleware[], snapshots?: readonly BoundToolDefinition[]) {
     for (const capability of middleware) {
-      for (const tool of capability.tools ?? []) {
+      for (const tool of [...(capability.tools ?? []), ...(capability.sessionTools ?? [])]) {
         const key = JSON.stringify([capability.id, tool.name]);
         if (this.tools.has(key) || this.owners.has(tool))
           throw new HarnessError(
