@@ -1,6 +1,6 @@
 {
   "name": "@nylorun/runtime",
-  "version": "0.6.0-beta",
+  "version": "0.7.0-beta",
   "description": "SQLite agent execution host and model providers.",
   "type": "module",
   "license": "Apache-2.0",
@@ -54,8 +54,8 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@earendil-works/pi-ai": "0.85.1",
     "@hono/node-server": "^2.1.1",
-    "@nylorun/harness": "0.15.0-beta",
-    "@nylorun/core": "0.1.1-beta"
+    "@nylorun/harness": "0.16.0-beta",
+    "@nylorun/core": "0.2.0-beta"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",

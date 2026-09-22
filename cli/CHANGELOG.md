@@ -1,5 +1,19 @@
 # @nylorun/cli
 
+## 0.1.2-beta
+
+### Patch Changes
+
+- 3a88f51: Ship Agent-Plugins (`plugin()` / `loadPlugin`), Skills (`load_skill` / skill resources), Runtime MCP pool + vault credentials, and manifest v3 capability fields. Validate completed tool `output` against the tool output schema so ordinary tools with `outputSchema` no longer false-fail as `tool.invalid-output`.
+- Pin agents to the tested release.
+- Pin runtime to the tested release.
+- Updated dependencies [3a88f51]
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+  - @nylorun/agents@0.3.0-beta
+  - @nylorun/runtime@0.7.0-beta
+
 ## 0.1.1-beta
 
 ### Patch Changes
