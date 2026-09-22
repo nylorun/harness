@@ -107,7 +107,8 @@ it("lets an agent executor finish an older action and fails a schema-breaking re
       });
       expect(listed.ok).toBe(true);
       pending = ((await listed.json()) as { actions: typeof pending }).actions;
-      if (!pending.length) await new Promise((resolve) => setTimeout(resolve, 20));
+      if (!pending.length)
+        await new Promise((resolve) => setTimeout(resolve, 20));
     }
     expect(pending).toHaveLength(1);
     expect(pending[0]?.manifestHash).toBe(definition.manifestHash);
@@ -122,7 +123,7 @@ it("lets an agent executor finish an older action and fails a schema-breaking re
           requestId: "claim-1",
           implementationVersion: "fixed",
         }),
-      },
+      }
     );
     expect(claim.ok).toBe(true);
     const claimed = (await claim.json()) as {
@@ -152,7 +153,9 @@ it("lets an agent executor finish an older action and fails a schema-breaking re
     const history = (await items.json()) as {
       items: { type: string; payload: { result?: unknown } }[];
     };
-    const completed = history.items.find((item) => item.type === "action.completed");
+    const completed = history.items.find(
+      (item) => item.type === "action.completed"
+    );
     expect(completed?.payload.result).toMatchObject({
       kind: "failed",
       code: "tool.invalid-output",
@@ -227,7 +230,7 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
             implementationVersion: "dev",
           }),
         })
-      ).ok,
+      ).ok
     ).toBe(true);
     expect(
       (
@@ -240,7 +243,7 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
             ownerUserId: "user",
           }),
         })
-      ).ok,
+      ).ok
     ).toBe(true);
     expect(
       (
@@ -254,7 +257,7 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
             content: "save a note",
           }),
         })
-      ).ok,
+      ).ok
     ).toBe(true);
 
     let pending: { actionId: string }[] = [];
@@ -263,11 +266,12 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
         headers: { authorization: executor.authorization },
       });
       pending = ((await listed.json()) as { actions: typeof pending }).actions;
-      if (!pending.length) await new Promise((resolve) => setTimeout(resolve, 20));
+      if (!pending.length)
+        await new Promise((resolve) => setTimeout(resolve, 20));
     }
     expect(pending).toHaveLength(1);
 
-    const claim = await (
+    const claim = (await (
       await fetch(`${runtime.url}/v1/actions/${pending[0]!.actionId}/claim`, {
         method: "POST",
         headers: executor,
@@ -276,7 +280,7 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
           implementationVersion: "dev",
         }),
       })
-    ).json() as { claimId: string; generation: number };
+    ).json()) as { claimId: string; generation: number };
 
     expect(
       (
@@ -295,7 +299,7 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
             },
           }),
         })
-      ).ok,
+      ).ok
     ).toBe(true);
 
     const history = (await (
@@ -305,7 +309,9 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
     ).json()) as {
       items: { type: string; payload: { result?: unknown } }[];
     };
-    const completed = history.items.find((item) => item.type === "action.completed");
+    const completed = history.items.find(
+      (item) => item.type === "action.completed"
+    );
     expect(completed?.payload.result).toEqual({
       kind: "completed",
       output: { saved: true },
