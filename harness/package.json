@@ -79,6 +79,6 @@
     "@nylorun/core": "0.1.1-beta"
   },
   "peerDependencies": {
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   }
 }
