@@ -44,13 +44,11 @@ export async function runProject(
   const credentials = await localCredentials();
   const version = process.env.NYLORUN_IMPLEMENTATION_VERSION ?? "dev";
   const scopes = agents.map((agent) => {
-    const key = JSON.stringify([agent.id, agent.hash, version]);
-    const token = (credentials.executors[key] ??=
+    const token = (credentials.executors[agent.id] ??=
       randomBytes(32).toString("hex"));
     return {
       token,
       agentId: agent.id,
-      manifestHash: agent.hash,
       implementationVersion: version,
     };
   });

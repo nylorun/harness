@@ -30,6 +30,8 @@ export const middleware = <T extends StepMiddleware>(value: T): T => value;
 /** Compose a reusable capability bundle (tools, instructions, optional dynamics). */
 export function capability<Info = unknown>(declaration: {
   readonly id: string;
+  readonly name?: string;
+  readonly description?: string;
   readonly tools?: readonly ToolDefinition<any, Info, any>[];
   readonly instructions?: string | readonly string[];
   readonly beforeModelCall?: import("../types/dynamics.js").BeforeModelCallFn<Info>;
@@ -47,6 +49,10 @@ export function capability<Info = unknown>(declaration: {
       : declaration.instructions;
   return {
     id: declaration.id,
+    ...(declaration.name === undefined ? {} : { name: declaration.name }),
+    ...(declaration.description === undefined
+      ? {}
+      : { description: declaration.description }),
     ...(declaration.tools === undefined ? {} : { tools: declaration.tools }),
     ...(instructions === undefined ? {} : { instructions }),
     ...(declaration.beforeModelCall === undefined

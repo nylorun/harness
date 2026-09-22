@@ -51,6 +51,7 @@
     "start": "node dist/core/main.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@earendil-works/pi-ai": "0.85.1",
     "@hono/node-server": "^2.1.1",
     "@nylorun/harness": "0.15.0-beta",

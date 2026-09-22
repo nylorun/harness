@@ -1,6 +1,6 @@
 import { openSession, setDefaultRuntime, listSessions, getSession, deleteSession } from "../src/session/api.js";
 import { describe, expect, it, vi } from "vitest";
-import { Agent, tool } from "@nylorun/core/define";
+import { Agent, hashManifest, tool } from "@nylorun/core/define";
 import { z } from "zod";
 import {
   Runtime,
@@ -17,7 +17,7 @@ describe("Runtime DX v5.6", () => {
       onModelCall: async () => "ok",
     });
     const document = await host.read("a", "s");
-    expect(document?.state?.manifestHash).toBe(agent.hash);
+    expect(document?.state?.manifestHash).toBe(hashManifest(agent.manifest));
     expect(document?.state?.manifestHash).toBeTruthy();
     await host.close();
   });
@@ -28,10 +28,10 @@ describe("Runtime DX v5.6", () => {
     const first = Agent({ id: "a", name: "A", instructions: "one" }).build();
     await host.submit(first, "s", "hi", { onModelCall: async () => "ok" });
     const saved = await store.get("a", "s");
-    expect(saved?.state?.manifestHash).toBe(first.hash);
+    expect(saved?.state?.manifestHash).toBe(hashManifest(first.manifest));
 
     const other = Agent({ id: "a", name: "A", instructions: "two" }).build();
-    expect(other.hash).not.toBe(first.hash);
+    expect(hashManifest(other.manifest)).not.toBe(hashManifest(first.manifest));
     await expect(
       new SessionHost(store).submit(other, "s", "again", {
         onModelCall: async () => "nope",

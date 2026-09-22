@@ -30,7 +30,7 @@ describe("DX v5.6 ergonomics", () => {
       ],
     });
     expect(agent.id).toBe("support");
-    expect(agent.manifest.schemaVersion).toBe(2);
+    expect(agent.manifest.manifestSchemaVersion).toBe(3);
     const extended = agent.use({ id: "extra", instructions: ["Extra."] });
     expect(extended).not.toBe(agent);
     expect(agent.build()).toBe(agent.build());
@@ -144,13 +144,13 @@ describe("DX v5.6 agent-as-JSON", () => {
       .build();
     const json = agent.toJSON();
     expect(json).not.toHaveProperty("model");
-    expect(hashManifest(json)).toBe(agent.hash);
+    expect(hashManifest(json)).toBe(hashManifest(agent.manifest));
     const implementations: Implementations = {
       agent: {},
       orders: { tools: { refund } },
     };
     const restored = Agent.from(json, implementations);
-    expect(restored.hash).toBe(agent.hash);
+    expect(hashManifest(restored.manifest)).toBe(hashManifest(agent.manifest));
     let calls = 0;
     const result = await runAgent(restored, {
       input: "go",
@@ -170,7 +170,7 @@ describe("DX v5.6 agent-as-JSON", () => {
     const state = {
       version: 1 as const,
       agentId: "a",
-      manifestHash: a.hash,
+      manifestHash: hashManifest(a.manifest),
       executionId: "execution_x",
       revision: 0,
       turnCount: 0,

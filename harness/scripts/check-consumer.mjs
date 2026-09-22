@@ -87,9 +87,10 @@ export function checkPackedConsumer(cache) {
     import { z } from 'zod';
     assert.equal('BuiltAgent' in api, false);
     const agent = api.Agent({ id: 'packed', name: 'Packed', outputSchema: z.object({ count: z.number() }) }).build();
-    assert.deepEqual(Object.keys(agent).sort(), ['hash', 'id', 'manifest', 'name', 'toJSON']);
-    assert.equal(typeof agent.hash, 'string');
-    assert.equal(agent.toJSON().schemaVersion, 2);
+    assert.deepEqual(Object.keys(agent).sort(), ['id', 'manifest', 'name', 'toJSON']);
+    assert.equal(agent.hash, undefined);
+    assert.equal(agent.toJSON().manifestSchemaVersion, 3);
+    assert.equal(agent.toJSON().capabilities[0].type, 'agent');
     const execution = await import('@nylorun/harness/run');
     const state = execution.createExecutionState(agent);
     const result = await execution.run({ binding: execution.bindingFromAgent(agent), state, input: 'go', onModelCall: async () => ({ output: [{type: 'json', value: {count: 1}}] }) });

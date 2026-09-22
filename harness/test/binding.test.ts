@@ -13,12 +13,12 @@ describe("build", () => {
     expect(agent.id).toBe("test");
     expect(agent.name).toBe("Test");
     expect(agent.manifest).toEqual({
-      schemaVersion: 2,
+      manifestSchemaVersion: 3,
       id: "test",
       name: "Test",
       capabilities: [
-        { id: "first", kind: "middleware", hasMiddleware: true },
-        { id: "second", kind: "middleware", hasMiddleware: true },
+        { id: "first", type: "agent" },
+        { id: "second", type: "agent" },
       ],
     });
     expect(agent.manifest).not.toHaveProperty("adapters");
@@ -45,16 +45,10 @@ describe("build", () => {
       .use({ id: "model", model: { id: "opus", controls: { temperature: 0.2 } } })
       .build();
     expect(agent.manifest).toEqual({
-      schemaVersion: 2,
+      manifestSchemaVersion: 3,
       id: "test",
       name: "Test",
-      capabilities: [
-        {
-          id: "model",
-          kind: "middleware",
-          hasMiddleware: false,
-        },
-      ],
+      capabilities: [{ id: "model", type: "agent" }],
     });
     expect(agent.manifest).not.toHaveProperty("model");
     expect(agent.manifest.capabilities[0]).not.toHaveProperty("model");
@@ -72,8 +66,7 @@ describe("build", () => {
     expect(agent.manifest.capabilities).toEqual([
       {
         id: "notes",
-        kind: "capability",
-        hasMiddleware: false,
+        type: "agent",
         instructions: ["Write notes."],
         tools: [{ name: "write_note", inputSchema: expect.any(Object) }],
       },
@@ -104,9 +97,9 @@ describe("build", () => {
       "named",
     ]);
     expect(agent.manifest.capabilities).toEqual([
-      { id: "middleware-1", kind: "middleware", hasMiddleware: true },
-      { id: "middleware-2", kind: "middleware", hasMiddleware: true },
-      { id: "named", kind: "middleware", hasMiddleware: true },
+      { id: "middleware-1", type: "agent" },
+      { id: "middleware-2", type: "agent" },
+      { id: "named", type: "agent" },
     ]);
   });
 
@@ -115,7 +108,7 @@ describe("build", () => {
     const builder = testAgent().use(id.value, async (_request, next) => next());
     id.value = "mutated";
     expect(builder.build().manifest.capabilities).toEqual([
-      { id: "original", kind: "middleware", hasMiddleware: true },
+      { id: "original", type: "agent" },
     ]);
   });
 
@@ -166,7 +159,7 @@ describe("build", () => {
       expect.objectContaining({ middlewareId: "agent", slot: "agent" }),
     );
     expect(agent.manifest.capabilities).toEqual([
-      { id: "agent", kind: "agent", hasMiddleware: false, instructions: ["Be concise."] },
+      { id: "agent", type: "agent", instructions: ["Be concise."] },
     ]);
     await session.stop();
   });
@@ -194,19 +187,18 @@ describe("build", () => {
     expect(agent.manifest.capabilities).toEqual([
       {
         id: "notes",
-        kind: "capability",
-        hasMiddleware: true,
+        type: "agent",
         tools: [{ name: "write_note", inputSchema: expect.any(Object) }],
       },
     ]);
   });
 
-  it("projects a raw middleware layer as id only besides kind flags", () => {
+  it("projects a raw middleware layer as id only", () => {
     const agent = testAgent()
       .use(async (_request, next) => next())
       .build();
     expect(agent.manifest.capabilities).toEqual([
-      { id: "middleware-1", kind: "middleware", hasMiddleware: true },
+      { id: "middleware-1", type: "agent" },
     ]);
   });
 

@@ -14,7 +14,7 @@ NYLORUN_SERVER_KEY='<separate-secret-at-least-16-characters>' npm start --worksp
 
 Default address: `http://127.0.0.1:8787`. `HOST`, `PORT`, and `NYLORUN_SQLITE_PATH` configure binding and storage. Missing server credentials fail startup. The default model is a credential-free scripted development response. It does not simulate conversations, tools or provider compatibility.
 
-`NYLORUN_EXECUTORS_JSON` is an array of `{token, agentId, manifestHash, implementationVersion}`. Each secret must differ from the application server key and every other executor token. The manifest hash is available from `@nylorun/core/compatibility` or saved definition registration. SDK clients use `NYLORUN_RUNTIME_URL`, `NYLORUN_SERVER_KEY`, and `NYLORUN_EXECUTOR_KEY`; runtime executor scope is configured explicitly, never broadened by client input.
+`NYLORUN_EXECUTORS_JSON` is an array of `{token, agentId, implementationVersion}`. Each secret must differ from the application server key and every other executor token. An optional `manifestHash` on an existing record is ignored and does not hide or reject work. SDK clients use `NYLORUN_RUNTIME_URL`, `NYLORUN_SERVER_KEY`, and `NYLORUN_EXECUTOR_KEY`; runtime executor scope is the agent id, never broadened by client input.
 
 For a model gateway, set `NYLORUN_MODEL_GATEWAY_URL`, `NYLORUN_MODEL_GATEWAY_KEY`, and `NYLORUN_MODEL`. The gateway receives `{model, call, context}` and returns a harness ModelCandidate or string. Provider credentials remain host configuration. The generic gateway requires an implementation of this envelope; it does not claim arbitrary provider wire compatibility. Alternatively supply a `ModelProvider` to `startRuntime`.
 
@@ -35,6 +35,8 @@ The session-first `/v1` API is specified in [HOST_CONTRACT.md](../harness/HOST_C
 SQLite transactions persist session checkpoints, command receipts, individual effects/actions, waits and canonical history. Actions are committed before notifications. Accepted execution is detached from HTTP request lifetime. Restart schedules persisted runnable sessions; model intents lacking recorded outcomes become uncertain. Expired customer claims become uncertain and are not automatically repeated. `GET /v1/sessions/:id` exposes waits, outstanding actions and uncertain effect summaries. Cancellation ends the current turn; a later message can start another turn from the state preceding the cancelled turn. Canonical events and uncertain external work remain inspectable. Reconciliation operations are not implemented in this pass.
 
 One process owns each SQLite database. A local PID lock rejects concurrent owners and recovers only when the recorded process no longer exists. Shared/network filesystems and multiple replicas are unsupported. Keep the database and its WAL/journal together; do not delete persisted effects separately from checkpoints. Invalid lock contents or PID reuse fail closed and require operator inspection. TLS and external ingress belong to deployment infrastructure.
+
+Vault credentials are a separate store from server tokens, executor tokens, and model provider keys. Each vault belongs to one `ownerUserId`. Secret values are encrypted with AES-256-GCM under a key-encryption key. Set `NYLORUN_VAULT_KEK` to 32 bytes encoded as base64, or allow the host to create `.nylorun/vault-kek` (mode 0600) on the first write. A database that already holds vault ciphertext will not open without that key. Reads of a vault or credential return metadata only.
 
 ## Local project workflow
 

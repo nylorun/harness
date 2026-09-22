@@ -26,6 +26,9 @@ export type {
   SessionCommand,
   Action,
   ActionOutcome,
+  CredentialInfo,
+  CredentialSelection,
+  VaultInfo,
 } from "@nylorun/core/contracts";
 export { AgentsClient, SessionClient, createClient } from "./client.js";
 export type { AgentSource, SessionView, CommandOptions } from "./client.js";
@@ -33,3 +36,9 @@ export { connectAgents } from "./executor.js";
 export type { ConnectOptions, AgentConnection } from "./executor.js";
 export { RuntimeError } from "./http.js";
 export type { Destination } from "./http.js";
+export { plugin } from "./plugins/plugin.js";
+export type { PluginCapability } from "./plugins/plugin.js";
+export { loadPlugin, PluginError } from "./plugins/load.js";
+export type { LoadedPlugin, PluginDiagnostic } from "./plugins/load.js";
+export { prepareStdioLaunch, expandPluginPlaceholders } from "./plugins/launch.js";
+export type { StdioLaunch } from "./plugins/launch.js";

@@ -6,6 +6,15 @@ import type {
   ModelConfigurationMutationOptions,
 } from "./model.js";
 import type { InputEvent, TranscriptEntry } from "./transcript.js";
+import type { McpServerManifest, SkillManifest } from "./manifest.js";
+
+/** Skill files held on the developer binding. Not a manifest field. */
+export interface SkillRecord {
+  readonly name: string;
+  readonly description: string;
+  readonly instructions: string;
+  readonly resources?: Readonly<Record<string, string>>;
+}
 import type { ContextItem, JsonObject, Tripwire } from "./shared.js";
 import type { AfterModelCallFn, BeforeModelCallFn } from "./dynamics.js";
 import type { Interaction, ToolDefinition, ToolResult } from "./tool.js";
@@ -84,8 +93,18 @@ export type CapabilityItems<Item> =
 
 export interface CapabilityDeclaration<Info = unknown> {
   readonly id: string;
+  readonly type?: "agent" | "agent-plugin";
+  readonly name?: string;
+  readonly description?: string;
+  readonly metadata?: JsonObject;
   readonly tools?: CapabilityItems<ToolDefinition<any, Info, any>>;
   readonly instructions?: CapabilityItems<string>;
+  readonly skills?: Readonly<Record<string, SkillManifest>>;
+  /** File contents for load_skill. Omitted from the manifest. */
+  readonly skillRecords?: Readonly<Record<string, SkillRecord>>;
+  readonly mcpServers?: Readonly<Record<string, McpServerManifest>>;
+  /** Resolved package directory. Not projected into the manifest. */
+  readonly pluginRoot?: string;
   /**
    * @deprecated Model resolution is Runtime-owned. Not projected into the harness manifest.
    * Kept for local middleware composition through 1.0.

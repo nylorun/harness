@@ -16,12 +16,16 @@ import {
 import { dirname } from "node:path";
 import {
   AgentManifestSchema,
+  CreateCredentialRequestSchema,
+  CreateVaultRequestSchema,
   PutAgentRequestSchema,
   PutSessionRequestSchema,
+  RotateCredentialRequestSchema,
   SessionCommandSchema,
   ActionClaimRequestSchema,
   ActionHeartbeatRequestSchema,
   type Action,
+  type CredentialSelection,
   type ExecutorScope,
   type SessionCommand,
   type LiveEvent,
@@ -30,18 +34,30 @@ import {
   createDurableCheckpoint,
   runDurable,
   type DurableCheckpoint,
+  type DurableSessionTool,
   type HostEffect,
   type EffectResolution,
 } from "@nylorun/harness/run";
 import { hashManifest } from "@nylorun/core/compatibility";
+import { schemaFromJSON, type AgentManifest, type JsonObject } from "@nylorun/core/define";
 import { Store, canonical } from "./store.js";
 import { scriptedModel, type ModelProvider } from "./provider.js";
+import { scrub } from "../redact.js";
+import { createKekFile, defaultKekPath, readVaultKek } from "../vault/kek.js";
+import { VaultError } from "../vault/error.js";
+import { VaultService, type AuthorizeResult } from "../vault/service.js";
+import { McpPool } from "../mcp/pool.js";
+import type { McpDiagnostic, McpSnapshot, McpToolRecord } from "../mcp/snapshot.js";
 export interface RuntimeOptions {
   sqlitePath: string;
   serverToken: string;
   executors: readonly (ExecutorScope & { token: string })[];
   model?: ModelProvider;
   leaseMs?: number;
+  /** 32-byte key, or base64 of that key. `null` disables env and file lookup. */
+  vaultKek?: Buffer | string | null;
+  vaultKekPath?: string;
+  vaultFetch?: typeof fetch;
 }
 interface Session {
   id: string;
@@ -59,6 +75,11 @@ interface Session {
   waits?: unknown;
   error?: string;
   creation: unknown;
+  vaultIds?: readonly string[];
+  credentialSelections?: readonly CredentialSelection[];
+  pluginRoots?: Readonly<Record<string, string>>;
+  mcpSnapshot?: McpSnapshot;
+  mcpDiagnostics?: readonly McpDiagnostic[];
 }
 class HttpError extends Error {
   constructor(
@@ -71,8 +92,80 @@ class HttpError extends Error {
 const fail = (status: number, message: string): never => {
   throw new HttpError(status, message);
 };
+function sessionToolsOf(
+  snapshot: McpSnapshot | undefined,
+): readonly DurableSessionTool[] | undefined {
+  if (!snapshot?.mcpTools.length) return undefined;
+  return snapshot.mcpTools.map((tool) => ({
+    capabilityId: tool.capabilityId,
+    name: tool.name,
+    ...(tool.description === undefined ? {} : { description: tool.description }),
+    inputSchema: tool.inputSchema,
+    ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
+  }));
+}
+function mcpToolOf(
+  session: Session,
+  capabilityId?: string,
+  toolName?: string,
+): McpToolRecord | undefined {
+  return session.mcpSnapshot?.mcpTools.find(
+    (tool) => tool.capabilityId === capabilityId && tool.name === toolName,
+  );
+}
+function pinnedTool(
+  manifest: AgentManifest,
+  capabilityId?: string,
+  toolName?: string,
+) {
+  const capability = manifest.capabilities.find((item) => item.id === capabilityId);
+  return capability?.tools?.find((tool) => tool.name === toolName);
+}
+function acceptedToolResult(
+  action: Action,
+  command: Extract<SessionCommand, { type: "action_result" }>,
+): Extract<SessionCommand, { type: "action_result" }> {
+  if (action.kind !== "tool" || !action.outputSchema) return command;
+  const value = command.outcome.value;
+  if (isFailedToolValue(value)) return command;
+  let matches = false;
+  try {
+    matches = schemaFromJSON(action.outputSchema as JsonObject).validate(value).ok;
+  } catch {
+    matches = false;
+  }
+  if (matches) return command;
+  return {
+    ...command,
+    outcome: {
+      ...command.outcome,
+      value: {
+        kind: "failed",
+        code: "tool.invalid-output",
+        message: "Tool result does not match the output schema stored on the action",
+      },
+    },
+  };
+}
+function isFailedToolValue(value: unknown): boolean {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { kind?: unknown }).kind === "failed"
+  );
+}
 const semantic = (value: any): string => {
   const { requestId: _, ...body } = value;
+  return canonical(body);
+};
+const sessionIdentity = (value: any): string => {
+  const {
+    requestId: _requestId,
+    vaultIds: _vaultIds,
+    credentialSelections: _selections,
+    ...body
+  } = value ?? {};
   return canonical(body);
 };
 const equals = (a: string, b: string) => {
@@ -82,10 +175,14 @@ const equals = (a: string, b: string) => {
 };
 export class CoreRuntime {
   private readonly store: Store;
+  private readonly vault: VaultService;
+  private kek: Buffer | undefined;
+  private readonly kekPath: string;
   private readonly running = new Map<string, AbortController>();
   private readonly pending = new Set<string>();
   private readonly observers = new Map<string, Set<ServerResponse>>();
   private readonly executors = new Set<ServerResponse>();
+  private readonly mcp: McpPool;
   private server?: Server;
   private closing = false;
   private readonly lockPath?: string;
@@ -109,12 +206,11 @@ export class CoreRuntime {
           e.token.length < 16 ||
           equals(e.token, options.serverToken) ||
           !e.agentId ||
-          !e.manifestHash ||
           !e.implementationVersion,
       )
     )
       throw new Error(
-        "Executor tokens require independent credentials and exact definition scope",
+        "Executor tokens require independent credentials and an agent id",
       );
     if (options.sqlitePath !== ":memory:") {
       mkdirSync(dirname(options.sqlitePath), { recursive: true });
@@ -138,12 +234,34 @@ export class CoreRuntime {
       writeFileSync(fd, String(process.pid));
       closeSync(fd);
     }
+    this.kekPath = options.vaultKekPath ?? defaultKekPath();
+    let store: Store | undefined;
     try {
-      this.store = new Store(options.sqlitePath);
+      store = new Store(options.sqlitePath);
+      this.kek = readVaultKek({
+        vaultKek: options.vaultKek,
+        vaultKekPath: this.kekPath,
+      });
+      if (store.credentialCount() > 0 && !this.kek)
+        throw new Error(
+          "Vault key-encryption key is required to open this database",
+        );
+      this.store = store;
     } catch (e) {
+      store?.db.close();
       if (this.lockPath) unlinkSync(this.lockPath);
       throw e;
     }
+    this.vault = new VaultService(
+      this.store.db,
+      (fn) => this.store.tx(fn),
+      () => this.ensureKek(),
+      options.vaultFetch ?? globalThis.fetch,
+    );
+    this.mcp = new McpPool({
+      dataDir: dirname(options.sqlitePath),
+      authorize: (sessionId, request) => this.authorize(sessionId, request),
+    });
     this.store.tx(() => {
       for (const effect of this.store.all("effects"))
         if (effect.status === "invoking") {
@@ -241,10 +359,13 @@ export class CoreRuntime {
     const controller = new AbortController();
     this.running.set(id, controller);
     try {
+      await this.prepareMcp(id, controller.signal);
+      const current = this.session(id);
       const result = await runDurable({
-        manifest: s.manifest,
-        checkpoint: s.checkpoint,
+        manifest: current.manifest,
+        checkpoint: current.checkpoint!,
         signal: controller.signal,
+        sessionTools: sessionToolsOf(current.mcpSnapshot),
         host: {
           resolveEffect: (e) => this.resolveEffect(e, controller.signal),
         },
@@ -352,7 +473,7 @@ export class CoreRuntime {
     request: HostEffect,
     signal: AbortSignal,
   ): Promise<EffectResolution> {
-    let invoke = false;
+    let invoke: "model" | "mcp" | undefined;
     let notify = false;
     let event: LiveEvent | undefined;
     const resolution = this.store.tx((): EffectResolution | undefined => {
@@ -377,14 +498,22 @@ export class CoreRuntime {
                   : "pending",
             };
       }
+      const mcpTool =
+        request.kind === "tool"
+          ? mcpToolOf(s, request.capabilityId, request.toolName)
+          : undefined;
       this.store.put("effects", request.effectId, {
         request,
-        status: request.kind === "model" ? "invoking" : "pending",
+        status: request.kind === "model" || mcpTool ? "invoking" : "pending",
       });
-      if (request.kind === "model") {
-        invoke = true;
+      if (request.kind === "model" || mcpTool) {
+        invoke = mcpTool ? "mcp" : "model";
         return undefined;
       }
+      const tool =
+        request.kind === "tool"
+          ? pinnedTool(s.manifest, request.capabilityId, request.toolName)
+          : undefined;
       const action: Action = {
         actionId: request.effectId,
         sessionId: request.sessionId,
@@ -395,6 +524,8 @@ export class CoreRuntime {
         kind: request.kind,
         capabilityId: request.capabilityId!,
         ...(request.toolName ? { toolName: request.toolName } : {}),
+        ...(tool?.inputSchema ? { inputSchema: tool.inputSchema } : {}),
+        ...(tool?.outputSchema ? { outputSchema: tool.outputSchema } : {}),
         input: request.input,
         context: request.context,
         status: "pending",
@@ -416,10 +547,10 @@ export class CoreRuntime {
     if (notify) this.notify();
     if (!invoke) return resolution!;
     try {
-      const value = await (this.options.model ?? scriptedModel())(
-        request,
-        signal,
-      );
+      const value =
+        invoke === "mcp"
+          ? await this.callMcpTool(request)
+          : await (this.options.model ?? scriptedModel())(request, signal);
       return this.store.tx(() => {
         const s = this.session(request.sessionId);
         if (
@@ -463,12 +594,7 @@ export class CoreRuntime {
     return executor;
   }
   private scoped(scope: ExecutorScope | "server", action: Action): void {
-    if (
-      scope === "server" ||
-      scope.agentId !== action.agentId ||
-      scope.manifestHash !== action.manifestHash ||
-      scope.implementationVersion !== action.implementationVersion
-    )
+    if (scope === "server" || scope.agentId !== action.agentId)
       fail(403, "Executor scope does not authorize this action");
   }
   private async body(request: IncomingMessage): Promise<unknown> {
@@ -485,22 +611,24 @@ export class CoreRuntime {
   }
   private command(
     id: string,
-    command: SessionCommand,
+    input: SessionCommand,
     scope: ExecutorScope | "server",
   ): unknown {
     let event: LiveEvent | undefined;
     let schedule = false;
     const response = this.store.tx(() => {
       const s = this.session(id);
-      const key = JSON.stringify([id, command.idempotencyKey]);
+      let command = input;
       if (command.type === "action_result") {
         const a =
           this.store.get<Action>("actions", command.actionId) ??
           fail(404, "Action not found");
         if (a.sessionId !== id) fail(403, "Action belongs to another session");
         this.scoped(scope, a);
+        command = acceptedToolResult(a, command);
       } else if (scope !== "server")
         fail(403, "Application credential required");
+      const key = JSON.stringify([id, command.idempotencyKey]);
       const existing = this.store.get("commands", key);
       if (existing) {
         if (semantic(existing.command) !== semantic(command))
@@ -661,7 +789,7 @@ export class CoreRuntime {
       return response;
     });
     if (event) this.publish(event);
-    if (command.type === "cancel") this.running.get(id)?.abort();
+    if (input.type === "cancel") this.running.get(id)?.abort();
     if (schedule) this.schedule(id);
     return response;
   }
@@ -744,11 +872,7 @@ export class CoreRuntime {
             actions: this.store
               .all<Action>("actions")
               .filter(
-                (a) =>
-                  a.status === "pending" &&
-                  a.agentId === scope.agentId &&
-                  a.manifestHash === scope.manifestHash &&
-                  a.implementationVersion === scope.implementationVersion,
+                (a) => a.status === "pending" && a.agentId === scope.agentId,
               ),
           });
         const actionId = path[2];
@@ -761,12 +885,7 @@ export class CoreRuntime {
             fail(404, "Action not found");
           this.scoped(scope, action);
           if (method === "POST" && path[3] === "claim") {
-            const claim = ActionClaimRequestSchema.parse(body);
-            if (
-              claim.manifestHash !== action.manifestHash ||
-              claim.implementationVersion !== action.implementationVersion
-            )
-              fail(409, "Definition mismatch");
+            ActionClaimRequestSchema.parse(body);
             if (
               action.status !== "pending" ||
               this.session(action.sessionId).status === "cancelled" ||
@@ -827,6 +946,8 @@ export class CoreRuntime {
             scope,
           ),
         );
+      if (path[1] === "vaults")
+        return json(await this.dispatchVault(scope, method, path, url, request));
       if (scope !== "server") fail(403, "Application credential required");
       if (path[1] === "agents" && path.length === 2 && method === "GET")
         return json({
@@ -882,14 +1003,26 @@ export class CoreRuntime {
         const id = path[2];
         if (method === "PUT" && path.length === 3) {
           const body = PutSessionRequestSchema.parse(await this.body(request));
+          const vaultIds = body.vaultIds ?? [];
+          const credentialSelections = body.credentialSelections ?? [];
           const result = this.store.tx(() => {
+            this.vault.assertAttachment(
+              body.ownerUserId,
+              vaultIds,
+              credentialSelections,
+            );
             const prior = this.store.get<Session>("sessions", id);
             if (prior) {
-              if (semantic(prior.creation) !== semantic(body))
+              if (sessionIdentity(prior.creation) !== sessionIdentity(body))
                 fail(
                   409,
                   "Session already exists with different creation parameters",
                 );
+              prior.vaultIds = vaultIds;
+              prior.credentialSelections = credentialSelections;
+              prior.creation = body;
+              this.store.put("sessions", id, prior);
+              this.vault.recordAttachment(id, vaultIds);
               return prior;
             }
             const definition =
@@ -906,8 +1039,12 @@ export class CoreRuntime {
               status: "idle",
               activeTurnId: null,
               creation: body,
+              vaultIds,
+              credentialSelections,
+              pluginRoots: definition.pluginRoots ?? {},
             };
             this.store.put("sessions", id, s);
+            this.vault.recordAttachment(id, vaultIds);
             return s;
           });
           return json(this.view(result));
@@ -941,7 +1078,7 @@ export class CoreRuntime {
         return;
       }
       const status =
-        error instanceof HttpError
+        error instanceof HttpError || error instanceof VaultError
           ? error.status
           : (error as any)?.name === "ZodError" ||
               (error as Error)?.message === "Invalid cursor"
@@ -969,6 +1106,10 @@ export class CoreRuntime {
       implementationVersion: s.implementationVersion,
       status: s.status,
       activeTurnId: s.activeTurnId,
+      vaultIds: s.vaultIds ?? [],
+      credentialSelections: s.credentialSelections ?? [],
+      mcpSnapshot: s.mcpSnapshot ?? null,
+      mcpDiagnostics: s.mcpDiagnostics ?? [],
       waits: Array.isArray(s.waits)
         ? s.waits.map((call: any) => ({
             invocationId: call.invocationId,
@@ -996,6 +1137,144 @@ export class CoreRuntime {
         })),
     };
   }
+  private async prepareMcp(id: string, signal: AbortSignal): Promise<void> {
+    const s = this.session(id);
+    const declared = s.manifest.capabilities.some(
+      (capability: { mcpServers?: object }) =>
+        capability.mcpServers !== undefined &&
+        Object.keys(capability.mcpServers).length > 0,
+    );
+    if (!declared) return;
+    if (!s.mcpSnapshot) {
+      const found = await this.mcp.discover({
+        sessionId: id,
+        manifest: s.manifest,
+        manifestHash: s.manifestHash,
+        pluginRoots: s.pluginRoots ?? {},
+        signal,
+      });
+      this.store.tx(() => {
+        const current = this.session(id);
+        if (current.mcpSnapshot) return;
+        current.mcpSnapshot = found.snapshot;
+        current.mcpDiagnostics = found.diagnostics;
+        this.store.put("sessions", id, current);
+      });
+      return;
+    }
+    const diagnostics = await this.mcp.reconnect({
+      sessionId: id,
+      manifest: s.manifest,
+      pluginRoots: s.pluginRoots ?? {},
+      tools: s.mcpSnapshot.mcpTools,
+      signal,
+    });
+    if (diagnostics.length === 0) return;
+    this.store.tx(() => {
+      const current = this.session(id);
+      const prior = [...(current.mcpDiagnostics ?? [])];
+      for (const item of diagnostics) {
+        const index = prior.findIndex(
+          (existing) =>
+            existing.capabilityId === item.capabilityId &&
+            existing.serverName === item.serverName,
+        );
+        if (index >= 0) prior[index] = item;
+        else prior.push(item);
+      }
+      current.mcpDiagnostics = prior;
+      this.store.put("sessions", id, current);
+    });
+  }
+  private async callMcpTool(request: HostEffect): Promise<unknown> {
+    const s = this.session(request.sessionId);
+    const tool = mcpToolOf(s, request.capabilityId, request.toolName);
+    if (!tool)
+      throw new Error(
+        `MCP tool '${request.toolName ?? ""}' is not in the session snapshot`,
+      );
+    return this.mcp.call({
+      sessionId: s.id,
+      capabilityId: tool.capabilityId,
+      serverName: tool.serverName,
+      serverToolName: tool.serverToolName,
+      args: request.input,
+      manifest: s.manifest,
+      pluginRoots: s.pluginRoots ?? {},
+    });
+  }
+  async authorize(
+    sessionId: string,
+    request: { url: string; serverName?: string },
+  ): Promise<AuthorizeResult> {
+    const s = this.session(sessionId);
+    const result = await this.vault.authorize({
+      sessionId,
+      vaultIds: s.vaultIds ?? [],
+      credentialSelections: s.credentialSelections ?? [],
+      url: request.url,
+      serverName: request.serverName,
+    });
+    if (result.status === "authorized") {
+      const token = result.headers.authorization.slice("Bearer ".length);
+      scrub({ authorization: result.headers.authorization, url: result.url }, [
+        token,
+      ]);
+    }
+    return result;
+  }
+  private ensureKek(): Buffer {
+    if (this.kek) return this.kek;
+    if (this.options.vaultKek === null)
+      throw new Error("Vault key-encryption key is required");
+    this.kek = createKekFile(this.kekPath);
+    return this.kek;
+  }
+  private async dispatchVault(
+    scope: ExecutorScope | "server",
+    method: string | undefined,
+    path: string[],
+    url: URL,
+    request: IncomingMessage,
+  ): Promise<unknown> {
+    if (scope !== "server") {
+      this.vault.reject(path.join("/"));
+      fail(403, "Application credential required");
+    }
+    if (path.length === 2 && method === "POST") {
+      const body = CreateVaultRequestSchema.parse(await this.body(request));
+      return this.vault.createVault(body);
+    }
+    if (path.length === 2 && method === "GET") {
+      const ownerUserId =
+        url.searchParams.get("ownerUserId") ??
+        fail(400, "ownerUserId is required");
+      return { vaults: this.vault.listVaults(ownerUserId) };
+    }
+    const vaultId = path[2];
+    if (!vaultId) fail(404, "Vault not found");
+    if (path.length === 3 && method === "GET") return this.vault.getVault(vaultId);
+    if (path.length === 3 && method === "DELETE")
+      return this.vault.deleteVault(vaultId);
+    if (path[3] !== "credentials") fail(404, "Route not found");
+    if (path.length === 4 && method === "POST") {
+      const body = CreateCredentialRequestSchema.parse(await this.body(request));
+      return this.vault.createCredential(vaultId, body);
+    }
+    if (path.length === 4 && method === "GET")
+      return { credentials: this.vault.listCredentials(vaultId) };
+    const credentialId = path[4];
+    if (!credentialId) fail(404, "Credential not found");
+    if (path.length === 5 && method === "GET")
+      return this.vault.getCredential(vaultId, credentialId);
+    if (path.length === 5 && method === "POST") {
+      const body = RotateCredentialRequestSchema.parse(await this.body(request));
+      return this.vault.rotateCredential(vaultId, credentialId, body);
+    }
+    if (path.length === 5 && method === "DELETE")
+      return this.vault.deleteCredential(vaultId, credentialId);
+    fail(404, "Route not found");
+  }
   async listen(port = 8787, hostname = "127.0.0.1"): Promise<{ url: string }> {
     if (this.server) throw new Error("Already listening");
     this.server = createServer((q, s) => {
@@ -1014,6 +1293,7 @@ export class CoreRuntime {
     this.closing = true;
     clearInterval(this.timer);
     for (const c of this.running.values()) c.abort();
+    await this.mcp.close();
     for (const r of this.executors) r.end();
     for (const set of this.observers.values()) for (const r of set) r.end();
     if (this.server)

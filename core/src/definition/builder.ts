@@ -3,7 +3,7 @@ import type {
   CapabilityDeclaration,
   StepMiddleware,
 } from "../types/middleware.js";
-import type { BuildDiagnostic } from "../types/shared.js";
+import type { BuildDiagnostic, JsonObject } from "../types/shared.js";
 import { HarnessError } from "../errors.js";
 import type {
   ToolDefinition,
@@ -23,7 +23,9 @@ export interface AgentOptions<
 > {
   readonly outputSchema?: Schema;
   readonly id: string;
-  readonly name: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly metadata?: JsonObject;
   readonly instructions?: string | readonly string[];
   /** Top-level tools (H2). Composed as capability id `"agent"`. */
   readonly tools?: readonly ToolDefinition<any, any, any>[];
@@ -32,7 +34,9 @@ export interface AgentOptions<
 
 interface BuilderSnapshot {
   readonly id: string;
-  readonly name: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly metadata?: JsonObject;
   readonly outputSchema?: ToolSchemaSource;
   readonly entries: readonly BoundMiddleware[];
   readonly dynamics: ReadonlyMap<string, CapabilityDynamics>;
@@ -121,16 +125,12 @@ export class AgentBuilder<
     return this.#snapshot.id;
   }
 
-  get name(): string {
+  get name(): string | undefined {
     return this.#snapshot.name;
   }
 
   get manifest(): AgentManifest {
     return this.ensure().manifest;
-  }
-
-  get hash(): string {
-    return this.ensure().hash;
   }
 
   toJSON(): AgentManifest {
@@ -240,6 +240,8 @@ export class AgentBuilder<
       {
         id: this.#snapshot.id,
         name: this.#snapshot.name,
+        description: this.#snapshot.description,
+        metadata: this.#snapshot.metadata,
         outputSchema: this.#snapshot.outputSchema,
       },
       this.#snapshot.dynamics
@@ -278,7 +280,11 @@ function createSnapshot(
   }
   return {
     id: options.id,
-    name: options.name,
+    ...(options.name === undefined ? {} : { name: options.name }),
+    ...(options.description === undefined
+      ? {}
+      : { description: options.description }),
+    ...(options.metadata === undefined ? {} : { metadata: options.metadata }),
     outputSchema: options.outputSchema,
     entries: Object.freeze(entries),
     dynamics,

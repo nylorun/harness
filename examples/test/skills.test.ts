@@ -269,8 +269,6 @@ describe("skills()", () => {
       agent.manifest.capabilities.find((item) => item.id === "skills")
     ).toMatchObject({
       id: "skills",
-      kind: "capability",
-      hasMiddleware: false,
       instructions: [
         SKILLS_USAGE,
         expect.stringContaining("<name>structured-summary</name>"),

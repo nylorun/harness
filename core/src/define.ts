@@ -21,13 +21,17 @@ export type { Implementations } from "./definition/implementations.js";
 export type {
   AgentManifest,
   CapabilityManifest,
-  ManifestTool,
+  McpServerManifest,
+  RuntimeManifest,
+  SkillManifest,
+  ToolManifest,
   ManifestSchemaVersion,
 } from "./types/manifest.js";
 export type {
   CapabilityDeclaration,
   CapabilityItems,
   MiddlewareContributions,
+  SkillRecord,
   StepMiddleware,
   StepRequest,
   StepResponse,
@@ -130,6 +134,7 @@ export { bindTool } from "./definition/bind-tool.js";
 export { bindOutputContract } from "./definition/output-contract.js";
 export type { TurnOutputContract } from "./definition/output-contract.js";
 export { agentFrom } from "./definition/from.js";
+export type { SessionToolRef } from "./definition/from.js";
 export { schemaFromJSON } from "./definition/schema-json.js";
 export { normalizeSchema } from "./definition/schema.js";
 export * from "./utils/immutable.js";

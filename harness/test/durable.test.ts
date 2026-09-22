@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Agent } from "@nylorun/core/define";
+import { Agent, hashManifest } from "@nylorun/core/define";
 import {
   createDurableCheckpoint,
   runDurable,
@@ -75,4 +75,81 @@ describe("durable reconstruction", () => {
       expect(JSON.stringify(checkpoint)).toBe(original);
     },
   );
+
+  it("advertises session tools without changing the manifest hash", async () => {
+    const agent = Agent({ id: "durable", name: "Durable" })
+      .use({
+        id: "jobs",
+        tools: [{ name: "job", inputSchema: z.object({}), execute: async () => "unused" }],
+      })
+      .build();
+    const manifest = agent.manifest;
+    const checkpoint = createDurableCheckpoint({
+      manifest,
+      sessionId: "session",
+      turnId: "turn",
+      input: "go",
+    });
+    const names: string[][] = [];
+    const host: DurableHost = {
+      async resolveEffect(effect) {
+        if (effect.kind === "model") {
+          const call = effect.input as { tools?: { name: string }[]; prompt?: { kind?: string }[] };
+          names.push((call.tools ?? []).map((tool) => tool.name));
+          const last = call.prompt?.at(-1);
+          if (last?.kind === "tool-result")
+            return {
+              status: "completed",
+              outcome: { value: { output: [{ type: "text", text: "done" }] } },
+            };
+          return {
+            status: "completed",
+            outcome: {
+              value: {
+                output: [
+                  {
+                    type: "tool-call",
+                    id: "issue-call",
+                    name: "github__get_issue",
+                    args: { number: 7 },
+                  },
+                ],
+              },
+            },
+          };
+        }
+        expect(effect).toMatchObject({
+          kind: "tool",
+          capabilityId: "jobs",
+          toolName: "github__get_issue",
+          input: { number: 7 },
+        });
+        return {
+          status: "completed",
+          outcome: { value: { kind: "completed", output: { title: "bug" } } },
+        };
+      },
+    };
+    const result = await runDurable({
+      manifest,
+      checkpoint,
+      host,
+      sessionTools: [
+        {
+          capabilityId: "jobs",
+          name: "github__get_issue",
+          description: "Read an issue.",
+          inputSchema: {
+            type: "object",
+            properties: { number: { type: "integer" } },
+            required: ["number"],
+          },
+        },
+      ],
+    });
+    expect(result.status).toBe("completed");
+    expect(names[0]).toEqual(["job", "github__get_issue"]);
+    expect(JSON.stringify(manifest)).not.toContain("github__get_issue");
+    expect(checkpoint.manifestHash).toBe(hashManifest(manifest));
+  });
 });

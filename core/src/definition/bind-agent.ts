@@ -9,8 +9,6 @@ import { bindOutputContract } from "./output-contract.js";
 import type { AgentBinding } from "./binding.js";
 import type { CapabilityDynamics } from "./assemble.js";
 import type { Implementations } from "./implementations.js";
-import { hashManifest } from "../utils/hash.js";
-
 export function bindAgent(
   middleware: readonly BoundMiddleware[],
   manifest: AgentManifest,
@@ -21,7 +19,10 @@ export function bindAgent(
   const keys = new Set<string>();
   const tools: BoundToolDefinition[] = [];
   for (const declaration of middleware)
-    for (const tool of declaration.tools ?? []) {
+    for (const tool of [
+      ...(declaration.tools ?? []),
+      ...(declaration.sessionTools ?? []),
+    ]) {
       const key = JSON.stringify([declaration.id, tool.name]);
       if (seen.has(tool) || keys.has(key))
         throw new HarnessError(
@@ -50,7 +51,6 @@ export function bindAgent(
     id: manifest.id,
     name: manifest.name,
     manifest,
-    hash: hashManifest(manifest),
     toJSON: () => manifest,
   } as BuiltAgent;
   Object.defineProperty(agent, "getBinding", {

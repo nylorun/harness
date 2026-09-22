@@ -5,7 +5,7 @@ import {
   type Action,
 } from "@nylorun/core/contracts";
 import type { BuiltAgent } from "@nylorun/core/define";
-import type { AgentSource } from "./client.js";
+import { assertNoMiddlewareClosures, type AgentSource } from "./client.js";
 import {
   Transport,
   RuntimeError,
@@ -38,6 +38,7 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
   const agents = new Map<string, BuiltAgent>();
   for (const source of options.agents) {
     const built = source.build?.() ?? (source as BuiltAgent);
+    assertNoMiddlewareClosures(built);
     AgentManifestSchema.parse(built.manifest);
     if (agents.has(built.id))
       throw new Error(`Duplicate connected agent ${built.id}`);
@@ -79,13 +80,7 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
         for (const item of response.actions) {
           const action = ActionSchema.parse(item);
           const agent = agents.get(action.agentId);
-          if (
-            !agent ||
-            agent.hash !== action.manifestHash ||
-            action.implementationVersion !== version ||
-            action.status !== "pending" ||
-            active.has(action.actionId)
-          )
+          if (!agent || action.status !== "pending" || active.has(action.actionId))
             continue;
           const work = new AbortController();
           active.set(action.actionId, work);
@@ -125,17 +120,12 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
           "POST",
           {
             requestId: id(),
-            manifestHash: agent.hash,
             implementationVersion: version,
           },
           work.signal
         )
       );
-      if (
-        claim.action.actionId !== action.actionId ||
-        claim.action.manifestHash !== agent.hash ||
-        claim.action.implementationVersion !== version
-      )
+      if (claim.action.actionId !== action.actionId)
         throw new Error("Claim definition mismatch");
       let expires = Date.parse(claim.leaseExpiresAt);
       renewal = (async () => {

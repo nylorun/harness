@@ -68,6 +68,7 @@ export type { Implementations, ExecutionState, RunResult, RunOptions };
 export { createDurableCheckpoint, runDurable } from "./durable.js";
 export type {
   DurableCheckpoint,
+  DurableSessionTool,
   HostEffect,
   EffectResolution,
   DurableHost,

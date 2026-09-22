@@ -2,25 +2,36 @@ import type { BoundMiddleware } from "./bound.js";
 import type {
   AgentManifest,
   CapabilityManifest,
-  ManifestTool,
+  RuntimeManifest,
+  ToolManifest,
 } from "../types/manifest.js";
+import type { JsonObject } from "../types/shared.js";
 import type { ToolSchemaSource } from "../types/tool.js";
 import { bindOutputContract } from "./output-contract.js";
 import { normalizedSchemasFor } from "./schema.js";
 
-import { deepFreeze } from "../utils/immutable.js";
+import { copyJsonObject, deepFreeze } from "../utils/immutable.js";
 
 export function createManifest(input: {
   id: string;
-  name: string;
+  name?: string;
+  description?: string;
+  metadata?: JsonObject;
   outputSchema?: ToolSchemaSource;
+  runtime?: RuntimeManifest;
   middleware: readonly BoundMiddleware[];
 }): AgentManifest {
   const capabilities = input.middleware.map((item) => projectCapability(item));
   return deepFreeze({
-    schemaVersion: 2 as const,
+    manifestSchemaVersion: 3 as const,
     id: input.id,
-    name: input.name,
+    ...(input.name === undefined ? {} : { name: input.name }),
+    ...(input.description === undefined
+      ? {}
+      : { description: input.description }),
+    ...(input.metadata === undefined
+      ? {}
+      : { metadata: copyJsonObject(input.metadata, "metadata") }),
     ...(input.outputSchema === undefined
       ? {}
       : {
@@ -28,6 +39,7 @@ export function createManifest(input: {
             .jsonSchema,
         }),
     capabilities,
+    ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
   });
 }
 
@@ -35,34 +47,28 @@ function projectCapability(item: BoundMiddleware): CapabilityManifest {
   const contributions = item.contributions;
   return {
     id: item.id,
-    kind: capabilityKind(item),
-    hasMiddleware: item.hasMiddleware,
+    type: item.manifestType ?? "agent",
+    ...(item.name === undefined ? {} : { name: item.name }),
+    ...(item.description === undefined ? {} : { description: item.description }),
+    ...(item.metadata === undefined
+      ? {}
+      : { metadata: copyJsonObject(item.metadata, "metadata") }),
     ...(contributions?.instructions === undefined
       ? {}
       : { instructions: contributions.instructions }),
     ...(item.tools === undefined
       ? {}
       : { tools: item.tools.map((tool) => projectTool(tool)) }),
+    ...(item.skills === undefined ? {} : { skills: item.skills }),
+    ...(item.mcpServers === undefined ? {} : { mcpServers: item.mcpServers }),
     ...(item.beforeModelCall ? { beforeModelCall: true } : {}),
     ...(item.afterModelCall ? { afterModelCall: true } : {}),
-    // Deliberately omit capability.model from new manifests (Runtime-owned).
   };
-}
-
-function capabilityKind(item: BoundMiddleware): CapabilityManifest["kind"] {
-  if (item.id === "agent") return "agent";
-  if (
-    item.contributions !== undefined ||
-    item.beforeModelCall ||
-    item.afterModelCall
-  )
-    return "capability";
-  return "middleware";
 }
 
 function projectTool(
   tool: NonNullable<BoundMiddleware["tools"]>[number]
-): ManifestTool {
+): ToolManifest {
   const schemas = normalizedSchemasFor(tool);
   return {
     name: tool.name,
