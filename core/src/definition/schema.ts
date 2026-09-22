@@ -142,10 +142,13 @@ export function normalizeSchema<T>(
 }
 
 function normalizeZodSchema(
-  source: z.ZodType,
+  source: z.core.$ZodType,
   role: "input" | "output"
 ): ToolSchema<unknown> {
-  if (hasDeclaredAsyncWork(source))
+  // Classic parse/JSON Schema helpers are typed on ZodType; concrete schemas
+  // are $ZodType-compatible but may not assign to ZodType under zod 4.6+.
+  const classic = source as z.ZodType;
+  if (hasDeclaredAsyncWork(classic))
     throw new HarnessError(
       "tool.invalid-schema",
       "Tool schema must validate synchronously"
@@ -153,7 +156,7 @@ function normalizeZodSchema(
   let jsonSchema: JsonObject;
   try {
     jsonSchema = copyJsonObject(
-      z.toJSONSchema(source, { target: "draft-07" }),
+      z.toJSONSchema(classic, { target: "draft-07" }),
       `tool.${role}Schema.jsonSchema`
     );
   } catch (error) {
@@ -167,7 +170,7 @@ function normalizeZodSchema(
     jsonSchema,
     validate(value: unknown): SchemaValidation<unknown> {
       try {
-        const result = source.safeParse(value);
+        const result = classic.safeParse(value);
         if (result.success) return { ok: true, value: result.data };
         return {
           ok: false,
@@ -303,7 +306,7 @@ function normalizeExplicitSchema(
   });
 }
 
-function isZodSchema(value: unknown): value is z.ZodType {
+function isZodSchema(value: unknown): value is z.core.$ZodType {
   return value instanceof z.ZodType;
 }
 
