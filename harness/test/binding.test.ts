@@ -107,9 +107,7 @@ describe("build", () => {
     const id = { value: "original" };
     const builder = testAgent().use(id.value, async (_request, next) => next());
     id.value = "mutated";
-    expect(builder.build().manifest.capabilities).toEqual([
-      { id: "original", type: "agent" },
-    ]);
+    expect(builder.build().manifest.capabilities).toEqual([{ id: "original", type: "agent" }]);
   });
 
   it("hides internal model and tool registries", () => {
@@ -197,9 +195,7 @@ describe("build", () => {
     const agent = testAgent()
       .use(async (_request, next) => next())
       .build();
-    expect(agent.manifest.capabilities).toEqual([
-      { id: "middleware-1", type: "agent" },
-    ]);
+    expect(agent.manifest.capabilities).toEqual([{ id: "middleware-1", type: "agent" }]);
   });
 
   it("rejects a capability that reuses the reserved agent id", () => {

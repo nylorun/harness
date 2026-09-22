@@ -80,8 +80,7 @@ export async function applyBeforeModelCall(
           const declared = ctx.agent.manifest.capabilities
             .find((cap) => cap.id === id)
             ?.tools?.some((tool) => tool.name === name);
-          const owned =
-            declared || ctx.agent.implementations[id]?.tools?.[name] !== undefined;
+          const owned = declared || ctx.agent.implementations[id]?.tools?.[name] !== undefined;
           if (!owned)
             throw new HarnessError(
               "configuration.invalid",

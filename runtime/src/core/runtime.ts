@@ -39,7 +39,11 @@ import {
   type EffectResolution,
 } from "@nylorun/harness/run";
 import { hashManifest } from "@nylorun/core/compatibility";
-import { schemaFromJSON, type AgentManifest, type JsonObject } from "@nylorun/core/define";
+import {
+  schemaFromJSON,
+  type AgentManifest,
+  type JsonObject,
+} from "@nylorun/core/define";
 import { Store, canonical } from "./store.js";
 import { scriptedModel, type ModelProvider } from "./provider.js";
 import { scrub } from "../redact.js";
@@ -47,7 +51,11 @@ import { createKekFile, defaultKekPath, readVaultKek } from "../vault/kek.js";
 import { VaultError } from "../vault/error.js";
 import { VaultService, type AuthorizeResult } from "../vault/service.js";
 import { McpPool } from "../mcp/pool.js";
-import type { McpDiagnostic, McpSnapshot, McpToolRecord } from "../mcp/snapshot.js";
+import type {
+  McpDiagnostic,
+  McpSnapshot,
+  McpToolRecord,
+} from "../mcp/snapshot.js";
 export interface RuntimeOptions {
   sqlitePath: string;
   serverToken: string;
@@ -82,10 +90,7 @@ interface Session {
   mcpDiagnostics?: readonly McpDiagnostic[];
 }
 class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
+  constructor(readonly status: number, message: string) {
     super(message);
   }
 }
@@ -93,44 +98,55 @@ const fail = (status: number, message: string): never => {
   throw new HttpError(status, message);
 };
 function sessionToolsOf(
-  snapshot: McpSnapshot | undefined,
+  snapshot: McpSnapshot | undefined
 ): readonly DurableSessionTool[] | undefined {
   if (!snapshot?.mcpTools.length) return undefined;
   return snapshot.mcpTools.map((tool) => ({
     capabilityId: tool.capabilityId,
     name: tool.name,
-    ...(tool.description === undefined ? {} : { description: tool.description }),
+    ...(tool.description === undefined
+      ? {}
+      : { description: tool.description }),
     inputSchema: tool.inputSchema,
-    ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
+    ...(tool.outputSchema === undefined
+      ? {}
+      : { outputSchema: tool.outputSchema }),
   }));
 }
 function mcpToolOf(
   session: Session,
   capabilityId?: string,
-  toolName?: string,
+  toolName?: string
 ): McpToolRecord | undefined {
   return session.mcpSnapshot?.mcpTools.find(
-    (tool) => tool.capabilityId === capabilityId && tool.name === toolName,
+    (tool) => tool.capabilityId === capabilityId && tool.name === toolName
   );
 }
 function pinnedTool(
   manifest: AgentManifest,
   capabilityId?: string,
-  toolName?: string,
+  toolName?: string
 ) {
-  const capability = manifest.capabilities.find((item) => item.id === capabilityId);
+  const capability = manifest.capabilities.find(
+    (item) => item.id === capabilityId
+  );
   return capability?.tools?.find((tool) => tool.name === toolName);
 }
 function acceptedToolResult(
   action: Action,
-  command: Extract<SessionCommand, { type: "action_result" }>,
+  command: Extract<SessionCommand, { type: "action_result" }>
 ): Extract<SessionCommand, { type: "action_result" }> {
   if (action.kind !== "tool" || !action.outputSchema) return command;
   const value = command.outcome.value;
   if (isFailedToolValue(value)) return command;
+  // Executors wrap successful tool output as `{ kind: "completed", output }`.
+  // Validate the tool payload, not the outcome envelope.
+  const candidate = completedToolOutput(value);
   let matches = false;
   try {
-    matches = schemaFromJSON(action.outputSchema as JsonObject).validate(value).ok;
+    matches = schemaFromJSON(action.outputSchema as JsonObject).validate(
+      candidate
+    ).ok;
   } catch {
     matches = false;
   }
@@ -142,10 +158,23 @@ function acceptedToolResult(
       value: {
         kind: "failed",
         code: "tool.invalid-output",
-        message: "Tool result does not match the output schema stored on the action",
+        message:
+          "Tool result does not match the output schema stored on the action",
       },
     },
   };
+}
+function completedToolOutput(value: unknown): unknown {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { kind?: unknown }).kind === "completed" &&
+    "output" in (value as object)
+  ) {
+    return (value as { output: unknown }).output;
+  }
+  return value;
 }
 function isFailedToolValue(value: unknown): boolean {
   return (
@@ -206,11 +235,11 @@ export class CoreRuntime {
           e.token.length < 16 ||
           equals(e.token, options.serverToken) ||
           !e.agentId ||
-          !e.implementationVersion,
+          !e.implementationVersion
       )
     )
       throw new Error(
-        "Executor tokens require independent credentials and an agent id",
+        "Executor tokens require independent credentials and an agent id"
       );
     if (options.sqlitePath !== ":memory:") {
       mkdirSync(dirname(options.sqlitePath), { recursive: true });
@@ -244,7 +273,7 @@ export class CoreRuntime {
       });
       if (store.credentialCount() > 0 && !this.kek)
         throw new Error(
-          "Vault key-encryption key is required to open this database",
+          "Vault key-encryption key is required to open this database"
         );
       this.store = store;
     } catch (e) {
@@ -256,7 +285,7 @@ export class CoreRuntime {
       this.store.db,
       (fn) => this.store.tx(fn),
       () => this.ensureKek(),
-      options.vaultFetch ?? globalThis.fetch,
+      options.vaultFetch ?? globalThis.fetch
     );
     this.mcp = new McpPool({
       dataDir: dirname(options.sqlitePath),
@@ -269,7 +298,7 @@ export class CoreRuntime {
           this.store.put("effects", effect.request.effectId, effect);
           const s = this.store.get<Session>(
             "sessions",
-            effect.request.sessionId,
+            effect.request.sessionId
           );
           if (
             s &&
@@ -287,7 +316,7 @@ export class CoreRuntime {
     this.expireClaims();
     this.timer = setInterval(
       () => this.expireClaims(),
-      Math.min(options.leaseMs ?? 30000, 5000),
+      Math.min(options.leaseMs ?? 30000, 5000)
     );
     this.timer.unref();
     for (const s of this.store.all<Session>("sessions"))
@@ -303,7 +332,9 @@ export class CoreRuntime {
     for (const response of this.observers.get(event.sessionId) ?? [])
       this.send(
         response,
-        `id: ${event.cursor}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+        `id: ${event.cursor}\nevent: ${event.type}\ndata: ${JSON.stringify(
+          event
+        )}\n\n`
       );
   }
   private send(response: ServerResponse, data: string): void {
@@ -313,7 +344,7 @@ export class CoreRuntime {
     for (const response of this.executors)
       this.send(
         response,
-        'event: work_available\ndata: {"type":"work_available"}\n\n',
+        'event: work_available\ndata: {"type":"work_available"}\n\n'
       );
   }
   private expireClaims(): void {
@@ -336,7 +367,7 @@ export class CoreRuntime {
             events.push(
               this.store.event(s.id, s.activeTurnId, "action.uncertain", {
                 actionId: action.actionId,
-              }),
+              })
             );
           }
         }
@@ -384,8 +415,8 @@ export class CoreRuntime {
           current.status = resumeRequested
             ? "runnable"
             : current.status === "uncertain"
-              ? "uncertain"
-              : result.status;
+            ? "uncertain"
+            : result.status;
           current.waits = { effectIds: result.effectIds };
         } else if ("result" in result) {
           current.state =
@@ -396,7 +427,7 @@ export class CoreRuntime {
           this.store.put(
             "checkpoints",
             JSON.stringify([id, s.activeTurnId, result.checkpoint.segment]),
-            { checkpoint: result.checkpoint, status: result.status },
+            { checkpoint: result.checkpoint, status: result.status }
           );
           current.status = result.status;
           current.waits =
@@ -411,24 +442,24 @@ export class CoreRuntime {
             result.status === "completed"
               ? { output: (result.result as any).output }
               : result.status === "paused"
-                ? {
-                    interactions: ((result.result as any).pending ?? []).map(
-                      (call: any) => ({
-                        invocationId: call.invocationId,
-                        interaction: call.interaction,
-                        wait: call.wait,
-                        status: call.status,
-                      }),
-                    ),
-                  }
-                : result.status === "failed"
-                  ? {
-                      error: {
-                        code: (result.result as any).error?.code,
-                        message: (result.result as any).error?.message,
-                      },
-                    }
-                  : {},
+              ? {
+                  interactions: ((result.result as any).pending ?? []).map(
+                    (call: any) => ({
+                      invocationId: call.invocationId,
+                      interaction: call.interaction,
+                      wait: call.wait,
+                      status: call.status,
+                    })
+                  ),
+                }
+              : result.status === "failed"
+              ? {
+                  error: {
+                    code: (result.result as any).error?.code,
+                    message: (result.result as any).error?.message,
+                  },
+                }
+              : {}
           );
         }
         this.store.put("sessions", id, current);
@@ -449,7 +480,7 @@ export class CoreRuntime {
           this.store.put(
             "checkpoints",
             JSON.stringify([id, s.activeTurnId, current.checkpoint.segment]),
-            { checkpoint: current.checkpoint, status: "failed" },
+            { checkpoint: current.checkpoint, status: "failed" }
           );
         current.error = error instanceof Error ? error.message : String(error);
         this.store.put("sessions", id, current);
@@ -471,7 +502,7 @@ export class CoreRuntime {
   }
   private async resolveEffect(
     request: HostEffect,
-    signal: AbortSignal,
+    signal: AbortSignal
   ): Promise<EffectResolution> {
     let invoke: "model" | "mcp" | undefined;
     let notify = false;
@@ -588,7 +619,7 @@ export class CoreRuntime {
     const token = header?.startsWith("Bearer ") ? header.slice(7) : "";
     if (token && equals(token, this.options.serverToken)) return "server";
     const executor = this.options.executors.find(
-      (e) => token && equals(token, e.token),
+      (e) => token && equals(token, e.token)
     );
     if (!executor) return fail(401, "Invalid credentials");
     return executor;
@@ -612,7 +643,7 @@ export class CoreRuntime {
   private command(
     id: string,
     input: SessionCommand,
-    scope: ExecutorScope | "server",
+    scope: ExecutorScope | "server"
   ): unknown {
     let event: LiveEvent | undefined;
     let schedule = false;
@@ -737,7 +768,7 @@ export class CoreRuntime {
                 c.status === "interaction" &&
                 c.interaction?.id === command.interactionId &&
                 (command.type === "approve") ===
-                  (c.interaction?.kind === "approval"),
+                  (c.interaction?.kind === "approval")
             )
           )
             fail(409, "Unknown interaction");
@@ -766,7 +797,7 @@ export class CoreRuntime {
         this.store.put(
           "checkpoints",
           JSON.stringify([id, s.activeTurnId, s.checkpoint!.segment]),
-          { checkpoint: s.checkpoint, status: "runnable" },
+          { checkpoint: s.checkpoint, status: "runnable" }
         );
         s.status = "runnable";
         s.waits = undefined;
@@ -775,7 +806,7 @@ export class CoreRuntime {
           id,
           s.activeTurnId,
           `command.${command.type}`,
-          command,
+          command
         );
       }
       this.store.put("sessions", id, s);
@@ -796,7 +827,7 @@ export class CoreRuntime {
   private sse(
     request: IncomingMessage,
     response: ServerResponse,
-    set: Set<ServerResponse>,
+    set: Set<ServerResponse>
   ): void {
     response.writeHead(200, {
       "content-type": "text/event-stream",
@@ -808,7 +839,7 @@ export class CoreRuntime {
     set.add(response);
     const timer = setInterval(
       () => this.send(response, ": keepalive\n\n"),
-      15000,
+      15000
     );
     timer.unref();
     request.on("close", () => {
@@ -818,7 +849,7 @@ export class CoreRuntime {
   }
   private async handle(
     request: IncomingMessage,
-    response: ServerResponse,
+    response: ServerResponse
   ): Promise<void> {
     const json = (value: unknown, status = 200) => {
       response.writeHead(status, { "content-type": "application/json" });
@@ -845,7 +876,7 @@ export class CoreRuntime {
               modelConfigured: true,
             },
           },
-          this.closing ? 503 : 200,
+          this.closing ? 503 : 200
         );
       }
       const scope = this.scope(request);
@@ -859,7 +890,7 @@ export class CoreRuntime {
         this.sse(request, response, this.executors);
         this.send(
           response,
-          'event: work_available\ndata: {"type":"work_available"}\n\n',
+          'event: work_available\ndata: {"type":"work_available"}\n\n'
         );
         return;
       }
@@ -872,7 +903,7 @@ export class CoreRuntime {
             actions: this.store
               .all<Action>("actions")
               .filter(
-                (a) => a.status === "pending" && a.agentId === scope.agentId,
+                (a) => a.status === "pending" && a.agentId === scope.agentId
               ),
           });
         const actionId = path[2];
@@ -896,14 +927,14 @@ export class CoreRuntime {
             action.generation++;
             action.claimId = randomUUID();
             action.leaseExpiresAt = new Date(
-              Date.now() + (this.options.leaseMs ?? 30000),
+              Date.now() + (this.options.leaseMs ?? 30000)
             ).toISOString();
             this.store.put("actions", actionId, action);
             event = this.store.event(
               action.sessionId,
               action.turnId,
               "action.claimed",
-              { actionId, generation: action.generation },
+              { actionId, generation: action.generation }
             );
             return {
               action,
@@ -923,7 +954,7 @@ export class CoreRuntime {
             )
               fail(409, "Stale or expired claim");
             action.leaseExpiresAt = new Date(
-              Date.now() + (this.options.leaseMs ?? 30000),
+              Date.now() + (this.options.leaseMs ?? 30000)
             ).toISOString();
             this.store.put("actions", actionId, action);
             return { leaseExpiresAt: action.leaseExpiresAt };
@@ -943,22 +974,22 @@ export class CoreRuntime {
           this.command(
             path[2],
             SessionCommandSchema.parse(await this.body(request)),
-            scope,
-          ),
+            scope
+          )
         );
       if (path[1] === "vaults")
-        return json(await this.dispatchVault(scope, method, path, url, request));
+        return json(
+          await this.dispatchVault(scope, method, path, url, request)
+        );
       if (scope !== "server") fail(403, "Application credential required");
       if (path[1] === "agents" && path.length === 2 && method === "GET")
         return json({
-          agents: this.store
-            .all("definitions")
-            .map((d) => ({
-              agentId: d.manifest.id,
-              manifest: d.manifest,
-              manifestHash: d.manifestHash,
-              implementationVersion: d.implementationVersion,
-            })),
+          agents: this.store.all("definitions").map((d) => ({
+            agentId: d.manifest.id,
+            manifest: d.manifest,
+            manifestHash: d.manifestHash,
+            implementationVersion: d.implementationVersion,
+          })),
         });
       if (path[1] === "sessions" && path.length === 2 && method === "GET")
         return json({
@@ -967,7 +998,7 @@ export class CoreRuntime {
             .filter(
               (s) =>
                 !url.searchParams.has("agentId") ||
-                s.agentId === url.searchParams.get("agentId"),
+                s.agentId === url.searchParams.get("agentId")
             )
             .map((s) => ({
               id: s.id,
@@ -1009,14 +1040,14 @@ export class CoreRuntime {
             this.vault.assertAttachment(
               body.ownerUserId,
               vaultIds,
-              credentialSelections,
+              credentialSelections
             );
             const prior = this.store.get<Session>("sessions", id);
             if (prior) {
               if (sessionIdentity(prior.creation) !== sessionIdentity(body))
                 fail(
                   409,
-                  "Session already exists with different creation parameters",
+                  "Session already exists with different creation parameters"
                 );
               prior.vaultIds = vaultIds;
               prior.credentialSelections = credentialSelections;
@@ -1066,7 +1097,9 @@ export class CoreRuntime {
           for (const event of history.items)
             this.send(
               response,
-              `id: ${event.cursor}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+              `id: ${event.cursor}\nevent: ${
+                event.type
+              }\ndata: ${JSON.stringify(event)}\n\n`
             );
           return;
         }
@@ -1081,9 +1114,9 @@ export class CoreRuntime {
         error instanceof HttpError || error instanceof VaultError
           ? error.status
           : (error as any)?.name === "ZodError" ||
-              (error as Error)?.message === "Invalid cursor"
-            ? 400
-            : 500;
+            (error as Error)?.message === "Invalid cursor"
+          ? 400
+          : 500;
       json(
         {
           status: "rejected",
@@ -1093,7 +1126,7 @@ export class CoreRuntime {
               ? "Runtime request failed"
               : (error as Error).message,
         },
-        status,
+        status
       );
     }
   }
@@ -1124,7 +1157,7 @@ export class CoreRuntime {
         .filter(
           (a) =>
             a.sessionId === s.id &&
-            !["completed", "cancelled"].includes(a.status),
+            !["completed", "cancelled"].includes(a.status)
         ),
       uncertainEffects: this.store
         .all("effects")
@@ -1142,7 +1175,7 @@ export class CoreRuntime {
     const declared = s.manifest.capabilities.some(
       (capability: { mcpServers?: object }) =>
         capability.mcpServers !== undefined &&
-        Object.keys(capability.mcpServers).length > 0,
+        Object.keys(capability.mcpServers).length > 0
     );
     if (!declared) return;
     if (!s.mcpSnapshot) {
@@ -1177,7 +1210,7 @@ export class CoreRuntime {
         const index = prior.findIndex(
           (existing) =>
             existing.capabilityId === item.capabilityId &&
-            existing.serverName === item.serverName,
+            existing.serverName === item.serverName
         );
         if (index >= 0) prior[index] = item;
         else prior.push(item);
@@ -1191,7 +1224,7 @@ export class CoreRuntime {
     const tool = mcpToolOf(s, request.capabilityId, request.toolName);
     if (!tool)
       throw new Error(
-        `MCP tool '${request.toolName ?? ""}' is not in the session snapshot`,
+        `MCP tool '${request.toolName ?? ""}' is not in the session snapshot`
       );
     return this.mcp.call({
       sessionId: s.id,
@@ -1205,7 +1238,7 @@ export class CoreRuntime {
   }
   async authorize(
     sessionId: string,
-    request: { url: string; serverName?: string },
+    request: { url: string; serverName?: string }
   ): Promise<AuthorizeResult> {
     const s = this.session(sessionId);
     const result = await this.vault.authorize({
@@ -1235,7 +1268,7 @@ export class CoreRuntime {
     method: string | undefined,
     path: string[],
     url: URL,
-    request: IncomingMessage,
+    request: IncomingMessage
   ): Promise<unknown> {
     if (scope !== "server") {
       this.vault.reject(path.join("/"));
@@ -1253,12 +1286,15 @@ export class CoreRuntime {
     }
     const vaultId = path[2];
     if (!vaultId) fail(404, "Vault not found");
-    if (path.length === 3 && method === "GET") return this.vault.getVault(vaultId);
+    if (path.length === 3 && method === "GET")
+      return this.vault.getVault(vaultId);
     if (path.length === 3 && method === "DELETE")
       return this.vault.deleteVault(vaultId);
     if (path[3] !== "credentials") fail(404, "Route not found");
     if (path.length === 4 && method === "POST") {
-      const body = CreateCredentialRequestSchema.parse(await this.body(request));
+      const body = CreateCredentialRequestSchema.parse(
+        await this.body(request)
+      );
       return this.vault.createCredential(vaultId, body);
     }
     if (path.length === 4 && method === "GET")
@@ -1268,7 +1304,9 @@ export class CoreRuntime {
     if (path.length === 5 && method === "GET")
       return this.vault.getCredential(vaultId, credentialId);
     if (path.length === 5 && method === "POST") {
-      const body = RotateCredentialRequestSchema.parse(await this.body(request));
+      const body = RotateCredentialRequestSchema.parse(
+        await this.body(request)
+      );
       return this.vault.rotateCredential(vaultId, credentialId, body);
     }
     if (path.length === 5 && method === "DELETE")
@@ -1286,7 +1324,9 @@ export class CoreRuntime {
     });
     const address = this.server.address();
     return {
-      url: `http://${hostname}:${typeof address === "object" && address ? address.port : port}`,
+      url: `http://${hostname}:${
+        typeof address === "object" && address ? address.port : port
+      }`,
     };
   }
   async close(): Promise<void> {
@@ -1312,7 +1352,7 @@ export function createRuntime(options: RuntimeOptions): CoreRuntime {
   return new CoreRuntime(options);
 }
 export async function startRuntime(
-  options: RuntimeOptions & { port?: number; hostname?: string },
+  options: RuntimeOptions & { port?: number; hostname?: string }
 ): Promise<CoreRuntime & { url: string }> {
   const runtime = createRuntime(options);
   try {
