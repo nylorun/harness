@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1-beta
+
+### Patch Changes
+
+- Update the tested Harness, SDK, Runtime, and Studio compatibility combination.
+
 ## 0.7.0-beta
 
 ### Minor Changes
