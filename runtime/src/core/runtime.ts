@@ -128,9 +128,14 @@ function acceptedToolResult(
   if (action.kind !== "tool" || !action.outputSchema) return command;
   const value = command.outcome.value;
   if (isFailedToolValue(value)) return command;
+  // Executors wrap successful tool output as `{ kind: "completed", output }`.
+  // Validate the tool payload, not the outcome envelope.
+  const candidate = completedToolOutput(value);
   let matches = false;
   try {
-    matches = schemaFromJSON(action.outputSchema as JsonObject).validate(value).ok;
+    matches = schemaFromJSON(action.outputSchema as JsonObject).validate(
+      candidate,
+    ).ok;
   } catch {
     matches = false;
   }
@@ -146,6 +151,18 @@ function acceptedToolResult(
       },
     },
   };
+}
+function completedToolOutput(value: unknown): unknown {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { kind?: unknown }).kind === "completed" &&
+    "output" in (value as object)
+  ) {
+    return (value as { output: unknown }).output;
+  }
+  return value;
 }
 function isFailedToolValue(value: unknown): boolean {
   return (
