@@ -1,10 +1,10 @@
 # OSS runtime implementation notes
 
-Historical core-pass record. The subsequent local release migrated CLI/creator/Studio and ran focused functional acceptance. See [the current repository handoff](../IMPLEMENTATION_HANDOFF.md) for up-to-date status. The build-only statements below describe the earlier pass.
+Historical core-pass record. The subsequent local release migrated CLI/creator/Studio and ran focused functional acceptance. The build-only statements below describe the earlier pass; prefer package READMEs and changelogs for current status.
 
 **Build/startup verification only; functional correctness and end-to-end behavior remain unverified.**
 
-New standalone implementation is `src/core/`, using `@nylorun/harness@0.14.0-beta.3` through the public workspace. Local candidate digests for this repo’s packs belong in the root handoff; Cloud upgrades via npm after publish, not via in-repo vendor artifacts. Node 24 is required for `node:sqlite`.
+New standalone implementation is `src/core/`, using `@nylorun/harness@0.14.0-beta.3` through the public workspace. Local candidate digests for this repo’s packs belong in release notes / changelogs; Cloud upgrades via npm after publish, not via in-repo vendor artifacts. Node 24 is required for `node:sqlite`.
 
 Built in this pass:
 
@@ -23,14 +23,14 @@ Pre-existing foundations: provider/media adapters, CLI launcher, Hono router, ol
 | Target area / milestone | Implementation status | Built evidence | Pending implementation | Verification required |
 |---|---|---|---|---|
 | M0 consolidate shared contracts / definition imports | Partial | Shared contracts and engine imports in core | Public legacy tooling migration and final cross-repo audit | Contract conformance; incompatible definition rejection |
-| M1 public execution API in both execution hosts | Built | runDurable and persisted individual model/tool/hook effects | See primary harness handoff for engine gaps | History, tools/hooks, schema/output and checkpoint behavior |
+| M1 public execution API in both execution hosts | Built | runDurable and persisted individual model/tool/hook effects | Engine gaps tracked in harness package docs | History, tools/hooks, schema/output and checkpoint behavior |
 | M2 customer tools and basic action recovery | Partial | SQLite transactions, commands, claims, history, SSE | Administrative reconciliation, scalable indexes and bounded history pagination | Command retries, duplicate outcomes, fencing, transaction/event ordering |
 | M3 durable session demonstration | Partial | Scoped SSE, lease renewal, uncertainty and startup runnable work | Reconciliation, timed sleep/wait-for wakeups, broader recovery acceptance | Reconnects, expiry, cancellation races, interrupted intents, approvals |
 | M4 coherent developer distribution | Deferred by scope | Existing build surfaces retained; standalone start added | Move CLI/starter/Studio to SDK and session-first host | New launch/package installation acceptance |
 | M5 portability and release discipline | Not started | Shared versions and manifest identity checked | Runtime conformance suite, checkpoint/session migration and support matrix | Cross-runtime behavior; migration/recovery gates |
 | M6 managed design-partner pilot | Deferred by scope | No managed operations added to OSS | Out of scope for this OSS repo | Not an OSS release gate |
 
-No milestone acceptance gate is marked complete by this table. The table maps the OSS portion of Target Architecture and Development Roadmap v1.1; the root handoff also covers shared harness and SDK work.
+No milestone acceptance gate is marked complete by this table. The table maps the OSS portion of Target Architecture and Development Roadmap v1.1; shared harness and SDK work are covered in their package docs.
 
 ## Run and verification
 
