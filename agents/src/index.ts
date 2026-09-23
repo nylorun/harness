@@ -56,3 +56,5 @@ export type {
   SkillsOptions,
   SkillDiagnostic,
 } from "./skills/index.js";
+export { mcp, McpError } from "./mcp/index.js";
+export type { McpCapability, McpOptions } from "./mcp/index.js";
