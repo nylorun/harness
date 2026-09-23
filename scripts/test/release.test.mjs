@@ -251,7 +251,7 @@ test("publication retries retain completed packages and never publish creator be
   );
 });
 
-test("release commit validation rejects unmerged or stale release plans", async () => {
+test("release commit validation accepts prepare commits and tips with an unchanged plan", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nylorun-release-git-"));
   const git = (args) => run("git", args, { cwd: directory, capture: true });
   try {
@@ -284,10 +284,8 @@ test("release commit validation rejects unmerged or stale release plans", async 
     const later = await commit("Unmerged");
     await assert.rejects(verifyReleaseCommit(directory, later));
     await git(["update-ref", "refs/remotes/origin/main", later]);
-    await assert.rejects(
-      verifyReleaseCommit(directory, later),
-      /must introduce or update/
-    );
+    // Tip that only changes scripts may finish publish when the plan is unchanged.
+    await verifyReleaseCommit(directory, later);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
