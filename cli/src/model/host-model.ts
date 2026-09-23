@@ -2,8 +2,18 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Credential } from "@earendil-works/pi-ai";
-import type { HostModelView } from "@nylorun/core/contracts";
 import { configureProvider, type PromptedModel } from "./configure.js";
+
+/** Wire shape from Runtime `/v1/host/model` (mirrors core HostModelView). */
+type HostModelView =
+  | { readonly configured: false }
+  | {
+      readonly configured: true;
+      readonly provider: string;
+      readonly model: string;
+      readonly authType: "api_key" | "oauth";
+      readonly baseUrl?: string;
+    };
 
 export async function getHostModel(
   runtimeUrl: string,

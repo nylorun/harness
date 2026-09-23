@@ -1,13 +1,13 @@
 import {
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   realpathSync,
   statSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { McpServerManifest, SkillRecord } from "@nylorun/core/define";
+import { loadSkillsFromDirectory } from "../skills/load.js";
 import { expandPluginPlaceholders } from "./launch.js";
 
 export const PLUGIN_SCHEMA =
@@ -29,7 +29,6 @@ const PLUGIN_FIELDS = new Set([
 ]);
 const AUTHOR_FIELDS = new Set(["name", "email", "url"]);
 const RESERVED_ENV = new Set(["PLUGIN_ROOT", "PLUGIN_DATA"]);
-const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export interface PluginDiagnostic {
   readonly severity: "info" | "warning";
@@ -178,120 +177,10 @@ function loadSkills(
     });
     return {};
   }
-  const skills: Record<string, SkillRecord> = {};
-  for (const entry of readdirSync(real, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-    const directory = join(real, entry.name);
-    const directoryReal = realInside(root, directory);
-    if (!directoryReal) {
-      diagnostics.push({
-        severity: "warning",
-        code: "plugin.skill-skipped",
-        message: `Skipped skill '${entry.name}' because its directory escapes the package`,
-        path: directory,
-      });
-      continue;
-    }
-    const skillFile = join(directoryReal, "SKILL.md");
-    if (!existsSync(skillFile)) continue;
-    const skillReal = realInside(root, skillFile);
-    if (!skillReal || !statSync(skillReal).isFile()) {
-      diagnostics.push({
-        severity: "warning",
-        code: "plugin.skill-skipped",
-        message: `Skipped skill '${entry.name}' because SKILL.md escapes the package`,
-        path: skillFile,
-      });
-      continue;
-    }
-    const parsed = parseSkill(readFileSync(skillReal, "utf8"), entry.name);
-    if (!parsed) {
-      diagnostics.push({
-        severity: "warning",
-        code: "plugin.skill-skipped",
-        message: `Skipped skill '${entry.name}' because SKILL.md is not a valid Agent Skill`,
-        path: skillFile,
-      });
-      continue;
-    }
-    if (skills[parsed.name]) {
-      diagnostics.push({
-        severity: "warning",
-        code: "plugin.skill-skipped",
-        message: `Skipped duplicate skill '${parsed.name}'`,
-        path: skillFile,
-      });
-      continue;
-    }
-    const resources = readResources(root, directoryReal, diagnostics);
-    skills[parsed.name] = {
-      name: parsed.name,
-      description: parsed.description,
-      instructions: parsed.instructions,
-      ...(Object.keys(resources).length === 0 ? {} : { resources }),
-    };
-  }
-  return skills;
-}
-
-function parseSkill(
-  text: string,
-  directoryName: string
-): { name: string; description: string; instructions: string } | undefined {
-  const match = /^-{3}\r?\n([\s\S]*?)\r?\n-{3}(?:\r?\n|$)/.exec(text);
-  if (!match) return undefined;
-  const fields: Record<string, string> = {};
-  for (const raw of (match[1] ?? "").split(/\r?\n/)) {
-    if (!raw.trim() || raw.trimStart().startsWith("#")) continue;
-    const line = /^([\w-]+)\s*:\s*(.*)$/.exec(raw);
-    if (!line || line[1] === "metadata") continue;
-    fields[line[1]!] = unquote(line[2] ?? "");
-  }
-  const name = fields.name?.trim() ?? "";
-  const description = fields.description?.trim() ?? "";
-  if (!name || !description || description.length > 1024) return undefined;
-  if (name.length > 64 || !SKILL_NAME.test(name) || name !== directoryName) return undefined;
-  return { name, description, instructions: text.slice(match[0].length).replace(/^\r?\n/, "") };
-}
-
-function readResources(
-  root: string,
-  directory: string,
-  diagnostics: PluginDiagnostic[]
-): Record<string, string> {
-  const resources: Record<string, string> = {};
-  const walk = (current: string, depth: number) => {
-    if (depth > 6) return;
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-      const full = join(current, entry.name);
-      if (entry.isDirectory()) {
-        const real = realInside(root, full);
-        if (!real) continue;
-        walk(real, depth + 1);
-        continue;
-      }
-      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
-      if (depth === 0 && entry.name === "SKILL.md") continue;
-      const real = realInside(root, full);
-      if (!real || !statSync(real).isFile()) {
-        diagnostics.push({
-          severity: "warning",
-          code: "plugin.resource-denied",
-          message: `Denied resource outside the package: ${entry.name}`,
-          path: full,
-        });
-        continue;
-      }
-      const bytes = readFileSync(real);
-      if (bytes.includes(0)) continue;
-      const rel = relative(directory, real).split(sep).join("/");
-      if (!rel || rel.startsWith("..")) continue;
-      resources[rel] = bytes.toString("utf8");
-    }
-  };
-  walk(directory, 0);
-  return resources;
+  return loadSkillsFromDirectory(real, diagnostics as never, {
+    boundary: root,
+    codePrefix: "plugin",
+  });
 }
 
 function loadMcp(
@@ -532,14 +421,4 @@ function isInside(root: string, target: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function unquote(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  )
-    return trimmed.slice(1, -1);
-  return trimmed;
 }
