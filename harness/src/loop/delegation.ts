@@ -1,4 +1,4 @@
-import { HarnessError } from "@nylorun/core/define";
+import { HarnessError, isHarnessError } from "@nylorun/core/define";
 import type {
   AgentRef,
   Delegate,
@@ -14,6 +14,7 @@ import { withNestedIds } from "../utils/ids.js";
 import { initializeExecutionState } from "./initial-state.js";
 import type { Invocation } from "./invocation.js";
 import { textFromOutput } from "./model/normalize.js";
+import { HostSuspension } from "./host-suspension.js";
 
 /** How one agent used as a tool is built and journaled. Durable hosts supply their own. */
 export interface DelegationHost {
@@ -88,33 +89,49 @@ export async function runDelegation(
   const host = invocation.delegation ?? localDelegation(options.onModelCall);
   await host.announce?.("started", ref, { task });
   invocation.observe({ type: "delegation.started", ...ids, attributes: { task } });
-  const child = host.child(delegate, ref);
-  const listener = options.onEvent;
-  const result = await withNestedIds(call.invocationId, () =>
-    execute(
-      child.definition,
-      {
-        input: task,
-        onModelCall: child.onModelCall,
-        signal,
-        ...(options.info === undefined ? {} : { info: options.info }),
-        state: initializeExecutionState(child.definition, {
-          executionId: `${invocation.state.executionId}/${call.invocationId}`,
-        }),
-        ...(listener ? { onEvent: (event) => listener({ ...event, agent: ref }) } : {}),
-      },
-      { delegated: ref },
-    ),
-  );
-  const outcome = settle(result);
+  let outcome: ToolOutcome;
+  let status: RunResult<JsonValue>["status"] = "failed";
+  try {
+    const child = host.child(delegate, ref);
+    const listener = options.onEvent;
+    const result = await withNestedIds(call.invocationId, () =>
+      execute(
+        child.definition,
+        {
+          input: task,
+          onModelCall: child.onModelCall,
+          signal,
+          ...(options.info === undefined ? {} : { info: options.info }),
+          state: initializeExecutionState(child.definition, {
+            executionId: `${invocation.state.executionId}/${call.invocationId}`,
+          }),
+          ...(listener ? { onEvent: (event) => listener({ ...event, agent: ref }) } : {}),
+        },
+        { delegated: ref },
+      ),
+    );
+    status = result.status;
+    outcome = settle(result);
+  } catch (cause) {
+    // Durable hosts suspend children mid-flight; that must escape to the parent journal.
+    if (cause instanceof HostSuspension) throw cause;
+    // Construction or setup failures still settle the journaled delegation; the parent
+    // sees the same failed tool result as an empty or crashed child.
+    if (isHarnessError(cause))
+      outcome = { kind: "failed", code: cause.code, message: cause.message };
+    else if (cause instanceof Error)
+      outcome = { kind: "failed", code: "delegation.failed", message: cause.message };
+    else
+      outcome = { kind: "failed", code: "delegation.failed", message: String(cause) };
+  }
   await host.announce?.("settled", ref, {
-    status: result.status,
+    status,
     outcome: outcome as unknown as JsonValue,
   });
   invocation.observe({
     type: "delegation.completed",
     ...ids,
-    status: result.status,
+    status,
     attributes:
       outcome.kind === "completed"
         ? {

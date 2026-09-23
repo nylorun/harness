@@ -293,3 +293,59 @@ it("fences a delegated agent's work when the session is cancelled", async () => 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+it("surfaces a child's empty answer as a failed tool result and filters history by path", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "delegation-fail-"));
+  const seen: { agent: string; prompt: Prompt }[] = [];
+  const model: ModelProvider = async (effect) => {
+    const prompt = (effect.input as { prompt?: Prompt }).prompt ?? [];
+    seen.push({ agent: effect.agent?.id ?? "root", prompt });
+    const step = prompt.filter((item) => item.kind === "tool-result").length;
+    if (effect.agent) {
+      const task = prompt.find((item) => item.kind === "message")?.content?.[0]?.text ?? "";
+      if (task === "A") return { output: [{ type: "text", text: "   " }] };
+      if (step === 0)
+        return {
+          output: [{ type: "tool-call", id: "c0", name: "search_orders", args: { query: task } }],
+        };
+      return { output: [{ type: "text", text: `answer ${task}` }] };
+    }
+    if (step === 0)
+      return {
+        output: [
+          { type: "tool-call", id: "p0-0", name: "researcher", args: { task: "A" } },
+          { type: "tool-call", id: "p0-1", name: "researcher", args: { task: "B" } },
+        ],
+      };
+    return { output: [{ type: "text", text: "done" }] };
+  };
+  const runtime = await boot(directory, model);
+  try {
+    const researcher = Agent({ id: "researcher", description: "Researches.", tools: [search] });
+    await start(runtime, Agent({ id: "bot", tools: [researcher] }).build().manifest);
+    const actions = await pendingActions(runtime, 1);
+    expect(actions).toHaveLength(1);
+    await complete(runtime, actions[0], `found ${actions[0].input.query}`);
+    const done = await until(runtime, ["completed", "failed", "uncertain"]);
+    expect(done.status).toBe("completed");
+
+    const last = seen.filter((item) => item.agent === "root").at(-1)!;
+    const text = JSON.stringify(last.prompt);
+    expect(text).toContain("answer B");
+    expect(text).toContain("finished without an answer");
+
+    const byPath = await items(runtime, "bot/researcher");
+    expect(byPath.length).toBeGreaterThan(0);
+    expect(byPath.every((item) => item.payload.agent?.path === "bot/researcher")).toBe(true);
+    const started = byPath.filter((item) => item.type === "delegation.started");
+    // Path filter matches every concurrent child that shares the path.
+    expect(started).toHaveLength(2);
+    const one = started[0]!.payload.agent.delegationId;
+    const byId = await items(runtime, one);
+    expect(byId.every((item) => item.payload.agent.delegationId === one)).toBe(true);
+    expect(byId.filter((item) => item.type === "delegation.started")).toHaveLength(1);
+  } finally {
+    await runtime.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
