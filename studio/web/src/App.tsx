@@ -13,6 +13,7 @@ import { ModelSettings } from "@/components/model-settings";
 import { AgentManifestPanel } from "@/components/agent-manifest-panel";
 import { EventDetails } from "@/components/event-details";
 import { EventTable } from "@/components/event-table";
+import { SessionModelPicker } from "@/components/session-model-picker";
 import {
   SidebarInset,
   SidebarProvider,
@@ -384,26 +385,31 @@ function SessionWorkspace({
           </div>
           <form
             onSubmit={submit}
-            className="flex shrink-0 gap-3 border-t p-3"
+            className="flex shrink-0 flex-col gap-2 border-t p-3"
           >
-            <textarea
-              aria-label="Message"
-              className="min-h-20 flex-1 resize-none rounded-md border bg-background p-3"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Look up order demo-123"
+            <SessionModelPicker
               disabled={busy || ["paused", "uncertain"].includes(status)}
             />
-            <Button
-              disabled={
-                busy ||
-                !content.trim() ||
-                ["paused", "uncertain"].includes(status)
-              }
-              type="submit"
-            >
-              Send
-            </Button>
+            <div className="flex gap-3">
+              <textarea
+                aria-label="Message"
+                className="min-h-20 flex-1 resize-none rounded-md border bg-background p-3"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="Look up order demo-123"
+                disabled={busy || ["paused", "uncertain"].includes(status)}
+              />
+              <Button
+                disabled={
+                  busy ||
+                  !content.trim() ||
+                  ["paused", "uncertain"].includes(status)
+                }
+                type="submit"
+              >
+                Send
+              </Button>
+            </div>
           </form>
         </section>
       </ResizablePanel>
