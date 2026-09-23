@@ -10,6 +10,7 @@ import { Tabs as TabsPrimitive } from "radix-ui";
 import { createClient } from "@nylorun/agents/client";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ModelSettings } from "@/components/model-settings";
+import { VaultModule } from "@/components/vault";
 import { AgentManifestPanel } from "@/components/agent-manifest-panel";
 import { EventDetails } from "@/components/event-details";
 import { EventTable } from "@/components/event-table";
@@ -110,6 +111,7 @@ function Workspace() {
         activeAgentId={agentId}
         activeSessionId={sessionId}
         settingsActive={location.pathname === "/settings"}
+        vaultActive={location.pathname === "/vault"}
       />
       <SidebarInset className="flex h-svh min-h-0 min-w-0 flex-col overflow-hidden">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
@@ -117,7 +119,9 @@ function Workspace() {
           <strong>
             {location.pathname === "/settings"
               ? "Model Settings"
-              : (agent?.name ?? "Nylorun Studio")}
+              : location.pathname === "/vault"
+                ? "Vault"
+                : (agent?.name ?? "Nylorun Studio")}
           </strong>
           <Badge variant="outline">Local beta</Badge>
           <Button
@@ -135,6 +139,8 @@ function Workspace() {
         )}
         {location.pathname === "/settings" ? (
           <ModelSettings />
+        ) : location.pathname === "/vault" ? (
+          <VaultModule />
         ) : agent && sessionId ? (
           <SessionWorkspace
             key={sessionId}
