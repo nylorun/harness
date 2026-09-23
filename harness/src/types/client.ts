@@ -4,7 +4,7 @@ import type { SavedToolCall } from "./execution.js";
 
 /**
  * Definition-parameterized client types (H11). Types only — harness does not implement Session.
- * Runtime imports these for `openSession` / stream typing later.
+ * Runtime imports these for session and stream typing.
  */
 
 export interface InputAccepted {

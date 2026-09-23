@@ -23,7 +23,7 @@ export function createManifest(input: {
 }): AgentManifest {
   const capabilities = input.middleware.map((item) => projectCapability(item));
   return deepFreeze({
-    manifestSchemaVersion: 3 as const,
+    manifestSchemaVersion: 4 as const,
     id: input.id,
     ...(input.name === undefined ? {} : { name: input.name }),
     ...(input.description === undefined
@@ -61,8 +61,12 @@ function projectCapability(item: BoundMiddleware): CapabilityManifest {
       : { tools: item.tools.map((tool) => projectTool(tool)) }),
     ...(item.skills === undefined ? {} : { skills: item.skills }),
     ...(item.mcpServers === undefined ? {} : { mcpServers: item.mcpServers }),
-    ...(item.beforeModelCall ? { beforeModelCall: true } : {}),
-    ...(item.afterModelCall ? { afterModelCall: true } : {}),
+    ...(item.sandbox === undefined
+      ? {}
+      : { sandbox: copyJsonObject(item.sandbox as unknown as JsonObject, "sandbox") }),
+    ...(item.hooks === undefined
+      ? {}
+      : { hooks: item.hooks.map((hook) => ({ at: hook.at, scope: hook.scope })) }),
   };
 }
 

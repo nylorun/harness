@@ -57,7 +57,7 @@ describe("starter template", () => {
       "8787"
     );
     expect(manifest.scripts.dev).toContain("--no-studio");
-    expect(manifest.scripts.start).toBe("nylorun start");
+    expect(manifest.scripts.start).toBe("nylorun serve");
   });
   it("renders ignore files under their real names so npm cannot drop them", async () => {
     const files = await starterFiles(compatibility, true);
@@ -157,7 +157,6 @@ it("renders a fresh project before installation and forwards browser choices", a
   expect(readme.startsWith("# demo\n")).toBe(true);
   expect(commands).toEqual([
     ["npm", ["install", "--yes"], "/workspace/demo"],
-    ["npm", ["run", "configure"], "/workspace/demo"],
     ["npm", ["run", "dev", "--", "--no-open"], "/workspace/demo"],
   ]);
 });
@@ -183,15 +182,14 @@ function fixture() {
 }
 const options = { directory: "my agent", studio: true, open: true, yes: false };
 
-it("rejects noninteractive creation before any writes or installation", async () => {
+it("starts development for a noninteractive create", async () => {
   const deps = fixture();
   deps.isInteractive = () => false;
-  await expect(createProject(options, compatibility, deps)).rejects.toThrow(
-    "--skip-config"
-  );
-  expect(deps.makeDirectory).not.toHaveBeenCalled();
-  expect(deps.write).not.toHaveBeenCalled();
-  expect(deps.run).not.toHaveBeenCalled();
+  await createProject(options, compatibility, deps);
+  expect(deps.run.mock.calls.map((call) => call[1])).toEqual([
+    ["install"],
+    ["run", "dev"],
+  ]);
 });
 
 it("stamps package name and README title from a sanitized directory", async () => {
@@ -200,11 +198,7 @@ it("stamps package name and README title from a sanitized directory", async () =
   deps.write = async (path, content) => {
     files.set(path, content);
   };
-  await createProject(
-    { ...options, yes: true, skipConfig: true },
-    compatibility,
-    deps
-  );
+  await createProject({ ...options, yes: true }, compatibility, deps);
   const packageJson = [...files.entries()].find(([path]) =>
     path.endsWith("/package.json")
   )![1];
@@ -215,22 +209,9 @@ it("stamps package name and README title from a sanitized directory", async () =
   expect(readme.startsWith("# my-agent\n")).toBe(true);
 });
 
-it("explicit skipping starts development without interactive configuration", async () => {
-  const deps = fixture();
-  deps.isInteractive = () => false;
-  await createProject({ ...options, skipConfig: true }, compatibility, deps);
-  expect(deps.run.mock.calls.map((call) => call[1])).toEqual([
-    ["install"],
-    ["run", "dev"],
-  ]);
-  expect(deps.log.mock.calls.flat().join("\n")).toContain(
-    "cd '/workspace/my agent'\nnpm run configure"
-  );
-});
-
 it.each([
   ["installation", 0, ["install"]],
-  ["configuration", 1, ["install", "run configure"]],
+  ["development", 1, ["install", "run dev"]],
 ])(
   "retains the project and does not advance after %s failure",
   async (_name, failAt, commands) => {
@@ -253,25 +234,25 @@ it.each([
   [{ status: 130 }, 130],
   [{ status: null, signal: "SIGTERM" as const }, 143],
 ])(
-  "preserves cancellation status and never starts development",
+  "preserves cancellation status and does not start development",
   async (result, exitCode) => {
     const deps = fixture();
-    deps.run.mockResolvedValueOnce({ status: 0 }).mockResolvedValueOnce(result);
+    deps.run.mockResolvedValueOnce(result);
     await expect(
       createProject(options, compatibility, deps)
     ).rejects.toMatchObject({ exitCode });
-    expect(deps.run).toHaveBeenCalledTimes(2);
+    expect(deps.run.mock.calls.map((call) => call[1])).toEqual([["install"]]);
     expect(deps.remove).not.toHaveBeenCalled();
   }
 );
 
-it("shows recovery instructions when spawning configure fails", async () => {
+it("shows recovery instructions when development fails to spawn", async () => {
   const deps = fixture();
   deps.run
     .mockResolvedValueOnce({ status: 0 })
     .mockRejectedValueOnce(new Error("spawn failed"));
   await expect(createProject(options, compatibility, deps)).rejects.toThrow(
-    "npm run configure\nnpm run dev"
+    "npm run dev"
   );
   expect(deps.run).toHaveBeenCalledTimes(2);
 });

@@ -7,7 +7,7 @@ try {
   await node("scripts/validate.mjs", ["build"]);
   await npm(["ci"], { cwd: join(root, "examples") });
   console.log(
-    "Ready. Run npm run configure, then npm run dev.",
+    "Ready. Run npm run dev. The first start stores the model provider in the Runtime vault.",
   );
 } catch (error) {
   console.error(error.message);

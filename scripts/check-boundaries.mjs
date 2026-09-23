@@ -10,6 +10,8 @@ const allowed = {
   studio: ["agents"],
   cli: ["agents", "runtime"],
 };
+// Sandbox substrate SDKs stay behind the backend adapter contract.
+const substrates = { runtime: ["microsandbox", "just-bash"] };
 const files = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
     e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]
@@ -53,6 +55,11 @@ export function checkBoundaries(name) {
           )
         )
           throw new Error(`${path} imports undeclared ${match[1]}`);
+      }
+      for (const substrate of substrates[name] ?? []) {
+        const pattern = new RegExp(`(?:from\\s*|import\\s*\\()["']${substrate}(?:/[^"']*)?["']`);
+        if (pattern.test(source) && !/[\\/]adapters[\\/]/.test(path.slice(join(root, name).length)))
+          throw new Error(`${path} imports ${substrate}; only adapters/ may import sandbox substrates`);
       }
       if (name === "core" && /(?:from\s*|import\s*\()["']node:/.test(source))
         throw new Error(`Core must remain portable: ${path}`);

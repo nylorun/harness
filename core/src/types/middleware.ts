@@ -6,7 +6,11 @@ import type {
   ModelConfigurationMutationOptions,
 } from "./model.js";
 import type { InputEvent, TranscriptEntry } from "./transcript.js";
-import type { McpServerManifest, SkillManifest } from "./manifest.js";
+import type {
+  McpServerManifest,
+  SandboxManifest,
+  SkillManifest,
+} from "./manifest.js";
 
 /** Skill files held on the developer binding. Not a manifest field. */
 export interface SkillRecord {
@@ -16,7 +20,7 @@ export interface SkillRecord {
   readonly resources?: Readonly<Record<string, string>>;
 }
 import type { ContextItem, JsonObject, Tripwire } from "./shared.js";
-import type { AfterModelCallFn, BeforeModelCallFn } from "./dynamics.js";
+import type { AfterHooks, BeforeHooks } from "./dynamics.js";
 import type { Interaction, ToolDefinition, ToolResult } from "./tool.js";
 
 interface StepRequestBase {
@@ -103,6 +107,8 @@ export interface CapabilityDeclaration<Info = unknown> {
   /** File contents for load_skill. Omitted from the manifest. */
   readonly skillRecords?: Readonly<Record<string, SkillRecord>>;
   readonly mcpServers?: Readonly<Record<string, McpServerManifest>>;
+  /** Runtime-owned sandbox requirements. Declare the built-in sandbox tools alongside it. */
+  readonly sandbox?: SandboxManifest;
   /** Resolved package directory. Not projected into the manifest. */
   readonly pluginRoot?: string;
   /**
@@ -110,10 +116,12 @@ export interface CapabilityDeclaration<Info = unknown> {
    * Kept for local middleware composition through 1.0.
    */
   readonly model?: ModelDirective;
-  /** @deprecated Prefer beforeModelCall / afterModelCall. Kept through 1.0. */
+  /** @deprecated Prefer before / after hooks. Kept through 1.0. */
   readonly middleware?: StepMiddleware<Info>;
-  readonly beforeModelCall?: BeforeModelCallFn<Info>;
-  readonly afterModelCall?: AfterModelCallFn<Info>;
+  /** Run before each turn or each model call (step). */
+  readonly before?: BeforeHooks<Info>;
+  /** Run after each model call (step) or after the turn's final answer. */
+  readonly after?: AfterHooks<Info>;
 }
 
 export interface MiddlewareContributions {

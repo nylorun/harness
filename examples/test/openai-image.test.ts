@@ -121,15 +121,16 @@ describe("OpenAI image integrations", () => {
       tools: [],
     };
     try {
-      vi.stubEnv("MODEL_PROVIDER_API_KEY", "test-provider-key");
       const adapter = piModel({
         root,
         media,
-        selection: {
+        readHostModel: () => ({
           provider: "custom",
           model: "vision-test",
-          custom: { baseUrl: "https://provider.example/v1" },
-        },
+          baseUrl: "https://provider.example/v1",
+          authType: "api_key",
+          credential: { type: "api_key", key: "test-provider-key" },
+        }),
       });
       await expect(adapter(call, context)).resolves.toMatchObject({
         output: [{ type: "text" }],

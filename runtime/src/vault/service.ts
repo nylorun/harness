@@ -5,7 +5,11 @@ import type {
   CreateVaultRequest,
   CredentialInfo,
   CredentialSelection,
+  HostModelProviderInfo,
+  HostModelView,
+  PutHostModelRequest,
   RotateCredentialRequest,
+  SelectHostModelRequest,
   VaultInfo,
 } from "@nylorun/core/contracts";
 import { canonical } from "../core/store.js";
@@ -15,9 +19,28 @@ import {
   VaultCryptoError,
 } from "./crypto.js";
 import { VaultError } from "./error.js";
+import { hostModelCatalog } from "../model/catalog.js";
 import { normalizeVaultUrl } from "./url.js";
 
 const REFRESH_SKEW_MS = 60_000;
+const HOST_VAULT_ID = "host";
+const HOST_MODEL_ID = "host-model";
+
+export type HostModelSecret = {
+  provider: string;
+  model: string;
+  baseUrl?: string;
+  authType: "api_key" | "oauth";
+  credential: {
+    type: "api_key" | "oauth";
+    key?: string;
+    env?: Record<string, string>;
+    refresh?: string;
+    access?: string;
+    expires?: number;
+    [key: string]: unknown;
+  };
+};
 
 type SecretPayload = {
   token?: string;
@@ -33,7 +56,7 @@ type CredentialRow = {
   id: string;
   vault_id: string;
   name: string;
-  type: "bearer" | "oauth";
+  type: "bearer" | "oauth" | "model";
   binding_json: string;
   expires_at: string | null;
   created_at: string;
@@ -101,7 +124,7 @@ export class VaultService {
   listVaults(ownerUserId: string): VaultInfo[] {
     const rows = this.db
       .prepare(
-        `SELECT id FROM vaults WHERE owner_user_id=? ORDER BY created_at, id`,
+        `SELECT id FROM vaults WHERE owner_user_id=? AND scope='user' ORDER BY created_at, id`,
       )
       .all(ownerUserId) as { id: string }[];
     return rows.map((row) => this.vaultInfo(row.id));
@@ -255,6 +278,8 @@ export class VaultService {
     for (const id of vaultIds) {
       const vault = this.vaultRow(id);
       if (!vault) throw new VaultError(404, "Vault not found");
+      if (vault.scope === "host")
+        throw new VaultError(400, "Host vault cannot be attached to a session");
       if (vault.owner_user_id !== ownerUserId)
         throw new VaultError(403, "Vault belongs to another user");
     }
@@ -379,6 +404,176 @@ export class VaultService {
       url,
       headers: { authorization: `Bearer ${token}` },
     };
+  }
+
+  getHostModel(): HostModelView {
+    const row = this.activeHostCredentialRow();
+    if (!row) return { configured: false };
+    const binding = modelBinding(row);
+    return {
+      configured: true,
+      provider: binding.provider,
+      model: binding.model,
+      authType: binding.authType,
+      ...(binding.baseUrl ? { baseUrl: binding.baseUrl } : {}),
+    };
+  }
+
+  listHostProviders(): { providers: HostModelProviderInfo[] } {
+    const active = this.activeProviderId();
+    const catalog = new Map(
+      hostModelCatalog().providers.map((provider) => [provider.id, provider.name]),
+    );
+    const providers = this.hostModelRows().map((row) => {
+      const binding = modelBinding(row);
+      return {
+        id: binding.provider,
+        name:
+          catalog.get(binding.provider) ??
+          (binding.provider === "custom"
+            ? "Custom OpenAI-compatible"
+            : binding.provider),
+        model: binding.model,
+        authType: binding.authType,
+        ...(binding.baseUrl ? { baseUrl: binding.baseUrl } : {}),
+        lastUpdated: row.rotated_at ?? row.created_at,
+        active: binding.provider === active,
+      };
+    });
+    providers.sort((left, right) => left.name.localeCompare(right.name));
+    return { providers };
+  }
+
+  putHostModel(body: PutHostModelRequest): HostModelView {
+    return this.tx(() =>
+      this.replay(`host-model:${body.idempotencyKey}`, body, () => {
+        this.validateHostModel(body);
+        this.ensureHostVault();
+        const credentialId = hostModelCredentialId(body.provider);
+        this.deleteHostProviderRows(body.provider);
+        const payload =
+          body.auth.type === "api_key"
+            ? {
+                apiKey: body.auth.key,
+                ...(body.auth.env ? { env: body.auth.env } : {}),
+              }
+            : { oauth: body.auth };
+        this.insertHostCredential({
+          id: credentialId,
+          provider: body.provider,
+          model: body.model,
+          baseUrl: body.baseUrl,
+          authType: body.auth.type,
+          payload,
+        });
+        this.setActiveProvider(body.provider);
+        this.audit({
+          actor: "application",
+          action: "rotate",
+          vaultId: HOST_VAULT_ID,
+          credentialId,
+          outcome: "rotated",
+        });
+        return this.getHostModel();
+      }),
+    );
+  }
+
+  selectHostModel(body: SelectHostModelRequest): HostModelView {
+    return this.tx(() =>
+      this.replay(`host-model-select:${body.idempotencyKey}`, body, () => {
+        this.validateHostModel(body);
+        const row = this.hostCredentialRowFor(body.provider);
+        if (!row)
+          throw new VaultError(404, "Model provider is not configured");
+        const binding = modelBinding(row);
+        const payload = this.readHostPayload(row, binding);
+        const credentialId = hostModelCredentialId(body.provider);
+        this.deleteHostProviderRows(body.provider);
+        this.insertHostCredential({
+          id: credentialId,
+          provider: body.provider,
+          model: body.model,
+          baseUrl: body.baseUrl,
+          authType: binding.authType,
+          payload,
+        });
+        this.setActiveProvider(body.provider);
+        this.audit({
+          actor: "application",
+          action: "rotate",
+          vaultId: HOST_VAULT_ID,
+          credentialId,
+          outcome: "rotated",
+        });
+        return this.getHostModel();
+      }),
+    );
+  }
+
+  readHostModel(): HostModelSecret | undefined {
+    const row = this.activeHostCredentialRow();
+    if (!row) return undefined;
+    const binding = modelBinding(row);
+    const payload = this.readHostPayload(row, binding);
+    const credential =
+      binding.authType === "oauth"
+        ? { type: "oauth" as const, ...payload.oauth }
+        : {
+            type: "api_key" as const,
+            key: payload.apiKey,
+            ...(payload.env ? { env: payload.env } : {}),
+          };
+    return {
+      provider: binding.provider,
+      model: binding.model,
+      ...(binding.baseUrl ? { baseUrl: binding.baseUrl } : {}),
+      authType: binding.authType,
+      credential,
+    };
+  }
+
+  updateHostCredential(credential: {
+    type: "api_key" | "oauth";
+    key?: string;
+    env?: Record<string, string>;
+    refresh?: string;
+    access?: string;
+    expires?: number;
+  }): void {
+    this.tx(() => {
+      const row = this.activeHostCredentialRow();
+      if (!row) throw new VaultError(404, "Model provider is not configured");
+      const binding = modelBinding(row);
+      const payload =
+        credential.type === "oauth"
+          ? { oauth: credential }
+          : {
+              apiKey: credential.key,
+              ...(credential.env ? { env: credential.env } : {}),
+            };
+      const aad = hostModelAad(binding.provider, binding.model);
+      const sealed = encryptSecret(
+        this.kek(),
+        aad,
+        Buffer.from(JSON.stringify(payload), "utf8"),
+      );
+      this.db
+        .prepare(
+          `UPDATE vault_credentials
+           SET type='model', binding_json=?, kek_id=?, nonce=?, ciphertext=?, wrapped_dek=?, rotated_at=?
+           WHERE id=?`,
+        )
+        .run(
+          JSON.stringify({ ...binding, authType: credential.type }),
+          sealed.kekId,
+          sealed.nonce,
+          sealed.ciphertext,
+          sealed.wrappedDek,
+          new Date().toISOString(),
+          row.id,
+        );
+    });
   }
 
   reject(route: string): void {
@@ -593,7 +788,7 @@ export class VaultService {
 
   private vaultInfo(id: string): VaultInfo {
     const row = this.vaultRow(id);
-    if (!row) throw new VaultError(404, "Vault not found");
+    if (!row || row.scope === "host") throw new VaultError(404, "Vault not found");
     return {
       id: row.id,
       name: row.name,
@@ -612,11 +807,12 @@ export class VaultService {
         owner_user_id: string;
         metadata_json: string | null;
         created_at: string;
+        scope: "user" | "host";
       }
     | undefined {
     return this.db
       .prepare(
-        `SELECT id, name, owner_user_id, metadata_json, created_at FROM vaults WHERE id=?`,
+        `SELECT id, name, owner_user_id, metadata_json, created_at, scope FROM vaults WHERE id=?`,
       )
       .get(id) as
       | {
@@ -625,8 +821,200 @@ export class VaultService {
           owner_user_id: string;
           metadata_json: string | null;
           created_at: string;
+          scope: "user" | "host";
         }
       | undefined;
+  }
+
+  private ensureHostVault(): void {
+    const existing = this.vaultRow(HOST_VAULT_ID);
+    if (existing?.scope === "host") return;
+    if (existing) throw new VaultError(409, "Host vault id is already used");
+    this.db
+      .prepare(
+        `INSERT INTO vaults(id,name,owner_user_id,metadata_json,created_at,scope) VALUES(?,?,?,?,?,?)`,
+      )
+      .run(
+        HOST_VAULT_ID,
+        "Host",
+        "host",
+        null,
+        new Date().toISOString(),
+        "host",
+      );
+  }
+
+  private validateHostModel(body: {
+    provider: string;
+    model: string;
+    baseUrl?: string;
+  }): void {
+    if (body.provider === "custom") {
+      if (!body.baseUrl)
+        throw new VaultError(
+          400,
+          "A base URL is required for a custom provider.",
+        );
+      let url: URL;
+      try {
+        url = new URL(body.baseUrl);
+      } catch {
+        throw new VaultError(400, "Base URL must be an HTTP(S) URL.");
+      }
+      if (!["http:", "https:"].includes(url.protocol))
+        throw new VaultError(400, "Base URL must be an HTTP(S) URL.");
+      return;
+    }
+    if (body.baseUrl)
+      throw new VaultError(
+        400,
+        "A base URL is only valid for a custom provider.",
+      );
+    const provider = hostModelCatalog().providers.find(
+      (item) => item.id === body.provider,
+    );
+    if (!provider) throw new VaultError(400, "Unknown model provider.");
+    if (!provider.models.some((item) => item.id === body.model))
+      throw new VaultError(400, "Unknown model.");
+  }
+
+  private insertHostCredential(input: {
+    id: string;
+    provider: string;
+    model: string;
+    baseUrl?: string;
+    authType: "api_key" | "oauth";
+    payload: HostSecretPayload;
+  }): void {
+    const aad = hostModelAad(input.provider, input.model);
+    const sealed = encryptSecret(
+      this.kek(),
+      aad,
+      Buffer.from(JSON.stringify(input.payload), "utf8"),
+    );
+    this.db
+      .prepare(
+        `INSERT INTO vault_credentials(
+          id, vault_id, name, type, binding_json, expires_at, created_at, rotated_at,
+          kek_id, nonce, ciphertext, wrapped_dek
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        input.id,
+        HOST_VAULT_ID,
+        input.provider,
+        "model",
+        JSON.stringify({
+          provider: input.provider,
+          model: input.model,
+          ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
+          authType: input.authType,
+        }),
+        null,
+        new Date().toISOString(),
+        null,
+        sealed.kekId,
+        sealed.nonce,
+        sealed.ciphertext,
+        sealed.wrappedDek,
+      );
+  }
+
+  private readHostPayload(
+    row: CredentialRow,
+    binding: ModelBinding,
+  ): HostSecretPayload {
+    const plaintext = decryptSecret(
+      this.kek(),
+      hostModelAad(binding.provider, binding.model),
+      Buffer.from(row.nonce),
+      Buffer.from(row.ciphertext),
+      Buffer.from(row.wrapped_dek),
+      row.kek_id,
+    );
+    try {
+      return JSON.parse(plaintext.toString("utf8")) as HostSecretPayload;
+    } finally {
+      plaintext.fill(0);
+    }
+  }
+
+  private hostModelRows(): CredentialRow[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT id, vault_id, name, type, binding_json, expires_at, created_at, rotated_at,
+                  kek_id, nonce, ciphertext, wrapped_dek
+           FROM vault_credentials WHERE vault_id=? AND type='model'
+           ORDER BY created_at, id`,
+        )
+        .all(HOST_VAULT_ID) as CredentialRow[]
+    ).filter((row) => {
+      try {
+        modelBinding(row);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  private hostCredentialRowFor(provider: string): CredentialRow | undefined {
+    const preferred = hostModelCredentialId(provider);
+    const rows = this.hostModelRows();
+    return (
+      rows.find((row) => row.id === preferred) ??
+      rows.find((row) => modelBinding(row).provider === provider)
+    );
+  }
+
+  private activeHostCredentialRow(): CredentialRow | undefined {
+    const active = this.activeProviderId();
+    if (!active) return undefined;
+    return this.hostCredentialRowFor(active);
+  }
+
+  private activeProviderId(): string | undefined {
+    const vault = this.vaultRow(HOST_VAULT_ID);
+    if (vault?.metadata_json) {
+      try {
+        const metadata = JSON.parse(vault.metadata_json) as {
+          activeProvider?: unknown;
+        };
+        if (
+          typeof metadata.activeProvider === "string" &&
+          metadata.activeProvider &&
+          this.hostCredentialRowFor(metadata.activeProvider)
+        )
+          return metadata.activeProvider;
+      } catch {
+        /* Fall through to the only configured provider. */
+      }
+    }
+    const rows = this.hostModelRows();
+    if (rows.length === 0) return undefined;
+    if (rows.length === 1) return modelBinding(rows[0]!).provider;
+    const legacy = rows.find((row) => row.id === HOST_MODEL_ID);
+    if (legacy) return modelBinding(legacy).provider;
+    return modelBinding(rows[0]!).provider;
+  }
+
+  private setActiveProvider(provider: string): void {
+    this.ensureHostVault();
+    this.db
+      .prepare(`UPDATE vaults SET metadata_json=? WHERE id=?`)
+      .run(JSON.stringify({ activeProvider: provider }), HOST_VAULT_ID);
+  }
+
+  private deleteHostProviderRows(provider: string): void {
+    const ids = this.hostModelRows()
+      .filter((row) => modelBinding(row).provider === provider)
+      .map((row) => row.id);
+    ids.push(hostModelCredentialId(provider));
+    for (const id of new Set(ids))
+      this.db
+        .prepare(`DELETE FROM vault_credentials WHERE id=? AND vault_id=?`)
+        .run(id, HOST_VAULT_ID);
   }
 
   private credentialInfo(vaultId: string, id: string): CredentialInfo {
@@ -643,7 +1031,10 @@ export class VaultService {
     };
   }
 
-  private credentialRow(vaultId: string, id: string): CredentialRow {
+  private credentialRow(
+    vaultId: string,
+    id: string,
+  ): CredentialRow & { type: "bearer" | "oauth" } {
     const row = this.db
       .prepare(
         `SELECT id, vault_id, name, type, binding_json, expires_at, created_at, rotated_at,
@@ -651,9 +1042,9 @@ export class VaultService {
          FROM vault_credentials WHERE id=? AND vault_id=?`,
       )
       .get(id, vaultId) as CredentialRow | undefined;
-    if (!row || (row.type !== "bearer" && row.type !== "oauth"))
+    if (!row || row.type === "model")
       throw new VaultError(404, "Credential not found");
-    return row;
+    return row as CredentialRow & { type: "bearer" | "oauth" };
   }
 
   private rowsForVault(vaultId: string): CredentialRow[] {
@@ -760,6 +1151,46 @@ function requireTimestamp(value: string): string {
   if (Number.isNaN(Date.parse(value)))
     throw new VaultError(400, "Credential expiry is invalid");
   return new Date(Date.parse(value)).toISOString();
+}
+
+type ModelBinding = {
+  provider: string;
+  model: string;
+  baseUrl?: string;
+  authType: "api_key" | "oauth";
+};
+
+type HostSecretPayload = {
+  apiKey?: string;
+  env?: Record<string, string>;
+  oauth?: HostModelSecret["credential"];
+};
+
+function modelBinding(row: CredentialRow): ModelBinding {
+  const binding = JSON.parse(row.binding_json) as ModelBinding;
+  if (!binding.provider || !binding.model || !binding.authType)
+    throw new VaultError(500, "Host model credential is unreadable");
+  return binding;
+}
+
+function hostModelCredentialId(provider: string): string {
+  if (!/^[a-zA-Z0-9._-]+$/.test(provider))
+    throw new VaultError(400, "Invalid provider id");
+  return `${HOST_MODEL_ID}:${provider}`;
+}
+
+function hostModelAad(provider: string, model: string): Buffer {
+  return Buffer.from(
+    canonical({
+      scope: "host",
+      vaultId: HOST_VAULT_ID,
+      credentialId: HOST_MODEL_ID,
+      type: "model",
+      provider,
+      model,
+    }),
+    "utf8",
+  );
 }
 
 function credentialAad(

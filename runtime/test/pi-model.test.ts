@@ -11,6 +11,30 @@ const selection = {
   model: "test-model",
   custom: { baseUrl: "https://provider.invalid/v1" },
 };
+const host = (
+  input: {
+    provider?: string;
+    model?: string;
+    key?: string;
+    baseUrl?: string;
+  } = {},
+) => {
+  const provider = input.provider ?? selection.provider;
+  return {
+    readHostModel: () => ({
+      provider,
+      model: input.model ?? selection.model,
+      ...(provider === "custom"
+        ? { baseUrl: input.baseUrl ?? selection.custom.baseUrl }
+        : {}),
+      authType: "api_key" as const,
+      credential: {
+        type: "api_key" as const,
+        key: input.key ?? "test-provider-secret",
+      },
+    }),
+  };
+};
 const signal = () => new AbortController().signal;
 const call: RuntimeModelCall = {
   sessionId: "test",
@@ -42,38 +66,33 @@ function response(delta: unknown, finishReason = "stop") {
     { headers: { "content-type": "text/event-stream" } },
   );
 }
-it.each([false, true])(
-  "calls a model without credential files (explicit selection: %s)",
-  async (explicit) => {
-    const root = await mkdtemp(join(tmpdir(), "pi-environment-"));
-    roots.push(root);
-    vi.stubEnv("MODEL_PROVIDER", explicit ? "invalid-provider" : "custom");
-    vi.stubEnv("MODEL", explicit ? "" : "test-model");
-    vi.stubEnv("MODEL_PROVIDER_BASE_URL", "https://provider.invalid/v1");
-    vi.stubEnv("MODEL_PROVIDER_API_KEY", "environment-key");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url, options) => {
-        expect(new Headers(options.headers).get("authorization")).toBe(
-          "Bearer environment-key",
-        );
-        return response({ role: "assistant", content: "environment response" });
-      }),
-    );
-    const adapter = piModel({ root, ...(explicit ? { selection } : {}) });
-    const result = await adapter(call, { signal: signal() });
-    expect(result.output).toEqual([
-      { type: "text", text: "environment response" },
-    ]);
-    expect(await readdir(root)).toEqual([]);
-  },
-);
+it("calls the provider with the host vault key and ignores the environment", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-environment-"));
+  roots.push(root);
+  vi.stubEnv("MODEL_PROVIDER_API_KEY", "environment-key");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url, options) => {
+      expect(new Headers(options.headers).get("authorization")).toBe(
+        "Bearer vault-key",
+      );
+      return response({ role: "assistant", content: "environment response" });
+    }),
+  );
+  const result = await piModel({ root, ...host({ key: "vault-key" }) })(call, {
+    signal: signal(),
+  });
+  expect(result.output).toEqual([
+    { type: "text", text: "environment response" },
+  ]);
+  expect(await readdir(root)).toEqual([]);
+});
 it("loads configuration lazily and reports missing setup only on invocation", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-lazy-"));
   roots.push(root);
   const adapter = piModel({ root });
   await expect(adapter(call, { signal: signal() })).rejects.toThrow(
-    "nylorun configure",
+    "Model provider is not configured",
   );
 });
 it("preserves context, assistant tool calls, tool results and model controls through the provider", async () => {
@@ -86,7 +105,7 @@ it("preserves context, assistant tool calls, tool results and model controls thr
       return response({ role: "assistant", content: "42" });
     }),
   );
-  const adapter = piModel({ selection });
+  const adapter = piModel(host());
   const result = await adapter(
     {
       ...call,
@@ -161,7 +180,7 @@ it("returns provider tool calls using the portable model contract", async () => 
     ),
   );
   expect(
-    await piModel({ selection })(call, { signal: signal() }),
+    await piModel(host())(call, { signal: signal() }),
   ).toMatchObject({
     finishReason: "tool-calls",
     output: [
@@ -180,7 +199,7 @@ it("honors cancellation before contacting a provider", async () => {
   const controller = new AbortController();
   controller.abort();
   await expect(
-    piModel({ selection })(call, { signal: controller.signal }),
+    piModel(host())(call, { signal: controller.signal }),
   ).rejects.toThrow();
   expect(fetch).not.toHaveBeenCalled();
 });
@@ -204,7 +223,9 @@ it("redacts credentials read from the vault in provider failures", async () => {
     ),
   );
   await expect(
-    piModel({ root, selection })(call, { signal: signal() }),
+    piModel({ root, ...host({ key: "vault-test-secret" }) })(call, {
+      signal: signal(),
+    }),
   ).rejects.toThrow("[redacted]");
 });
 it("keeps usage counters while redacting credential fields and inline images", () => {
@@ -268,9 +289,13 @@ it.each(["tool", "text", "reasoning"])(
         );
       }),
     );
-    const adapter = piModel({
-      selection: { provider: "google", model: "gemini-flash-latest" },
-    });
+    const adapter = piModel(
+      host({
+        provider: "google",
+        model: "gemini-flash-latest",
+        key: "test-google-secret",
+      }),
+    );
     const first = await adapter(call, { signal: signal() });
     const toolCall = first.output.find((part) => part.type === "tool-call");
     if (!toolCall || toolCall.type !== "tool-call")
@@ -294,9 +319,13 @@ it.each(["tool", "text", "reasoning"])(
       ],
     };
     // A fresh adapter and JSON round trip rule out hidden per-instance state.
-    await piModel({
-      selection: { provider: "google", model: "gemini-flash-latest" },
-    })(JSON.parse(JSON.stringify(nextCall)), { signal: signal() });
+    await piModel(
+      host({
+        provider: "google",
+        model: "gemini-flash-latest",
+        key: "test-google-secret",
+      }),
+    )(JSON.parse(JSON.stringify(nextCall)), { signal: signal() });
     expect(
       requests[1]?.contents.find((message) => message.role === "model")?.parts,
     ).toContainEqual({
@@ -313,9 +342,13 @@ it.each(["tool", "text", "reasoning"])(
         requests[1]?.contents.find((message) => message.role === "model")
           ?.parts[0],
       ).toEqual({ text: "", thought: true, thoughtSignature: "dGhpbmtpbmc=" });
-    await piModel({
-      selection: { provider: "google", model: "gemini-2.5-flash" },
-    })(nextCall, { signal: signal() });
+    await piModel(
+      host({
+        provider: "google",
+        model: "gemini-2.5-flash",
+        key: "test-google-secret",
+      }),
+    )(nextCall, { signal: signal() });
     expect(JSON.stringify(requests[2])).not.toContain("thoughtSignature");
   },
 );

@@ -48,6 +48,18 @@ const LABELS: Readonly<Record<string, string>> = {
   "effect.uncertain": "Effect uncertain",
 };
 
+/** Names what an action runs: `Hook · before step (a, b)` or `Tool · name`. */
+export function actionLabel(payload: Readonly<Record<string, unknown>>): string {
+  const hook = payload.hook as
+    | { at?: unknown; scope?: unknown; capabilityIds?: unknown }
+    | undefined;
+  if (hook && typeof hook === "object") {
+    const ids = Array.isArray(hook.capabilityIds) ? hook.capabilityIds.join(", ") : "";
+    return `Hook · ${String(hook.at)} ${String(hook.scope)}${ids ? ` (${ids})` : ""}`;
+  }
+  return `Tool · ${text(payload.toolName, text(payload.actionId, "action"))}`;
+}
+
 export function eventLabel(event: Pick<LiveEvent, "type">): string {
   return LABELS[event.type] ?? event.type.replaceAll(".", " ");
 }
@@ -79,7 +91,7 @@ export function eventSummary(event: Pick<LiveEvent, "type" | "payload">): string
     case "action.claimed":
     case "action.completed":
     case "action.uncertain": {
-      const name = text(payload.toolName, text(payload.actionId, "action"));
+      const name = actionLabel(payload);
       if (event.type === "action.pending")
         return `${name}: ${compact(payload.input)}`;
       if (event.type === "action.completed")

@@ -9,9 +9,12 @@ import {
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { createClient } from "@nylorun/agents/client";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ModelSettings } from "@/components/model-settings";
+import { VaultModule } from "@/components/vault";
 import { AgentManifestPanel } from "@/components/agent-manifest-panel";
 import { EventDetails } from "@/components/event-details";
 import { EventTable } from "@/components/event-table";
+import { SessionModelPicker } from "@/components/session-model-picker";
 import {
   SidebarInset,
   SidebarProvider,
@@ -25,6 +28,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import {
+  actionLabel,
   mergeStudioEvents,
   type StudioEvent,
 } from "@/event-presentation";
@@ -107,11 +111,19 @@ function Workspace() {
         connection={connection}
         activeAgentId={agentId}
         activeSessionId={sessionId}
+        settingsActive={location.pathname === "/settings"}
+        vaultActive={location.pathname === "/vault"}
       />
       <SidebarInset className="flex h-svh min-h-0 min-w-0 flex-col overflow-hidden">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
           <SidebarTrigger />
-          <strong>{agent?.name ?? "Nylorun Studio"}</strong>
+          <strong>
+            {location.pathname === "/settings"
+              ? "Model Settings"
+              : location.pathname === "/vault"
+                ? "Vault"
+                : (agent?.name ?? "Nylorun Studio")}
+          </strong>
           <Badge variant="outline">Local beta</Badge>
           <Button
             className="ml-auto"
@@ -126,7 +138,11 @@ function Workspace() {
             {error}
           </p>
         )}
-        {agent && sessionId ? (
+        {location.pathname === "/settings" ? (
+          <ModelSettings />
+        ) : location.pathname === "/vault" ? (
+          <VaultModule />
+        ) : agent && sessionId ? (
           <SessionWorkspace
             key={sessionId}
             agent={agent}
@@ -333,9 +349,7 @@ function SessionWorkspace({
                     open={event.type === "action.completed"}
                   >
                     <summary className="cursor-pointer text-sm font-medium">
-                      Tool ·{" "}
-                      {String(payload.toolName ?? payload.actionId ?? "action")}{" "}
-                      · {event.type.slice(7)}
+                      {actionLabel(payload)} · {event.type.slice(7)}
                     </summary>
                     <pre className="mt-2 overflow-auto whitespace-pre-wrap text-xs">
                       {pretty(
@@ -376,26 +390,31 @@ function SessionWorkspace({
           </div>
           <form
             onSubmit={submit}
-            className="flex shrink-0 gap-3 border-t p-3"
+            className="flex shrink-0 flex-col gap-2 border-t p-3"
           >
-            <textarea
-              aria-label="Message"
-              className="min-h-20 flex-1 resize-none rounded-md border bg-background p-3"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Look up order demo-123"
+            <SessionModelPicker
               disabled={busy || ["paused", "uncertain"].includes(status)}
             />
-            <Button
-              disabled={
-                busy ||
-                !content.trim() ||
-                ["paused", "uncertain"].includes(status)
-              }
-              type="submit"
-            >
-              Send
-            </Button>
+            <div className="flex gap-3">
+              <textarea
+                aria-label="Message"
+                className="min-h-20 flex-1 resize-none rounded-md border bg-background p-3"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="Look up order demo-123"
+                disabled={busy || ["paused", "uncertain"].includes(status)}
+              />
+              <Button
+                disabled={
+                  busy ||
+                  !content.trim() ||
+                  ["paused", "uncertain"].includes(status)
+                }
+                type="submit"
+              >
+                Send
+              </Button>
+            </div>
           </form>
         </section>
       </ResizablePanel>

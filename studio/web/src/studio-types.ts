@@ -1,3 +1,8 @@
+export type HookPoint = {
+  at: "before" | "after";
+  scope: "turn" | "step";
+};
+
 export type AgentManifest = {
   id: string;
   name: string;
@@ -5,6 +10,7 @@ export type AgentManifest = {
     capabilities: readonly {
       id: string;
       tools?: readonly { name: string; description?: string }[];
+      hooks?: readonly HookPoint[];
     }[];
   };
 };

@@ -5,13 +5,14 @@ import type {
   MiddlewareContributions,
   StepMiddleware,
 } from "../types/middleware.js";
-import type { AfterModelCallFn, BeforeModelCallFn } from "../types/dynamics.js";
+import type { AfterHooks, BeforeHooks } from "../types/dynamics.js";
+import { hooksFrom } from "./hooks.js";
 import type { ModelDirective } from "../types/model.js";
 
 export interface CompiledCapability {
   readonly bound: BoundMiddleware;
-  readonly beforeModelCall?: BeforeModelCallFn<any>;
-  readonly afterModelCall?: AfterModelCallFn<any>;
+  readonly before?: BeforeHooks<any>;
+  readonly after?: AfterHooks<any>;
   readonly middleware?: StepMiddleware<any>;
 }
 
@@ -21,6 +22,7 @@ export function compileDeclaration<State>(
   const tools = copyItems(declaration.tools, declaration.id);
   const instructions = copyItems(declaration.instructions, declaration.id);
   const model = declaration.model;
+  const hooks = hooksFrom(declaration.before, declaration.after);
   const contributions = snapshotContributions(
     instructions?.items,
     tools?.items,
@@ -49,8 +51,7 @@ export function compileDeclaration<State>(
       hasMiddleware: declaration.middleware !== undefined,
       tools: tools?.items,
       ...(contributions === undefined ? {} : { contributions }),
-      ...(declaration.beforeModelCall ? { beforeModelCall: true } : {}),
-      ...(declaration.afterModelCall ? { afterModelCall: true } : {}),
+      ...(hooks === undefined ? {} : { hooks }),
       ...(declaration.type === undefined ? {} : { manifestType: declaration.type }),
       ...(declaration.metadata === undefined
         ? {}
@@ -67,16 +68,15 @@ export function compileDeclaration<State>(
       Object.keys(declaration.mcpServers).length === 0
         ? {}
         : { mcpServers: declaration.mcpServers }),
+      ...(declaration.sandbox === undefined
+        ? {}
+        : { sandbox: declaration.sandbox }),
       ...(declaration.pluginRoot === undefined
         ? {}
         : { pluginRoot: declaration.pluginRoot }),
     },
-    ...(declaration.beforeModelCall
-      ? { beforeModelCall: declaration.beforeModelCall }
-      : {}),
-    ...(declaration.afterModelCall
-      ? { afterModelCall: declaration.afterModelCall }
-      : {}),
+    ...(declaration.before === undefined ? {} : { before: declaration.before }),
+    ...(declaration.after === undefined ? {} : { after: declaration.after }),
     ...(declaration.middleware ? { middleware: declaration.middleware } : {}),
   };
 }

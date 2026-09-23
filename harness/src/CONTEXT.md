@@ -14,7 +14,11 @@ tool snapshots, hooks and live schema validators. Functions in a binding stay lo
 **Loop**: The progression from model calls through tool outcomes to a final result
 or a durable wait. A supplied checkpoint is not mutated by a new invocation.
 
-**Step**: One model call together with its middleware and tool plan.
+**Step**: One model call together with its middleware, hooks and tool plan.
+
+**Hook**: Developer code the loop calls at a named point: `before` or `after`, scoped to
+a `turn` (once per turn) or a `step` (every model call). It returns data that the engine
+validates and applies. All capabilities registered at one point run as one host effect.
 
 **Host**: The OSS or Cloud runtime that owns persistence, scheduling,
 authentication and provider access around the shared engine.

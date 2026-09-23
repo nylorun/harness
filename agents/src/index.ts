@@ -18,6 +18,10 @@ export type {
   ToolOutcome,
   Patch,
   Decision,
+  TurnDecision,
+  HookScope,
+  BeforeHook,
+  AfterHook,
   JsonValue,
   JsonObject,
 } from "@nylorun/core/define";
@@ -42,3 +46,25 @@ export { loadPlugin, PluginError } from "./plugins/load.js";
 export type { LoadedPlugin, PluginDiagnostic } from "./plugins/load.js";
 export { prepareStdioLaunch, expandPluginPlaceholders } from "./plugins/launch.js";
 export type { StdioLaunch } from "./plugins/launch.js";
+export {
+  skills,
+  loadSkillsFromDirectory,
+  resolveSkillsRoot,
+  parseSkill,
+  SkillsError,
+  formatSkillCatalog,
+  SKILLS_USAGE,
+} from "./skills/index.js";
+export type {
+  SkillsCapability,
+  SkillsOptions,
+  SkillDiagnostic,
+} from "./skills/index.js";
+export { mcp, McpError } from "./mcp/index.js";
+export type { McpCapability, McpOptions } from "./mcp/index.js";
+export { sandbox, SandboxError } from "./sandbox/index.js";
+export type {
+  SandboxCapability,
+  SandboxCapabilityOptions,
+  SandboxOptions,
+} from "./sandbox/index.js";

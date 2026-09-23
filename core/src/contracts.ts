@@ -1,6 +1,14 @@
 /** Public wire contracts only. Never import checkpoint or engine modules here. */
 import { z } from "zod";
 import type { AgentManifest } from "./types/manifest.js";
+import {
+  SANDBOX_NETWORK_PRESETS,
+  SANDBOX_TOOL_NAMES,
+  isSandboxHostPattern,
+  parseSandboxDuration,
+  parseSandboxSize,
+} from "./utils/sandbox.js";
+import { hookListIssue } from "./definition/hooks.js";
 export type { AgentManifest } from "./types/manifest.js";
 export const PROTOCOL_VERSION = 1;
 export const RequestIdSchema = z.string().min(1);
@@ -40,6 +48,42 @@ const skillManifestSchema = z
     description: z.string().min(1),
   })
   .strict();
+const sandboxManifestSchema = z
+  .object({
+    image: z.string().min(1).optional(),
+    network: z
+      .object({
+        preset: z.enum(SANDBOX_NETWORK_PRESETS).optional(),
+        allow: z
+          .array(
+            z.string().refine(isSandboxHostPattern, {
+              message: "network.allow entries must be host names such as api.github.com or *.example.com",
+            })
+          )
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    resources: z
+      .object({
+        cpus: z.number().int().min(1).max(64).optional(),
+        memory: z
+          .string()
+          .refine((value) => parseSandboxSize(value) !== undefined, {
+            message: "resources.memory must be a size such as 512MiB or 2GiB",
+          })
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    idle: z
+      .string()
+      .refine((value) => parseSandboxDuration(value) !== undefined, {
+        message: "idle must be a duration such as 30s, 15m or 1h",
+      })
+      .optional(),
+  })
+  .strict();
 const toolManifestSchema = z
   .object({
     name: z.string().min(1),
@@ -48,9 +92,15 @@ const toolManifestSchema = z
     outputSchema: jsonObject.optional(),
   })
   .strict();
+const hookPointSchema = z
+  .object({
+    at: z.enum(["before", "after"]),
+    scope: z.enum(["turn", "step"]),
+  })
+  .strict();
 export const AgentManifestSchema = z
   .object({
-    manifestSchemaVersion: z.literal(3),
+    manifestSchemaVersion: z.literal(4),
     id: z.string().min(1),
     name: z.string().min(1).optional(),
     description: z.string().optional(),
@@ -68,8 +118,14 @@ export const AgentManifestSchema = z
           skills: z.record(z.string(), skillManifestSchema).optional(),
           tools: z.array(toolManifestSchema).optional(),
           mcpServers: z.record(z.string(), mcpServerSchema).optional(),
-          beforeModelCall: z.boolean().optional(),
-          afterModelCall: z.boolean().optional(),
+          sandbox: sandboxManifestSchema.optional(),
+          hooks: z
+            .array(hookPointSchema)
+            .optional()
+            .superRefine((hooks, ctx) => {
+              const issue = hooks === undefined ? undefined : hookListIssue(hooks);
+              if (issue) ctx.addIssue({ code: "custom", message: issue });
+            }),
         })
         .strict()
     ),
@@ -81,7 +137,23 @@ export const AgentManifestSchema = z
     const names = new Set<string>();
     const servers = new Set<string>();
     const skills = new Set<string>();
+    let sandboxes = 0;
     for (const capability of manifest.capabilities) {
+      if (capability.sandbox) {
+        sandboxes += 1;
+        if (sandboxes > 1)
+          ctx.addIssue({
+            code: "custom",
+            message: "At most one capability may declare a sandbox",
+          });
+        const declared = new Set((capability.tools ?? []).map((tool) => tool.name));
+        for (const name of SANDBOX_TOOL_NAMES)
+          if (!declared.has(name))
+            ctx.addIssue({
+              code: "custom",
+              message: `Sandbox capability '${capability.id}' must declare the built-in '${name}' tool`,
+            });
+      }
       if (ids.has(capability.id))
         ctx.addIssue({ code: "custom", message: "Duplicate capability id" });
       ids.add(capability.id);
@@ -248,6 +320,61 @@ export const RotateCredentialRequestSchema = z
 export type RotateCredentialRequest = z.infer<
   typeof RotateCredentialRequestSchema
 >;
+export const PutHostModelRequestSchema = z
+  .object({
+    ...vaultWriteBase,
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    baseUrl: z.string().min(1).optional(),
+    auth: z.discriminatedUnion("type", [
+      z
+        .object({
+          type: z.literal("api_key"),
+          key: z.string().min(1),
+          env: z.record(z.string(), z.string()).optional(),
+        })
+        .strict(),
+      z
+        .object({
+          type: z.literal("oauth"),
+          refresh: z.string().min(1),
+          access: z.string().min(1),
+          expires: z.number(),
+        })
+        .passthrough(),
+    ]),
+  })
+  .strict();
+export type PutHostModelRequest = z.infer<typeof PutHostModelRequestSchema>;
+export type HostModelView =
+  | { readonly configured: false }
+  | {
+      readonly configured: true;
+      readonly provider: string;
+      readonly model: string;
+      readonly authType: "api_key" | "oauth";
+      readonly baseUrl?: string;
+    };
+export const SelectHostModelRequestSchema = z
+  .object({
+    ...vaultWriteBase,
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    baseUrl: z.string().min(1).optional(),
+  })
+  .strict();
+export type SelectHostModelRequest = z.infer<
+  typeof SelectHostModelRequestSchema
+>;
+export type HostModelProviderInfo = {
+  readonly id: string;
+  readonly name: string;
+  readonly model: string;
+  readonly authType: "api_key" | "oauth";
+  readonly baseUrl?: string;
+  readonly lastUpdated: string;
+  readonly active: boolean;
+};
 export interface VaultInfo {
   readonly id: string;
   readonly name: string;
@@ -356,25 +483,44 @@ export const RejectedResponseSchema = z.object({
   requestId: z.string().optional(),
 });
 export type RejectedResponse = z.infer<typeof RejectedResponseSchema>;
-export const ActionSchema = z.object({
+const actionBase = {
   actionId: z.string(),
   sessionId: z.string(),
   turnId: z.string(),
   agentId: z.string(),
   manifestHash: z.string(),
   implementationVersion: z.string(),
-  kind: z.enum(["tool", "beforeModelCall", "afterModelCall"]),
-  capabilityId: z.string(),
-  toolName: z.string().optional(),
-  inputSchema: jsonObject.optional(),
-  outputSchema: jsonObject.optional(),
   input: z.unknown(),
   context: jsonObject,
   status: z.enum(["pending", "claimed", "completed", "uncertain", "cancelled"]),
   generation: z.number().int().nonnegative(),
   claimId: z.string().nullable(),
   leaseExpiresAt: z.string().nullable(),
-});
+};
+/** The hook point an action runs, and the capabilities that registered it (manifest order). */
+export const ActionHookSchema = z
+  .object({
+    at: z.enum(["before", "after"]),
+    scope: z.enum(["turn", "step"]),
+    capabilityIds: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+export type ActionHook = z.infer<typeof ActionHookSchema>;
+export const ActionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    ...actionBase,
+    kind: z.literal("tool"),
+    capabilityId: z.string(),
+    toolName: z.string(),
+    inputSchema: jsonObject.optional(),
+    outputSchema: jsonObject.optional(),
+  }),
+  z.object({
+    ...actionBase,
+    kind: z.literal("hook"),
+    hook: ActionHookSchema,
+  }),
+]);
 export type Action = z.infer<typeof ActionSchema>;
 export const ActionClaimRequestSchema = z
   .object({
@@ -404,9 +550,50 @@ export interface ExecutorScope {
 export const ExecutorNotificationSchema = z.object({
   type: z.literal("work_available"),
 });
+export const ExecutorRegistrationSchema = z
+  .object({
+    agentId: z.string().min(1),
+    implementationVersion: z.string().min(1),
+    manifestHash: z.string().min(1).optional(),
+    token: z.string().min(16),
+  })
+  .strict();
+export const RegisterExecutorsRequestSchema = z
+  .object({
+    executors: z.array(ExecutorRegistrationSchema).min(1).max(64),
+  })
+  .strict();
+export const RegisterExecutorsResponseSchema = z.object({
+  executors: z.array(
+    z.object({
+      agentId: z.string(),
+      implementationVersion: z.string(),
+      rotated: z.boolean(),
+    })
+  ),
+});
+export const ExecutorSummarySchema = z.object({
+  agentId: z.string(),
+  implementationVersion: z.string(),
+  manifestHash: z.string().optional(),
+  connected: z.boolean(),
+  updatedAt: z.string(),
+});
+export const ListExecutorsResponseSchema = z.object({
+  executors: z.array(ExecutorSummarySchema),
+});
+export type ExecutorRegistration = z.infer<typeof ExecutorRegistrationSchema>;
+export type RegisterExecutorsResponse = z.infer<
+  typeof RegisterExecutorsResponseSchema
+>;
+export type ExecutorSummary = z.infer<typeof ExecutorSummarySchema>;
+// Health fields added after the beta stay optional so a new client can parse an older Runtime.
 export const HealthResponseSchema = z.object({
   status: z.literal("ok"),
   service: z.string(),
+  version: z.string().optional(),
+  scopeId: z.string().optional(),
+  pid: z.number().int().positive().optional(),
 });
 export const ReadyResponseSchema = z.object({
   status: z.enum(["ready", "not_ready"]),

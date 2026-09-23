@@ -1,0 +1,132 @@
+/**
+ * Virtual backend: an emulated bash with a virtual filesystem, running in the Runtime process.
+ * `/workspace` is backed by a host directory so files survive stop and Runtime restarts.
+ * It is not a VM boundary; it exists so the first run and CI work on any machine.
+ */
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { SANDBOX_WORKSPACE } from "@nylorun/core/define";
+import type {
+  ExecRequest,
+  ExecResult,
+  SandboxBackend,
+  SandboxHandle,
+  SandboxProbe,
+  SandboxSpec,
+} from "../../sandbox/types.js";
+
+const ENV = Object.freeze({
+  PATH: "/usr/local/bin:/usr/bin:/bin",
+  HOME: SANDBOX_WORKSPACE,
+  LANG: "C.UTF-8",
+  TERM: "dumb",
+});
+const METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"] as const;
+
+export function virtualBackend(options: { readonly root: string }): SandboxBackend {
+  let sdk: Promise<typeof import("just-bash")> | undefined;
+  const load = () => (sdk ??= import("just-bash"));
+  const directory = (key: string) => join(options.root, key, "workspace");
+
+  return {
+    name: "virtual",
+    isolation: "process",
+    async probe(): Promise<SandboxProbe> {
+      const base = { name: "virtual" as const, isolation: "process" as const };
+      try {
+        await load();
+        return { ...base, available: true, reason: "emulated shell in the Runtime process (not a VM)" };
+      } catch (error) {
+        return {
+          ...base,
+          available: false,
+          reason: `could not load just-bash: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    },
+    unmet(spec: SandboxSpec) {
+      if (spec.network.suffixes.length > 0)
+        return "the virtual backend cannot allow wildcard hosts; list exact host names in network.allow or run with microsandbox";
+      return undefined;
+    },
+    async open(spec: SandboxSpec): Promise<SandboxHandle> {
+      const { Bash, InMemoryFs, MountableFs, ReadWriteFs } = await load();
+      const root = directory(spec.key);
+      mkdirSync(root, { recursive: true });
+      const base = new InMemoryFs();
+      await base.mkdir("/tmp", { recursive: true });
+      const fs = new MountableFs({
+        base,
+        mounts: [{ mountPoint: SANDBOX_WORKSPACE, filesystem: new ReadWriteFs({ root }) }],
+      });
+      const network =
+        spec.network.preset === "open"
+          ? { dangerouslyAllowFullInternetAccess: true, denyPrivateRanges: true }
+          : spec.network.hosts.length > 0
+            ? {
+                allowedUrlPrefixes: spec.network.hosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
+                allowedMethods: [...METHODS],
+                denyPrivateRanges: true,
+              }
+            : undefined;
+      const bash = new Bash({
+        fs,
+        cwd: SANDBOX_WORKSPACE,
+        env: { ...ENV },
+        python: true,
+        ...(network ? { network } : {}),
+      });
+      return {
+        async exec(request: ExecRequest, signal: AbortSignal): Promise<ExecResult> {
+          const controller = new AbortController();
+          let timedOut = false;
+          const timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+          }, request.timeoutMs);
+          const onAbort = () => controller.abort();
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) controller.abort();
+          try {
+            const result = await bash.exec(request.command, {
+              cwd: request.cwd,
+              env: { ...ENV },
+              replaceEnv: true,
+              rawScript: true,
+              signal: controller.signal,
+            });
+            const killed = controller.signal.aborted;
+            return {
+              exitCode: killed ? (timedOut ? 124 : 130) : result.exitCode,
+              stdout: result.stdout,
+              stderr: result.stderr,
+              killed,
+              timedOut,
+            };
+          } finally {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", onAbort);
+          }
+        },
+        async readFile(path) {
+          if (!(await fs.exists(path))) return undefined;
+          return fs.readFile(path, "utf8");
+        },
+        async writeFile(path, content) {
+          await fs.writeFile(path, content, "utf8");
+        },
+        async stop() {},
+      };
+    },
+    async remove(key: string) {
+      rmSync(join(options.root, key), { recursive: true, force: true });
+    },
+    async list(prefix: string) {
+      try {
+        return readdirSync(options.root).filter((name) => name.startsWith(prefix));
+      } catch {
+        return [];
+      }
+    },
+  };
+}

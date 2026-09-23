@@ -1,5 +1,5 @@
 import { HostSuspension } from "../host-suspension.js";
-import type { ExecutionSnapshot, StepInput, StepRuntime } from "./runtime.js";
+import type { ExecutionSnapshot, StepInput, StepRuntime, StepTurnHooks } from "./runtime.js";
 import type { TurnOutputContract } from "@nylorun/core/define";
 import type { ModelCandidate, ModelConfigurationSnapshot } from "@nylorun/core/define";
 import type { ObserveEvent, ObserveModelConfigurationSnapshot } from "@nylorun/core/define";
@@ -19,11 +19,15 @@ import { sealStep, type SealedStepOutput } from "./seal.js";
 import { ModelConfigurationDraft } from "./model-configuration.js";
 import { createId } from "../../utils/ids.js";
 import {
-  applyAfterModelCall,
-  applyBeforeModelCall,
-  hasDynamics,
-  type DynamicsContext,
-} from "./dynamics.js";
+  applyPatch,
+  asDecisions,
+  callHooks,
+  combinePatches,
+  layerPatches,
+  mergeDecisions,
+  type CallPatch,
+} from "./hooks.js";
+import type { Decision } from "@nylorun/core/define";
 
 export interface StepRunResult {
   readonly stepId: string;
@@ -31,7 +35,12 @@ export interface StepRunResult {
   readonly output: SealedStepOutput;
   readonly requestedModelId?: string;
   readonly modelInvocationId?: string;
+  /** Feedback when an after("step") hook asked a text-only answer to be redone. */
   readonly retry?: string;
+  /** True when an after("step") hook requested a retry (text or tool calls). */
+  readonly retried?: boolean;
+  /** Validated before("turn") patch, returned on the first step of a turn. */
+  readonly turnPatch?: CallPatch;
 }
 
 export async function runStep(input: {
@@ -48,10 +57,14 @@ export async function runStep(input: {
   signal: AbortSignal;
   info?: unknown;
   output?: TurnOutputContract;
+  /** Turn-scoped hook state; omitted when the agent registers no hooks. */
+  turn?: StepTurnHooks;
 }): Promise<StepRunResult> {
   let requestedModelId: string | undefined;
   let modelInvocationId: string | undefined;
   let retryFeedback: string | undefined;
+  let retried = false;
+  let turnPatch: CallPatch | undefined;
   const stepInput = Object.freeze({
     executionId: input.executionId,
     turnId: input.turnId,
@@ -82,38 +95,53 @@ export async function runStep(input: {
       if (context.currentTripwire) return context.tripwire(context.currentTripwire);
 
       const definition = input.agent.definition;
-      const dynamicsCtx: DynamicsContext | undefined =
-        definition && hasDynamics(definition)
-          ? {
-              agent: definition,
-              info: input.info,
-              step: input.stepNumber - 1,
-              arrivals: input.arrivals,
-              messages: projectModelCall(
-                resolveModelRequest({
-                  context,
-                  arrivals: input.arrivals,
-                  toolResults: input.toolResults,
-                  output: input.output,
-                }),
-              ).prompt,
-              sessionState: input.agent.sessionState ?? {},
-            }
-          : undefined;
-
-      if (dynamicsCtx) {
+      const turn = input.turn;
+      if (definition && turn) {
         try {
-          const before = await applyBeforeModelCall(dynamicsCtx, configuration);
-          if (input.agent.sessionState) {
-            Object.assign(input.agent.sessionState, dynamicsCtx.sessionState);
+          const messages = projectModelCall(
+            resolveModelRequest({
+              context,
+              arrivals: input.arrivals,
+              toolResults: input.toolResults,
+              output: input.output,
+            }),
+          ).prompt;
+          const sessionState = input.agent.sessionState ?? {};
+          const base = { input: turn.input, info: input.info, messages };
+          let patch = turn.patch;
+          if (turn.start) {
+            const combined = combinePatches(
+              definition,
+              await callHooks(
+                definition,
+                { at: "before", scope: "turn" },
+                { ...base, state: { ...sessionState } },
+                "before-turn",
+              ),
+            );
+            if (combined.state) Object.assign(sessionState, combined.state);
+            if (combined.block !== undefined)
+              return context.tripwire({
+                code: "dynamics.blocked",
+                message: combined.block,
+                scope: "execution",
+              });
+            patch = turnPatch = combined.patch;
           }
+          const step = combinePatches(
+            definition,
+            await callHooks(
+              definition,
+              { at: "before", scope: "step" },
+              { ...base, state: { ...sessionState }, step: input.stepNumber - 1 },
+              `before-step:${input.stepId}`,
+            ),
+          );
+          if (step.state) Object.assign(sessionState, step.state);
           if (input.agent.recordAfterDynamics) await input.agent.recordAfterDynamics();
-          if (before.blocked) {
-            return context.tripwire({
-              code: "dynamics.blocked",
-              message: before.blocked,
-            });
-          }
+          if (step.block !== undefined)
+            return context.tripwire({ code: "dynamics.blocked", message: step.block });
+          applyPatch(configuration, layerPatches(patch, step.patch), 10_000);
         } catch (error) {
           if (error instanceof HostSuspension) throw error;
           return context.tripwire({
@@ -193,7 +221,7 @@ export async function runStep(input: {
         if (!candidate)
           throw new HarnessError("model.candidate-missing", "Model candidate missing after mint");
 
-        if (dynamicsCtx) {
+        if (definition && turn) {
           const text = candidate.output
             ?.filter((block): block is { type: "text"; text: string } => block.type === "text")
             .map((block) => block.text)
@@ -209,17 +237,34 @@ export async function runStep(input: {
               };
               return { id: call.id, name: call.name, args: call.args };
             });
-          const decision = await applyAfterModelCall(dynamicsCtx, {
-            ...(text ? { text } : {}),
-            toolCalls,
-          });
+          const decision = mergeDecisions(
+            asDecisions<Decision>(
+              await callHooks(
+                definition,
+                { at: "after", scope: "step" },
+                {
+                  ...(text ? { text } : {}),
+                  toolCalls,
+                  info: input.info,
+                  state: { ...(input.agent.sessionState ?? {}) },
+                  step: input.stepNumber - 1,
+                  attempt: turn.afterStepAttempts,
+                },
+                `after-step:${input.stepId}`,
+              ),
+            ),
+          );
           if (input.agent.recordAfterDynamics) await input.agent.recordAfterDynamics();
           if (decision.block) {
             return context.tripwire({ code: "dynamics.blocked", message: decision.block });
           }
           if (decision.retry) {
-            retryFeedback = decision.retry;
-            return context.tripwire({ code: "dynamics.retry", message: decision.retry });
+            retried = true;
+            // Denied calls reach the model as tool results carrying the feedback.
+            if (toolCalls.length)
+              for (const call of toolCalls) minted.deny(call.id, decision.retry);
+            else retryFeedback = decision.retry;
+            return minted;
           }
           if (decision.text !== undefined) {
             minted.replace({
@@ -246,7 +291,8 @@ export async function runStep(input: {
     },
     input.observe,
   );
-  const output = sealStep(context, input.output);
+  // A text answer sent back for a retry is not the turn's output, so skip output sealing.
+  const output = sealStep(context, retryFeedback === undefined ? input.output : undefined);
   const candidate = output.kind === "tools" ? output.plan.candidate : context.currentCandidate;
   return Object.freeze({
     stepId: input.stepId,
@@ -255,6 +301,8 @@ export async function runStep(input: {
     output,
     ...(modelInvocationId ? { modelInvocationId } : {}),
     ...(retryFeedback ? { retry: retryFeedback } : {}),
+    ...(retried ? { retried } : {}),
+    ...(turnPatch === undefined ? {} : { turnPatch }),
   });
 }
 

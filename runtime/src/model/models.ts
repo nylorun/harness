@@ -17,7 +17,11 @@ export type Selection = Readonly<{
   custom?: Readonly<{ baseUrl: string }>;
 }>;
 
-export function modelsFor(selection: Selection, credentials: CredentialStore) {
+export function modelsFor(
+  selection: Selection,
+  credentials: CredentialStore,
+  options: { environment?: boolean } = {},
+) {
   const environmentFirst: CredentialStore = {
     async read(providerId, options) {
       const explicit = process.env.MODEL_PROVIDER_API_KEY;
@@ -40,7 +44,9 @@ export function modelsFor(selection: Selection, credentials: CredentialStore) {
     modify: (id, fn, options) => credentials.modify(id, fn, options),
     delete: (id, options) => credentials.delete(id, options),
   };
-  const models = builtinModels({ credentials: environmentFirst });
+  const models = builtinModels({
+    credentials: options.environment === false ? credentials : environmentFirst,
+  });
   if (!selection.custom) return models;
   const model: Model<"openai-completions"> = {
     id: selection.model,

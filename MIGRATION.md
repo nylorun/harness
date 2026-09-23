@@ -1,3 +1,36 @@
+# Scoped hooks and manifest schema 4
+
+`beforeModelCall` and `afterModelCall` are replaced by two verbs with an explicit scope.
+There are no compatibility aliases.
+
+| Previous | Replacement |
+| --- | --- |
+| `.beforeModelCall(fn)` | `.before("step", fn)`, or `.before("turn", fn)` when the decision holds for the whole turn |
+| `.afterModelCall((args, ctx) => …)` | `.after("step", ({ text, toolCalls, info, state, step, attempt }) => …)` (one argument) |
+| `capability({ beforeModelCall, afterModelCall })` | `capability({ before: { turn?, step? }, after: { step?, turn? } })` |
+| — | `after("turn", ({ text, output, attempt }) => TurnDecision)` for the final answer |
+| Manifest `beforeModelCall` / `afterModelCall` booleans | `capabilities[].hooks: { at, scope }[]` in `manifestSchemaVersion: 4` |
+| Action kinds `beforeModelCall` / `afterModelCall` | Action kind `hook` with `hook: { at, scope, capabilityIds }` |
+| `BeforeModelCallFn` / `AfterModelCallFn` | `BeforeHook<scope>` / `AfterHook<scope>` |
+
+`before("turn")` runs once per turn and its `Patch` applies to every model call in that
+turn; `before("step")` and `after("step")` run on every model call. In a Runtime, every
+capability registered at one hook point runs in a single executor action, so a hook point
+costs one round trip per turn or per model call.
+
+Hooks may run more than once when a delivery is retried: an expired hook claim is offered
+again instead of becoming uncertain. Keep side effects in tools.
+
+`retry` now retries. From `after("step")` it denies the proposed tool calls with the feedback,
+or sends a text answer back with the feedback as a message; from `after("turn")` it sends the
+final answer back. The engine does not cap retries: bound them with the `attempt` argument,
+for example `attempt < 2 ? { retry: "…" } : { block: "…" }`.
+
+Rebuild agents to publish schema 4 manifests. `Agent.from` rejects schema 3. On startup the
+Runtime cancels pending `beforeModelCall` / `afterModelCall` actions and fails any turn that
+was in flight under a schema 3 manifest; start new sessions after upgrading. The durable
+engine version is now `hosted-2`, because hook effect ids changed.
+
 # Package architecture beta migration
 
 The [design document](docs/design/package-architecture.md) defines the new structure.
@@ -32,12 +65,12 @@ Upgrade the harness, SDK, Runtime, Studio, and creator as the tested compatible 
 
 1. Import `Agent` and `tool` from `@nylorun/agents`. Export `agents` from `agents/index.ts`. Keep model selection in Runtime configuration.
 2. Remove the starter's Hono application and old `Runtime` / `serveAgents` / `openSession` imports. Definitions no longer expose `agent.run()`.
-3. Use `nylorun configure`, then `nylorun dev`. Compiled `nylorun start` loads `dist/agents/index.js`. Runtime defaults to loopback port 8787.
+3. `nylorun start` is removed. Use `nylorun serve [entry]` to run the compiled build (same `dist/agents/index.js` default) and change `scripts.start` to `nylorun serve`. The Runtime is now its own persistent process: `nylorun up` starts it, `nylorun down` stops it, `nylorun runtime status` reports it, and `dev`/`serve` start it for you and leave it running. Runtime defaults to loopback port 8787 in project-scoped `.nylorun/`.
 4. Update custom applications to SDK `createClient` and session commands with stable idempotency keys. Trusted servers supply `ownerUserId`; input text uses `content`.
 5. Custom connected executors use `connectAgents({ agents, runtime: { url, key } })`. Supply scoped executor credentials, separate from server credentials. The local CLI provisions these automatically.
-6. Studio now uses canonical history and authenticated SSE through its local proxy. Attach with `nylorun studio --runtime-url http://127.0.0.1:8787`. Remove AG-UI and legacy manifest endpoint configuration.
+6. Studio now uses canonical history and authenticated SSE through its local proxy. Attach with `nylorun studio`, which resolves the active scope; `--runtime-url` still overrides it. Remove AG-UI and legacy manifest endpoint configuration.
 
-Keep credentials and SQLite in gitignored `.nylorun/`; provider configuration uses `.env`. Keep backups of old SessionRecord/event files. They are not automatically converted to new SQLite checkpoints. Session export/import and migration tooling are deferred. Start new sessions after changing definitions or implementations.
+Keep credentials and SQLite in gitignored `.nylorun/`; provider configuration uses `.env`. Keep backups of old SessionRecord/event files. They are not automatically converted to new SQLite checkpoints. Session export/import and migration tooling are deferred. Start new sessions after changing definitions or implementations. Because the Runtime now outlives `dev`, a source change re-registers agents and reconnects executors rather than restarting the host.
 
 Explicit in-process engine execution remains available to host authors through `@nylorun/harness/run`; it is not loaded by the application SDK. OSS and Cloud consume the harness independently.
 
@@ -47,4 +80,4 @@ The release workflow covers local text and ordinary tools. Advanced examples rem
 
 Replace `@nylorun/harness/engine` imports with `@nylorun/harness/run`. Rename `runHosted` to `runDurable`, `createHostedCheckpoint` to `createDurableCheckpoint`, `HostedCheckpoint` / `HostedResult` to `DurableCheckpoint` / `DurableResult`, and `EngineHost` to `DurableHost`. Rename `EngineBinding`, `EngineRunOptions`, and `createEngineState` to `RunBinding`, `BoundRunOptions`, and `createRunState`. There are no compatibility aliases.
 
-Durable execution reconstructs progress from a checkpoint and individually journaled effect outcomes; the host must persist both. Existing checkpoint fields and `ENGINE_VERSION = "hosted-1"` remain compatible.
+Durable execution reconstructs progress from a checkpoint and individually journaled effect outcomes; the host must persist both. Existing checkpoint fields and `ENGINE_VERSION = "hosted-1"` remained compatible at the time of this rename; scoped hooks later moved the engine to `hosted-2`.

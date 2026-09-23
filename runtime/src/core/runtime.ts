@@ -12,14 +12,21 @@ import {
   unlinkSync,
   writeFileSync,
   readFileSync,
+  realpathSync,
+  mkdtempSync,
 } from "node:fs";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   AgentManifestSchema,
   CreateCredentialRequestSchema,
   CreateVaultRequestSchema,
   PutAgentRequestSchema,
+  PutHostModelRequestSchema,
+  SelectHostModelRequestSchema,
   PutSessionRequestSchema,
+  RegisterExecutorsRequestSchema,
   RotateCredentialRequestSchema,
   SessionCommandSchema,
   ActionClaimRequestSchema,
@@ -45,12 +52,24 @@ import {
   type JsonObject,
 } from "@nylorun/core/define";
 import { Store, canonical } from "./store.js";
+import {
+  ExecutorRegistry,
+  assertExecutorCredential,
+  hashToken,
+  type ExecutorRecord,
+} from "./executors.js";
+import { RUNTIME_VERSION } from "../version.js";
+import { hostModelCatalog } from "../model/catalog.js";
+import { piModel } from "../model/pi-model.js";
 import { scriptedModel, type ModelProvider } from "./provider.js";
 import { scrub } from "../redact.js";
 import { createKekFile, defaultKekPath, readVaultKek } from "../vault/kek.js";
 import { VaultError } from "../vault/error.js";
 import { VaultService, type AuthorizeResult } from "../vault/service.js";
 import { McpPool } from "../mcp/pool.js";
+import { SandboxManager, sandboxCapabilityOf } from "../sandbox/manager.js";
+import { defaultSandboxBackends } from "../sandbox/select.js";
+import type { SandboxBackend } from "../sandbox/types.js";
 import type {
   McpDiagnostic,
   McpSnapshot,
@@ -61,11 +80,21 @@ export interface RuntimeOptions {
   serverToken: string;
   executors: readonly (ExecutorScope & { token: string })[];
   model?: ModelProvider;
+  /** Read the model provider credential from the host vault at call time. */
+  useHostModel?: boolean;
   leaseMs?: number;
   /** 32-byte key, or base64 of that key. `null` disables env and file lookup. */
   vaultKek?: Buffer | string | null;
   vaultKekPath?: string;
   vaultFetch?: typeof fetch;
+  sandbox?: {
+    /** `auto` (default), `microsandbox` or `virtual`. Defaults to NYLORUN_SANDBOX. */
+    backend?: string;
+    /** Host directory for virtual-backend workspaces. Defaults beside the SQLite file. */
+    root?: string;
+    /** Replace the backend list. Tests only. */
+    backends?: readonly SandboxBackend[];
+  };
 }
 interface Session {
   id: string;
@@ -210,10 +239,15 @@ export class CoreRuntime {
   private readonly running = new Map<string, AbortController>();
   private readonly pending = new Set<string>();
   private readonly observers = new Map<string, Set<ServerResponse>>();
-  private readonly executors = new Set<ServerResponse>();
+  // Keyed by token hash so a rotation can end exactly the streams that the replaced token owns.
+  private readonly executorStreams = new Map<string, Set<ServerResponse>>();
+  private readonly registry = new ExecutorRegistry();
+  private readonly scopeId: string;
   private readonly mcp: McpPool;
+  private readonly sandbox: SandboxManager;
   private server?: Server;
   private closing = false;
+  private closed = false;
   private readonly lockPath?: string;
   private readonly timer: NodeJS.Timeout;
   constructor(private readonly options: RuntimeOptions) {
@@ -229,18 +263,8 @@ export class CoreRuntime {
       throw new Error("Executor tokens must be unique");
     if (!options.serverToken || options.serverToken.length < 16)
       throw new Error("A server token of at least 16 characters is required");
-    if (
-      options.executors.some(
-        (e) =>
-          e.token.length < 16 ||
-          equals(e.token, options.serverToken) ||
-          !e.agentId ||
-          !e.implementationVersion
-      )
-    )
-      throw new Error(
-        "Executor tokens require independent credentials and an agent id"
-      );
+    for (const executor of options.executors)
+      assertExecutorCredential(executor, options.serverToken);
     if (options.sqlitePath !== ":memory:") {
       mkdirSync(dirname(options.sqlitePath), { recursive: true });
       this.lockPath = options.sqlitePath + ".runtime-lock";
@@ -281,6 +305,49 @@ export class CoreRuntime {
       if (this.lockPath) unlinkSync(this.lockPath);
       throw e;
     }
+    // A short digest of the resolved database path identifies this scope to the CLI without
+    // disclosing the path itself over the unauthenticated health route.
+    this.scopeId =
+      options.sqlitePath === ":memory:"
+        ? "memory"
+        : createHash("sha256")
+            .update(realpathSync(options.sqlitePath))
+            .digest("hex")
+            .slice(0, 16);
+    // Registrations persisted by PUT /v1/executors load first; scopes supplied through
+    // NYLORUN_EXECUTORS_JSON then overlay them for this process only and are never written back.
+    this.registry.seed(
+      this.store.allExecutors().map((row) => ({
+        agentId: row.agentId,
+        implementationVersion: row.implementationVersion,
+        ...(row.manifestHash === undefined
+          ? {}
+          : { manifestHash: row.manifestHash }),
+        tokenHash: row.tokenHash,
+        persisted: true,
+        updatedAt: row.updatedAt,
+      }))
+    );
+    const now = new Date().toISOString();
+    for (const executor of options.executors) {
+      const tokenHash = hashToken(executor.token);
+      const collision = this.registry.find(tokenHash);
+      if (collision && collision.agentId !== executor.agentId) {
+        this.store.db.close();
+        if (this.lockPath) unlinkSync(this.lockPath);
+        throw new Error("Executor tokens must be unique");
+      }
+      this.registry.upsert({
+        agentId: executor.agentId,
+        implementationVersion: executor.implementationVersion,
+        ...(executor.manifestHash === undefined
+          ? {}
+          : { manifestHash: executor.manifestHash }),
+        tokenHash,
+        persisted: false,
+        updatedAt: now,
+      });
+    }
     this.vault = new VaultService(
       this.store.db,
       (fn) => this.store.tx(fn),
@@ -291,6 +358,31 @@ export class CoreRuntime {
       dataDir: dirname(options.sqlitePath),
       authorize: (sessionId, request) => this.authorize(sessionId, request),
     });
+    const ephemeral = options.sqlitePath === ":memory:";
+    const sandboxRoot =
+      options.sandbox?.root ??
+      (ephemeral
+        ? mkdtempSync(join(tmpdir(), "nylorun-sandboxes-"))
+        : join(dirname(options.sqlitePath), "sandboxes"));
+    this.sandbox = new SandboxManager({
+      scope: ephemeral ? `m${randomUUID().slice(0, 8)}` : this.scopeId,
+      store: this.store,
+      backends:
+        options.sandbox?.backends ?? defaultSandboxBackends({ root: sandboxRoot }),
+      preference: options.sandbox?.backend ?? process.env.NYLORUN_SANDBOX,
+      ephemeral,
+      emit: (sessionId, turnId, type, payload) => {
+        if (this.closed) return;
+        const event = this.store.tx(() =>
+          this.store.event(sessionId, turnId, type, payload)
+        );
+        this.publish(event);
+      },
+    });
+    if (!ephemeral && this.sandbox.hasRecords())
+      void this.sandbox
+        .reconcile((id) => !this.closed && !!this.store.get("sessions", id))
+        .catch(() => undefined);
     this.store.tx(() => {
       for (const effect of this.store.all("effects"))
         if (effect.status === "invoking") {
@@ -313,6 +405,7 @@ export class CoreRuntime {
           }
         }
     });
+    this.retireLegacyHooks();
     this.expireClaims();
     this.timer = setInterval(
       () => this.expireClaims(),
@@ -341,20 +434,63 @@ export class CoreRuntime {
     if (!response.write(data)) response.destroy();
   }
   private notify(): void {
-    for (const response of this.executors)
-      this.send(
-        response,
-        'event: work_available\ndata: {"type":"work_available"}\n\n'
-      );
+    for (const streams of this.executorStreams.values())
+      for (const response of streams)
+        this.send(
+          response,
+          'event: work_available\ndata: {"type":"work_available"}\n\n'
+        );
+  }
+  /**
+   * Manifest v4 replaced beforeModelCall/afterModelCall with scoped hooks. Turns started under
+   * an older manifest cannot continue, and their hook actions no longer parse, so end them.
+   */
+  private retireLegacyHooks(): void {
+    this.store.tx(() => {
+      for (const action of this.store.all<{ actionId: string; kind: string; status: string }>(
+        "actions"
+      ))
+        if (
+          (action.kind === "beforeModelCall" || action.kind === "afterModelCall") &&
+          (action.status === "pending" || action.status === "claimed")
+        ) {
+          action.status = "cancelled";
+          this.store.put("actions", action.actionId, action);
+        }
+      for (const s of this.store.all<Session>("sessions"))
+        if (s.activeTurnId && s.manifest?.manifestSchemaVersion !== 4) {
+          this.store.event(s.id, s.activeTurnId, "turn.failed", {
+            error: {
+              code: "execution.incompatible",
+              message:
+                "This turn started under manifest schema 3; see MIGRATION.md for before/after hooks",
+            },
+          });
+          s.status = "failed";
+          s.activeTurnId = null;
+          this.store.put("sessions", s.id, s);
+        }
+    });
   }
   private expireClaims(): void {
     const events: LiveEvent[] = [];
+    let redeliver = false;
     this.store.tx(() => {
       for (const action of this.store.all<Action>("actions"))
         if (
           action.status === "claimed" &&
           Date.parse(action.leaseExpiresAt!) <= Date.now()
         ) {
+          if (action.kind === "hook") {
+            // Hooks are pure by contract, so a lost claim is simply delivered again.
+            // The next claim bumps the generation, which fences any late result.
+            action.status = "pending";
+            action.claimId = null;
+            action.leaseExpiresAt = null;
+            this.store.put("actions", action.actionId, action);
+            redeliver = true;
+            continue;
+          }
           action.status = "uncertain";
           this.store.put("actions", action.actionId, action);
           const effect = this.store.get("effects", action.actionId);
@@ -373,6 +509,7 @@ export class CoreRuntime {
         }
     });
     events.forEach((e) => this.publish(e));
+    if (redeliver) this.notify();
   }
   private schedule(id: string): void {
     if (this.closing) return;
@@ -500,11 +637,26 @@ export class CoreRuntime {
         this.schedule(id);
     }
   }
+  private invokeModel(request: HostEffect, signal: AbortSignal) {
+    if (!this.options.useHostModel)
+      return (this.options.model ?? scriptedModel())(request, signal);
+    const adapter = piModel({
+      readHostModel: () => this.vault.readHostModel(),
+      writeHostCredential: (credential) =>
+        this.vault.updateHostCredential(credential),
+    });
+    return adapter(request.input as any, {
+      request: request.context.request as any,
+      invocationId: String(request.context.invocationId),
+      signal,
+      reportPreparedCall() {},
+    });
+  }
   private async resolveEffect(
     request: HostEffect,
     signal: AbortSignal
   ): Promise<EffectResolution> {
-    let invoke: "model" | "mcp" | undefined;
+    let invoke: "model" | "mcp" | "sandbox" | undefined;
     let notify = false;
     let event: LiveEvent | undefined;
     const resolution = this.store.tx((): EffectResolution | undefined => {
@@ -533,42 +685,63 @@ export class CoreRuntime {
         request.kind === "tool"
           ? mcpToolOf(s, request.capabilityId, request.toolName)
           : undefined;
+      const sandboxTool =
+        request.kind === "tool" && !mcpTool
+          ? sandboxCapabilityOf(s.manifest, request.capabilityId, request.toolName)
+          : undefined;
       this.store.put("effects", request.effectId, {
         request,
-        status: request.kind === "model" || mcpTool ? "invoking" : "pending",
+        status:
+          request.kind === "model" || mcpTool || sandboxTool
+            ? "invoking"
+            : "pending",
       });
-      if (request.kind === "model" || mcpTool) {
-        invoke = mcpTool ? "mcp" : "model";
+      if (request.kind === "model" || mcpTool || sandboxTool) {
+        invoke = mcpTool ? "mcp" : sandboxTool ? "sandbox" : "model";
         return undefined;
       }
       const tool =
         request.kind === "tool"
           ? pinnedTool(s.manifest, request.capabilityId, request.toolName)
           : undefined;
-      const action: Action = {
+      const base = {
         actionId: request.effectId,
         sessionId: request.sessionId,
         turnId: request.turnId,
         agentId: request.agentId,
         manifestHash: request.manifestHash,
         implementationVersion: s.implementationVersion,
-        kind: request.kind,
-        capabilityId: request.capabilityId!,
-        ...(request.toolName ? { toolName: request.toolName } : {}),
-        ...(tool?.inputSchema ? { inputSchema: tool.inputSchema } : {}),
-        ...(tool?.outputSchema ? { outputSchema: tool.outputSchema } : {}),
         input: request.input,
         context: request.context,
-        status: "pending",
+        status: "pending" as const,
         generation: 0,
         claimId: null,
         leaseExpiresAt: null,
       };
+      const action: Action =
+        request.kind === "hook"
+          ? {
+              ...base,
+              kind: "hook",
+              hook: {
+                at: request.hook!.at,
+                scope: request.hook!.scope,
+                capabilityIds: [...request.hook!.capabilityIds],
+              },
+            }
+          : {
+              ...base,
+              kind: "tool",
+              capabilityId: request.capabilityId!,
+              toolName: request.toolName!,
+              ...(tool?.inputSchema ? { inputSchema: tool.inputSchema } : {}),
+              ...(tool?.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+            };
       this.store.put("actions", action.actionId, action);
       event = this.store.event(s.id, s.activeTurnId, "action.pending", {
         actionId: action.actionId,
         kind: action.kind,
-        toolName: action.toolName,
+        ...actionTarget(action),
         input: action.input,
       });
       notify = true;
@@ -581,7 +754,9 @@ export class CoreRuntime {
       const value =
         invoke === "mcp"
           ? await this.callMcpTool(request)
-          : await (this.options.model ?? scriptedModel())(request, signal);
+          : invoke === "sandbox"
+            ? await this.callSandboxTool(request, signal)
+            : await this.invokeModel(request, signal);
       return this.store.tx(() => {
         const s = this.session(request.sessionId);
         if (
@@ -617,10 +792,11 @@ export class CoreRuntime {
   private scope(request: IncomingMessage): ExecutorScope | "server" {
     const header = request.headers.authorization;
     const token = header?.startsWith("Bearer ") ? header.slice(7) : "";
-    if (token && equals(token, this.options.serverToken)) return "server";
-    const executor = this.options.executors.find(
-      (e) => token && equals(token, e.token)
-    );
+    if (!token) return fail(401, "Invalid credentials");
+    if (equals(token, this.options.serverToken)) return "server";
+    // The map is keyed by a digest of the presented token, so the lookup reveals nothing the
+    // caller does not already hold; the server token keeps its constant-time comparison.
+    const executor = this.registry.find(hashToken(token));
     if (!executor) return fail(401, "Invalid credentials");
     return executor;
   }
@@ -696,7 +872,7 @@ export class CoreRuntime {
         schedule = true;
         event = this.store.event(id, s.activeTurnId, "action.completed", {
           actionId: action.actionId,
-          toolName: action.toolName,
+          ...actionTarget(action),
           kind: action.kind,
           result: command.outcome.value,
         });
@@ -827,7 +1003,8 @@ export class CoreRuntime {
   private sse(
     request: IncomingMessage,
     response: ServerResponse,
-    set: Set<ServerResponse>
+    set: Set<ServerResponse>,
+    whenEmpty?: () => void
   ): void {
     response.writeHead(200, {
       "content-type": "text/event-stream",
@@ -845,6 +1022,7 @@ export class CoreRuntime {
     request.on("close", () => {
       clearInterval(timer);
       set.delete(response);
+      if (!set.size) whenEmpty?.();
     });
   }
   private async handle(
@@ -863,7 +1041,13 @@ export class CoreRuntime {
         .map(decodeURIComponent);
       const method = request.method;
       if (url.pathname === "/health")
-        return json({ status: "ok", service: "oss-runtime" });
+        return json({
+          status: "ok",
+          service: "oss-runtime",
+          version: RUNTIME_VERSION,
+          scopeId: this.scopeId,
+          pid: process.pid,
+        });
       if (url.pathname === "/ready") {
         this.store.db.prepare("SELECT 1").get();
         return json(
@@ -887,7 +1071,13 @@ export class CoreRuntime {
         method === "GET"
       ) {
         if (scope === "server") fail(403, "Executor credential required");
-        this.sse(request, response, this.executors);
+        const tokenHash = (scope as ExecutorRecord).tokenHash;
+        let streams = this.executorStreams.get(tokenHash);
+        if (!streams)
+          this.executorStreams.set(tokenHash, (streams = new Set()));
+        this.sse(request, response, streams, () =>
+          this.executorStreams.delete(tokenHash)
+        );
         this.send(
           response,
           'event: work_available\ndata: {"type":"work_available"}\n\n'
@@ -981,7 +1171,109 @@ export class CoreRuntime {
         return json(
           await this.dispatchVault(scope, method, path, url, request)
         );
+      if (path[1] === "host")
+        return json(
+          await this.dispatchHost(scope, method, path, request)
+        );
       if (scope !== "server") fail(403, "Application credential required");
+      if (path[1] === "executors" && path.length === 2 && method === "GET")
+        return json({
+          executors: this.registry.list().map((e) => ({
+            agentId: e.agentId,
+            implementationVersion: e.implementationVersion,
+            ...(e.manifestHash === undefined
+              ? {}
+              : { manifestHash: e.manifestHash }),
+            connected: (this.executorStreams.get(e.tokenHash)?.size ?? 0) > 0,
+            updatedAt: e.updatedAt,
+          })),
+        });
+      // The length guard matters: the connect branch above only matches GET, so without it a
+      // PUT to /v1/executors/connect would register an agent literally named "connect".
+      if (path[1] === "executors" && path.length === 2 && method === "PUT") {
+        const body = RegisterExecutorsRequestSchema.parse(
+          await this.body(request)
+        );
+        // Credential rules are shared with startup validation, which throws plainly; on the
+        // wire a rejected registration is a bad request, not a server fault.
+        try {
+          for (const executor of body.executors)
+            assertExecutorCredential(executor, this.options.serverToken);
+        } catch (error) {
+          fail(400, error instanceof Error ? error.message : String(error));
+        }
+        if (
+          new Set(body.executors.map((e) => e.agentId)).size !==
+            body.executors.length ||
+          new Set(body.executors.map((e) => e.token)).size !==
+            body.executors.length
+        )
+          fail(400, "Executor registrations must be unique per agent and token");
+        const updatedAt = new Date().toISOString();
+        const records = body.executors.map((executor) => ({
+          agentId: executor.agentId,
+          implementationVersion: executor.implementationVersion,
+          ...(executor.manifestHash === undefined
+            ? {}
+            : { manifestHash: executor.manifestHash }),
+          tokenHash: hashToken(executor.token),
+          persisted: true as const,
+          updatedAt,
+        }));
+        for (const record of records) {
+          const collision = this.registry.find(record.tokenHash);
+          if (collision && collision.agentId !== record.agentId)
+            fail(409, "Executor tokens must be unique");
+        }
+        // Persist the whole batch first; the in-memory registry must never run ahead of SQLite.
+        this.store.tx(() => {
+          for (const record of records)
+            this.store.putExecutor({
+              agentId: record.agentId,
+              tokenHash: record.tokenHash,
+              implementationVersion: record.implementationVersion,
+              ...(record.manifestHash === undefined
+                ? {}
+                : { manifestHash: record.manifestHash }),
+              updatedAt,
+            });
+        });
+        const results = records.map((record) => {
+          const { rotated, previousHash } = this.registry.upsert(record);
+          if (rotated && previousHash) {
+            for (const r of this.executorStreams.get(previousHash) ?? [])
+              r.end();
+            this.executorStreams.delete(previousHash);
+          }
+          return {
+            agentId: record.agentId,
+            implementationVersion: record.implementationVersion,
+            rotated,
+          };
+        });
+        return json({ executors: results });
+      }
+      if (
+        path[1] === "executors" &&
+        path.length === 3 &&
+        path[2] &&
+        method === "DELETE"
+      ) {
+        const agentId = path[2];
+        const existing =
+          this.registry.get(agentId) ?? fail(404, "Executor not found");
+        if (!existing.persisted)
+          fail(
+            409,
+            "Executor is provided by NYLORUN_EXECUTORS_JSON and cannot be deleted"
+          );
+        this.store.tx(() => this.store.deleteExecutor(agentId));
+        this.registry.remove(agentId);
+        for (const r of this.executorStreams.get(existing.tokenHash) ?? [])
+          r.end();
+        this.executorStreams.delete(existing.tokenHash);
+        return json({ agentId, deleted: true });
+      }
       if (path[1] === "agents" && path.length === 2 && method === "GET")
         return json({
           agents: this.store.all("definitions").map((d) => ({
@@ -1236,6 +1528,26 @@ export class CoreRuntime {
       pluginRoots: s.pluginRoots ?? {},
     });
   }
+  private async callSandboxTool(
+    request: HostEffect,
+    signal: AbortSignal
+  ): Promise<unknown> {
+    const s = this.session(request.sessionId);
+    const capability = sandboxCapabilityOf(
+      s.manifest,
+      request.capabilityId,
+      request.toolName
+    );
+    if (!capability)
+      throw new Error(`'${request.toolName ?? ""}' is not a sandbox tool`);
+    return this.sandbox.run(
+      { id: s.id, activeTurnId: s.activeTurnId, manifest: s.manifest },
+      capability,
+      request.toolName as never,
+      request.input,
+      signal
+    );
+  }
   async authorize(
     sessionId: string,
     request: { url: string; serverName?: string }
@@ -1262,6 +1574,39 @@ export class CoreRuntime {
       throw new Error("Vault key-encryption key is required");
     this.kek = createKekFile(this.kekPath);
     return this.kek;
+  }
+  private async dispatchHost(
+    scope: ExecutorScope | "server",
+    method: string | undefined,
+    path: string[],
+    request: IncomingMessage
+  ): Promise<unknown> {
+    if (scope !== "server") {
+      this.vault.reject(path.join("/"));
+      fail(403, "Application credential required");
+    }
+    if (path[2] === "models" && path.length === 3 && method === "GET")
+      return hostModelCatalog();
+    if (path[2] === "sandbox" && path.length === 3 && method === "GET")
+      return this.sandbox.report();
+    if (path[2] === "providers" && path.length === 3 && method === "GET")
+      return this.vault.listHostProviders();
+    if (path[2] === "model" && path.length === 3 && method === "GET")
+      return this.vault.getHostModel();
+    if (path[2] === "model" && path.length === 3 && method === "PUT")
+      return this.vault.putHostModel(
+        PutHostModelRequestSchema.parse(await this.body(request))
+      );
+    if (
+      path[2] === "model" &&
+      path[3] === "selection" &&
+      path.length === 4 &&
+      method === "PUT"
+    )
+      return this.vault.selectHostModel(
+        SelectHostModelRequestSchema.parse(await this.body(request))
+      );
+    fail(404, "Route not found");
   }
   private async dispatchVault(
     scope: ExecutorScope | "server",
@@ -1334,7 +1679,8 @@ export class CoreRuntime {
     clearInterval(this.timer);
     for (const c of this.running.values()) c.abort();
     await this.mcp.close();
-    for (const r of this.executors) r.end();
+    for (const streams of this.executorStreams.values())
+      for (const r of streams) r.end();
     for (const set of this.observers.values()) for (const r of set) r.end();
     if (this.server)
       await new Promise<void>((resolve) => {
@@ -1344,6 +1690,8 @@ export class CoreRuntime {
     // Providers must honor AbortSignal. Keep storage open until any in-flight journal writes have drained.
     while (this.running.size)
       await new Promise((resolve) => setTimeout(resolve, 10));
+    await this.sandbox.close();
+    this.closed = true;
     this.store.db.close();
     if (this.lockPath) unlinkSync(this.lockPath);
   }
@@ -1362,4 +1710,9 @@ export async function startRuntime(
     await runtime.close();
     throw error;
   }
+}
+
+/** What an action runs, for events: a tool name, or a hook point and its capabilities. */
+function actionTarget(action: Action) {
+  return action.kind === "hook" ? { hook: action.hook } : { toolName: action.toolName };
 }

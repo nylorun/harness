@@ -1,4 +1,29 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+
+const LOCAL_OWNER = "local-developer";
+
+function isVaultRead(method: string, path: string): boolean {
+  return (
+    method === "GET" &&
+    (/^\/v1\/vaults$/.test(path) ||
+      /^\/v1\/vaults\/[^/]+$/.test(path) ||
+      /^\/v1\/vaults\/[^/]+\/credentials$/.test(path) ||
+      /^\/v1\/vaults\/[^/]+\/credentials\/[^/]+$/.test(path))
+  );
+}
+
+function isVaultWrite(method: string, path: string): boolean {
+  return (
+    (method === "POST" &&
+      (/^\/v1\/vaults$/.test(path) ||
+        /^\/v1\/vaults\/[^/]+\/credentials$/.test(path) ||
+        /^\/v1\/vaults\/[^/]+\/credentials\/[^/]+$/.test(path))) ||
+    (method === "DELETE" &&
+      (/^\/v1\/vaults\/[^/]+$/.test(path) ||
+        /^\/v1\/vaults\/[^/]+\/credentials\/[^/]+$/.test(path)))
+  );
+}
+
 /** Local tooling proxy: credentials stay in this process, not the browser. */
 export async function proxyRuntime(
   request: IncomingMessage,
@@ -15,15 +40,24 @@ export async function proxyRuntime(
   const read =
     method === "GET" &&
     (/^\/v1\/(agents|sessions)$/.test(path) ||
-      /^\/v1\/sessions\/[^/]+(?:\/(items|events))?$/.test(path));
+      /^\/v1\/sessions\/[^/]+(?:\/(items|events))?$/.test(path) ||
+      path === "/v1/host/model" ||
+      path === "/v1/host/models" ||
+      path === "/v1/host/providers" ||
+      isVaultRead(method, path));
   const write =
     (method === "PUT" && /^\/v1\/sessions\/[^/]+$/.test(path)) ||
     (method === "POST" && /^\/v1\/sessions\/[^/]+\/commands$/.test(path));
-  if (!read && !write) return fail(404, "Unsupported Studio operation");
-  if (write && request.headers.origin !== options.origin)
+  const hostWrite =
+    method === "PUT" &&
+    (path === "/v1/host/model" || path === "/v1/host/model/selection");
+  const vaultWrite = isVaultWrite(method, path);
+  if (!read && !write && !hostWrite && !vaultWrite)
+    return fail(404, "Unsupported Studio operation");
+  if ((write || hostWrite || vaultWrite) && request.headers.origin !== options.origin)
     return fail(403, "Studio mutations require a same-origin request");
   let body: string | undefined;
-  if (write) {
+  if (write || hostWrite || (vaultWrite && method === "POST")) {
     if (!request.headers["content-type"]?.startsWith("application/json"))
       return fail(415, "JSON required");
     let text = "";
@@ -40,14 +74,23 @@ export async function proxyRuntime(
     }
     if (!value || typeof value !== "object" || Array.isArray(value))
       return fail(400, "JSON object required");
-    if (method === "PUT") value.ownerUserId = "local-developer";
-    else if (!["message", "cancel"].includes(value.type))
+    if (vaultWrite && path === "/v1/vaults" && method === "POST")
+      value.ownerUserId = LOCAL_OWNER;
+    else if (!hostWrite && !vaultWrite && method === "PUT")
+      value.ownerUserId = LOCAL_OWNER;
+    else if (
+      !hostWrite &&
+      !vaultWrite &&
+      !["message", "cancel"].includes(value.type)
+    )
       return fail(
         400,
         "This Studio release supports message and cancel commands",
       );
     body = JSON.stringify(value);
   }
+  if (path === "/v1/vaults" && method === "GET")
+    incoming.searchParams.set("ownerUserId", LOCAL_OWNER);
   const controller = new AbortController();
   response.on("close", () => controller.abort());
   try {

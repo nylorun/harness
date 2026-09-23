@@ -9,6 +9,6 @@ for(const enabled of [true,false]){
  assert.equal(files['src/index.ts'],undefined);assert.match(files['agents/assistant/agent.ts'],/lookup_order/);
  assert.equal(p.scripts.dev,enabled?'nylorun dev':'nylorun dev --no-studio');
  assert.equal(Boolean(p.devDependencies['@nylorun/studio']),enabled);assert.match(files['.gitignore'],/\.nylorun\//);
- assert.equal(p.scripts.start,'nylorun start');assert.ok(!files['agents/assistant/agent.ts'].match(/\bmodel\s*:/));
+ assert.equal(p.scripts.start,'nylorun serve');assert.ok(!files['agents/assistant/agent.ts'].match(/\bmodel\s*:/));
 }
 console.log('SDK registry starter contract passed, with and without Studio.');

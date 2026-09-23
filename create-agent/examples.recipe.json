@@ -14,9 +14,9 @@
     "vitest": "^4.1.11"
   },
   "scripts": {
+    "configure": "nylorun configure",
     "test": "vitest run",
-    "codex:preflight": "node scripts/codex-preflight.mjs",
-    "docker:preflight": "node scripts/docker-preflight.mjs"
+    "codex:preflight": "node scripts/codex-preflight.mjs"
   },
   "index": "// CLI loads the supported registry directly.\nexport { agents } from \"../agents/index.js\";\n"
 }

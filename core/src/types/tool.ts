@@ -160,7 +160,7 @@ interface ToolExecutionContextBase {
   readonly idempotencyKey: string;
   /** True when this invocation is being offered again after an interrupted active call. */
   readonly redelivery?: boolean;
-  /** Durable session memory (tools write; beforeModelCall reads). */
+  /** Durable session memory (tools write; hooks read). */
   readonly state: SessionStateBag;
   /** Session identity stub — Runtime fills this later. */
   readonly session: { readonly id: string };

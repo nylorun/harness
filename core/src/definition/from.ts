@@ -16,6 +16,7 @@ import type { CapabilityDynamics } from "./assemble.js";
 import { schemaFromJSON } from "./schema-json.js";
 import { copyJsonObject, deepFreeze } from "../utils/immutable.js";
 import type { BoundMiddleware } from "./bound.js";
+import { HOOK_POINTS, hasHook, hookListIssue } from "./hooks.js";
 
 /** A tool that exists for one execution and is not part of the hashed manifest. */
 export interface SessionToolRef {
@@ -49,16 +50,7 @@ export function agentFrom<Info = unknown>(
           );
         return live;
       });
-    if (capability.beforeModelCall && !impl.beforeModelCall)
-      throw new HarnessError(
-        "agent.build-failed",
-        `Missing beforeModelCall implementation for capability '${capability.id}'`
-      );
-    if (capability.afterModelCall && !impl.afterModelCall)
-      throw new HarnessError(
-        "agent.build-failed",
-        `Missing afterModelCall implementation for capability '${capability.id}'`
-      );
+    assertHookImplementations(capability, impl);
     const handle: StepMiddleware =
       (impl.middleware as StepMiddleware | undefined) ??
       (async (request, next) => {
@@ -117,8 +109,7 @@ export function agentFrom<Info = unknown>(
               }
             : {}),
         }),
-        ...(capability.beforeModelCall ? { beforeModelCall: true } : {}),
-        ...(capability.afterModelCall ? { afterModelCall: true } : {}),
+        ...(capability.hooks === undefined ? {} : { hooks: capability.hooks }),
         manifestType: capability.type,
         ...(capability.metadata === undefined
           ? {}
@@ -126,18 +117,17 @@ export function agentFrom<Info = unknown>(
         ...(capability.mcpServers === undefined
           ? {}
           : { mcpServers: capability.mcpServers }),
+        ...(capability.sandbox === undefined
+          ? {}
+          : { sandbox: capability.sandbox }),
         ...(capability.skills === undefined
           ? {}
           : { skills: capability.skills }),
       })
     );
     dynamics.set(capability.id, {
-      ...(impl.beforeModelCall
-        ? { beforeModelCall: impl.beforeModelCall as any }
-        : {}),
-      ...(impl.afterModelCall
-        ? { afterModelCall: impl.afterModelCall as any }
-        : {}),
+      ...(impl.before ? { before: impl.before as any } : {}),
+      ...(impl.after ? { after: impl.after as any } : {}),
       ...(impl.middleware ? { middleware: impl.middleware as any } : {}),
     });
   }
@@ -215,6 +205,26 @@ function resolveTools(
   });
 }
 
+function assertHookImplementations(
+  capability: CapabilityManifest,
+  impl: Implementations<any>[string]
+): void {
+  for (const point of HOOK_POINTS) {
+    const declared = hasHook(capability.hooks, point.at, point.scope);
+    const live = impl[point.at]?.[point.scope] !== undefined;
+    if (declared && !live)
+      throw new HarnessError(
+        "agent.build-failed",
+        `Missing ${point.at}("${point.scope}") implementation for capability '${capability.id}'`
+      );
+    if (live && !declared)
+      throw new HarnessError(
+        "agent.build-failed",
+        `Capability '${capability.id}' implements ${point.at}("${point.scope}") but the manifest does not declare it`
+      );
+  }
+}
+
 function normalizeManifest(json: AgentManifest | JsonObject): AgentManifest {
   if (!json || typeof json !== "object" || Array.isArray(json))
     throw new HarnessError(
@@ -244,10 +254,12 @@ function normalizeManifest(json: AgentManifest | JsonObject): AgentManifest {
       "agent.build-failed",
       "Manifest field schemaVersion was renamed to manifestSchemaVersion"
     );
-  if (value.manifestSchemaVersion !== 3)
+  if (value.manifestSchemaVersion !== 4)
     throw new HarnessError(
       "agent.build-failed",
-      `Unsupported manifestSchemaVersion ${String(value.manifestSchemaVersion)}`
+      value.manifestSchemaVersion === 3
+        ? "manifestSchemaVersion 3 is no longer supported; rebuild the agent with before/after hooks (see MIGRATION.md)"
+        : `Unsupported manifestSchemaVersion ${String(value.manifestSchemaVersion)}`
     );
   // Reject top-level model (Runtime-owned).
   if ("model" in value && value.model !== undefined)
@@ -281,7 +293,7 @@ function normalizeManifest(json: AgentManifest | JsonObject): AgentManifest {
       servers.add(name);
     }
   return deepFreeze({
-    manifestSchemaVersion: 3 as const,
+    manifestSchemaVersion: 4 as const,
     id: value.id,
     ...(typeof value.name === "string" && value.name ? { name: value.name } : {}),
     ...(typeof value.description === "string"
@@ -342,6 +354,20 @@ function normalizeCapability(
       "agent.build-failed",
       `Capability '${capability.id}' type must be agent or agent-plugin`
     );
+  for (const legacy of ["beforeModelCall", "afterModelCall"])
+    if (legacy in raw)
+      throw new HarnessError(
+        "agent.build-failed",
+        `Capability '${capability.id}' field ${legacy} was replaced by hooks (see MIGRATION.md)`
+      );
+  if (capability.hooks !== undefined) {
+    const issue = hookListIssue(capability.hooks);
+    if (issue)
+      throw new HarnessError(
+        "agent.build-failed",
+        `Capability '${capability.id}' ${issue}`
+      );
+  }
   const metadata =
     capability.metadata === undefined
       ? undefined
@@ -364,8 +390,22 @@ function normalizeCapability(
       : {}),
     ...(skills === undefined ? {} : { skills }),
     ...(mcpServers === undefined ? {} : { mcpServers }),
-    ...(capability.beforeModelCall ? { beforeModelCall: true } : {}),
-    ...(capability.afterModelCall ? { afterModelCall: true } : {}),
+    ...(capability.sandbox === undefined
+      ? {}
+      : {
+          sandbox: deepFreeze(
+            copyJsonObject(capability.sandbox as unknown as JsonObject, "sandbox")
+          ) as CapabilityManifest["sandbox"],
+        }),
+    ...(capability.hooks === undefined
+      ? {}
+      : {
+          hooks: Object.freeze(
+            capability.hooks.map((hook) =>
+              Object.freeze({ at: hook.at, scope: hook.scope })
+            )
+          ),
+        }),
   });
 }
 

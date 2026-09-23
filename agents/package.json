@@ -35,7 +35,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@nylorun/core": "0.2.0-beta"
+    "@nylorun/core": "0.2.0-beta",
+    "gray-matter": "^4.0.3"
   },
   "peerDependencies": {
     "zod": "^4.6.5"

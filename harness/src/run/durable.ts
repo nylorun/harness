@@ -4,6 +4,10 @@ import type { ExecutionInput, ExecutionState, RunResult } from "../types/executi
 import type { JsonObject } from "@nylorun/core/define";
 import type { Implementations } from "@nylorun/core/define";
 import type { ActionOutcome } from "@nylorun/core/contracts";
+import type { HookAt, HookScope } from "@nylorun/core/define";
+import { HOOK_POINTS, hasHook } from "@nylorun/core/define";
+import type { AgentDefinition } from "../definition/agent-definition.js";
+import type { HookRunner } from "../loop/step/hooks.js";
 import { AgentManifestSchema } from "@nylorun/core/contracts";
 import { agentFrom } from "@nylorun/core/define";
 import { definitionFor } from "../definition/agent-definition.js";
@@ -34,9 +38,15 @@ export interface HostEffect {
   readonly turnId: string;
   readonly agentId: string;
   readonly manifestHash: string;
-  readonly kind: "model" | "tool" | "beforeModelCall" | "afterModelCall";
+  readonly kind: "model" | "tool" | "hook";
   readonly capabilityId?: string;
   readonly toolName?: string;
+  /** For `hook` effects: the hook point and every capability that registered it, in manifest order. */
+  readonly hook?: {
+    readonly at: HookAt;
+    readonly scope: HookScope;
+    readonly capabilityIds: readonly string[];
+  };
   readonly input: unknown;
   readonly context: Record<string, unknown>;
 }
@@ -117,18 +127,17 @@ export async function runDurable(options: {
       checkpoint.state.executionId !== checkpoint.sessionId)
   )
     throw new HarnessError("execution.incompatible", "Checkpoint definition/session mismatch");
-  let serial = 0;
   const pending = new Map<string, "pending" | "uncertain">();
   const inFlight = new Set<Promise<unknown>>();
+  // Effect ids are derived from stable names, never call order, so replays line up.
   const effect = async (
     kind: HostEffect["kind"],
     input: unknown,
     context: Record<string, unknown>,
-    capabilityId?: string,
-    toolName?: string,
-    identity?: string,
+    identity: string,
+    target: Pick<HostEffect, "capabilityId" | "toolName" | "hook"> = {},
   ): Promise<ActionOutcome> => {
-    const effectId = `${checkpoint.turnId}:${checkpoint.segment}:${kind}:${identity ?? ++serial}`;
+    const effectId = `${checkpoint.turnId}:${checkpoint.segment}:${kind}:${identity}`;
     const request: HostEffect = JSON.parse(
       JSON.stringify({
         effectId,
@@ -139,8 +148,7 @@ export async function runDurable(options: {
         kind,
         input,
         context,
-        ...(capabilityId ? { capabilityId } : {}),
-        ...(toolName ? { toolName } : {}),
+        ...target,
       }),
     );
     const operation = host.resolveEffect(request);
@@ -192,9 +200,8 @@ export async function runDurable(options: {
             state: ctx.state.entries(),
             resume: ctx.resume,
           },
-          capabilityId,
-          tool.name,
           ctx.invocationId,
+          { capabilityId, toolName: tool.name },
         );
         // Apply concurrently resolved patches in manifest call order, independent of host I/O timing.
         await previous;
@@ -225,19 +232,8 @@ export async function runDurable(options: {
       if (tool.capabilityId === capability.id) tools[tool.name] = hostedTool(capability.id, tool);
     implementations[capability.id] = {
       tools,
-      ...(capability.beforeModelCall
-        ? {
-            beforeModelCall: async (args: any) =>
-              (await effect("beforeModelCall", args, { info: checkpoint.info }, capability.id))
-                .value as any,
-          }
-        : {}),
-      ...(capability.afterModelCall
-        ? {
-            afterModelCall: async (args: any, ctx: any) =>
-              (await effect("afterModelCall", args, ctx, capability.id)).value as any,
-          }
-        : {}),
+      // Hooks run through runHooks below, one effect per hook point; these only satisfy binding.
+      ...hookPlaceholders(capability.hooks),
     };
   }
   const definition = definitionFor(
@@ -257,9 +253,20 @@ export async function runDurable(options: {
   // Manifest reconstruction must retain definition identity, including schemas and instructions.
   if (definition.hash !== checkpoint.manifestHash)
     throw new HarnessError("execution.incompatible", "Reconstructed definition hash mismatch");
+  // All capabilities registered at a hook point share one effect, so one executor round trip.
+  const runHooks: HookRunner = async ({ point, capabilityIds, args, identity }) => {
+    const outcome = await effect("hook", args, { info: checkpoint.info }, identity, {
+      hook: { at: point.at, scope: point.scope, capabilityIds },
+    });
+    const results = (outcome.value as { results?: unknown } | null)?.results;
+    return results !== null && typeof results === "object" && !Array.isArray(results)
+      ? (results as Record<string, unknown>)
+      : {};
+  };
+  const hosted: AgentDefinition = Object.freeze({ ...definition, runHooks });
   try {
     const result = await withDeterministicIds(`${checkpoint.turnId}_${checkpoint.segment}`, () =>
-      execute(definition, {
+      execute(hosted, {
         state:
           checkpoint.state ??
           initializeExecutionState(definition, { executionId: checkpoint.sessionId }),
@@ -272,8 +279,6 @@ export async function runDurable(options: {
               "model",
               call,
               { request: ctx.request, invocationId: ctx.invocationId },
-              undefined,
-              undefined,
               ctx.invocationId,
             )
           ).value as any,
@@ -290,4 +295,14 @@ export async function runDurable(options: {
       effectIds: [...pending.keys()],
     };
   }
+}
+
+function hookPlaceholders(hooks: AgentManifest["capabilities"][number]["hooks"]) {
+  const placeholder = () => {
+    throw new HarnessError("execution.incompatible", "Hosted hooks run through the host effect");
+  };
+  const table: { before?: Record<string, unknown>; after?: Record<string, unknown> } = {};
+  for (const point of HOOK_POINTS)
+    if (hasHook(hooks, point.at, point.scope)) (table[point.at] ??= {})[point.scope] = placeholder;
+  return table;
 }

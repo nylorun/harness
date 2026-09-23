@@ -3,7 +3,7 @@ import type { BuiltAgent } from "../types/agent.js";
 import type { AgentManifest, RuntimeManifest } from "../types/manifest.js";
 import type { BuildDiagnostic, JsonObject } from "../types/shared.js";
 import type { ToolSchemaSource } from "../types/tool.js";
-import type { AfterModelCallFn, BeforeModelCallFn } from "../types/dynamics.js";
+import type { AfterHooks, BeforeHooks } from "../types/dynamics.js";
 import type { StepMiddleware } from "../types/middleware.js";
 import type { SkillRecord } from "../types/middleware.js";
 import { bindAgent } from "./bind-agent.js";
@@ -19,8 +19,8 @@ type BuildResult<Agent> =
   | { readonly ok: false; readonly diagnostics: readonly BuildDiagnostic[] };
 
 export interface CapabilityDynamics {
-  readonly beforeModelCall?: BeforeModelCallFn<any>;
-  readonly afterModelCall?: AfterModelCallFn<any>;
+  readonly before?: BeforeHooks<any>;
+  readonly after?: AfterHooks<any>;
   readonly middleware?: StepMiddleware<any>;
 }
 
@@ -101,8 +101,7 @@ export function assembleAgent(
           ...(item.contributions === undefined
             ? {}
             : { contributions: item.contributions }),
-          ...(item.beforeModelCall ? { beforeModelCall: true } : {}),
-          ...(item.afterModelCall ? { afterModelCall: true } : {}),
+          ...(item.hooks === undefined ? {} : { hooks: item.hooks }),
           ...(item.manifestType === undefined
             ? {}
             : { manifestType: item.manifestType }),
@@ -110,6 +109,7 @@ export function assembleAgent(
           ...(item.mcpServers === undefined
             ? {}
             : { mcpServers: item.mcpServers }),
+          ...(item.sandbox === undefined ? {} : { sandbox: item.sandbox }),
           ...(item.skills === undefined ? {} : { skills: item.skills }),
           ...(item.skillRecords === undefined
             ? {}
@@ -125,6 +125,24 @@ export function assembleAgent(
 
   const skilled = attachSkillTools(frozen);
   diagnostics.push(...skilled.diagnostics);
+  // The wire schema rejects tool names shared across capabilities; report them at build time
+  // with both owners. Duplicates within one capability keep their registration-time error.
+  const toolOwners = new Map<string, string>();
+  for (const item of skilled.items)
+    for (const entry of item.tools ?? []) {
+      const owner = toolOwners.get(entry.name);
+      if (owner !== undefined && owner !== item.id)
+        diagnostics.push(
+          diagnostic(
+            "tool.duplicate-name",
+            `Tool '${entry.name}' is declared by capabilities '${owner}' and '${item.id}'` +
+              (owner === "sandbox" || item.id === "sandbox"
+                ? "; sandbox() provides built-in bash, read, write, edit, grep and glob tools, so rename yours"
+                : "")
+          )
+        );
+      else toolOwners.set(entry.name, item.id);
+    }
 
   if (diagnostics.length)
     return Object.freeze({

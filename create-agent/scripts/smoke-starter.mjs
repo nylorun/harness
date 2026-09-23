@@ -18,6 +18,8 @@ import { availablePort } from "../../scripts/lib/development.mjs";
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-release-"));
 const group = new ProcessGroup();
 let browser;
+// Declared outside the try so the finally can reap detached Runtimes started in either project.
+const projects = [];
 const tarballs = process.env.NYLORUN_STACK_TARBALLS
   ? JSON.parse(await readFile(process.env.NYLORUN_STACK_TARBALLS, "utf8"))
   : {};
@@ -56,7 +58,6 @@ try {
   const pins = JSON.parse(
     await readFile(join(creator, "package/compatibility.json"), "utf8"),
   );
-  const projects = [];
   for (const studio of [true, false]) {
     const project = join(temporary, studio ? "with-studio" : "headless");
     await mkdir(project);
@@ -84,6 +85,17 @@ try {
     projects.push(project);
   }
   const project = projects[0];
+  // The Runtime is a separate, persistent process now, so the smoke drives it explicitly.
+  const nylorun = (cwd, args, extra = {}) =>
+    run(
+      process.execPath,
+      [join(cwd, "node_modules/@nylorun/cli/dist/cli.js"), ...args],
+      { cwd, ...extra },
+    );
+  const runtimePid = async (cwd) =>
+    Number(
+      await readFile(join(cwd, ".nylorun/runtime.pid"), "utf8").catch(() => ""),
+    ) || undefined;
   const port = await availablePort();
   const url = `http://127.0.0.1:${port}`;
   const env = {
@@ -186,7 +198,17 @@ try {
     await new Promise((r) => setTimeout(r, 100));
   }
   assert.ok(updated, "source edit restarted registry");
+  // A source edit re-registers against the same host rather than respawning it.
+  const devPid = await runtimePid(project);
+  assert.ok(devPid, "dev started a Runtime");
+  assert.equal(
+    (await (await fetch(`${url}/health`)).json()).pid,
+    devPid,
+    "source edit reused the running Runtime",
+  );
   await dev.stop();
+  // Stopping dev must leave the Runtime up; the compiled check attaches to this same host.
+  assert.equal((await (await fetch(`${url}/health`)).json()).pid, devPid);
   await run(process.execPath, [npmCli(), "run", "build"], { cwd: project });
   const started = group.start(
     "compiled-start",
@@ -195,6 +217,11 @@ try {
     { cwd: project, env },
   );
   await started.line((l) => l.startsWith("Local project ready"));
+  assert.equal(
+    await runtimePid(project),
+    devPid,
+    "compiled serve attached to the running Runtime",
+  );
   const sdk = await import(
     pathToFileURL(join(project, "node_modules/@nylorun/agents/dist/index.js"))
       .href
@@ -228,26 +255,52 @@ try {
   }
   assert.ok(complete, "compiled start executes tool");
   await started.stop();
+  await nylorun(project, ["down"]);
+  assert.equal(await runtimePid(project), undefined);
+  await assert.rejects(fetch(`${url}/health`));
+  // Stopping the Runtime keeps its data.
+  await stat(join(project, ".nylorun/runtime.sqlite"));
+  await stat(join(project, ".nylorun/local-credentials.json"));
+  const headlessPort = await availablePort();
+  const headlessEnv = { ...env, PORT: String(headlessPort) };
   const headless = group.start(
     "headless-dev",
     process.execPath,
     [npmCli(), "run", "dev", "--", "--no-open"],
-    { cwd: projects[1], env: { ...env, PORT: String(await availablePort()) } },
+    { cwd: projects[1], env: headlessEnv },
   );
   await headless.line((l) => l.startsWith("Local project ready"));
   await headless.stop();
+  // serve autostarts before the model credential is checked, so this failure path also has a
+  // Runtime to clean up; the port is explicit so it can never collide with a real 8787.
   const missing = group.start(
     "missing-config",
     process.execPath,
     [npmCli(), "start"],
-    { cwd: projects[1], env: { ...process.env, NYLORUN_DEV_MODEL: "" } },
+    {
+      cwd: projects[1],
+      env: {
+        ...process.env,
+        PORT: String(headlessPort),
+        NYLORUN_DEV_MODEL: "",
+      },
+    },
   );
-  await missing.line((l) => l.includes("configure"));
+  await missing.line((l) => l.includes("not configured"));
   assert.notEqual(await missing.exit, 0);
+  await nylorun(projects[1], ["down"]);
   console.log(
     "PASS: packed creator, both starters, browser tool/results/history, source restart, compiled tool execution, shutdown, credentials, and missing-configuration error.",
   );
 } finally {
+  // Detached Runtimes are deliberately outside the process group, so reap them by pid.
+  for (const project of projects)
+    try {
+      const pid = Number(
+        await readFile(join(project, ".nylorun/runtime.pid"), "utf8"),
+      );
+      if (Number.isSafeInteger(pid) && pid > 0) process.kill(pid, "SIGKILL");
+    } catch {}
   await browser?.close();
   await group.close();
   await rm(temporary, { recursive: true, force: true });

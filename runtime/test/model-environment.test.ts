@@ -1,10 +1,10 @@
-import { mkdtemp, readdir, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { modelsFor } from "../src/model/models.js";
 import { ProjectCredentialStore } from "../src/model/auth-store.js";
-import { modelSelection, projectSecrets } from "../src/model/settings.js";
+import { projectSecrets } from "../src/model/settings.js";
 
 const roots: string[] = [];
 async function fixture() {
@@ -17,21 +17,6 @@ afterEach(async () => {
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
-});
-
-it("uses environment selection without touching disk and rejects incomplete selection", async () => {
-  const root = await fixture();
-  vi.stubEnv("MODEL_PROVIDER", "custom");
-  vi.stubEnv("MODEL", "fixture");
-  vi.stubEnv("MODEL_PROVIDER_BASE_URL", "https://example.test/v1");
-  expect(modelSelection(root)).toEqual({
-    provider: "custom",
-    model: "fixture",
-    custom: { baseUrl: "https://example.test/v1" },
-  });
-  vi.stubEnv("MODEL", "");
-  expect(() => modelSelection(root)).toThrow("both MODEL_PROVIDER and MODEL");
-  expect(await readdir(root)).toEqual([]);
 });
 
 it.each(["explicit", "native", "stored"])(

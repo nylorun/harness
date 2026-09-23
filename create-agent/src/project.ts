@@ -42,13 +42,6 @@ export async function createProject(
     );
   if (await dependencies.exists(destination))
     throw new Error(`Target directory already exists: ${destination}`);
-  if (!options.skipConfig && !dependencies.isInteractive())
-    throw new Error(
-      "Provider configuration requires interactive stdin and stdout. " +
-        `To configure later, run: npm create @nylorun/agent@beta ${quote(
-          options.directory
-        )} -- --skip-config`
-    );
   dependencies.signal?.throwIfAborted();
   const temporary = join(
     dirname(destination),
@@ -77,17 +70,9 @@ export async function createProject(
   }
   dependencies.log("Installing dependencies...");
   await stage("Installation", ["install", ...(options.yes ? ["--yes"] : [])]);
-  if (options.skipConfig) {
-    dependencies.log(
-      `Provider configuration skipped. Configure later in another terminal:\ncd ${quote(
-        destination
-      )}\nnpm run configure`
-    );
-  } else {
-    dependencies.log("Configuring your provider and model...");
-    await stage("Provider configuration", ["run", "configure"]);
-  }
-  dependencies.log("Starting development...");
+  dependencies.log(
+    "Starting development. The first start sets up the model provider in the Runtime vault.",
+  );
   await stage("Development", [
     "run",
     "dev",
@@ -107,11 +92,9 @@ export async function createProject(
         throw new Error(`${name} failed.`);
     } catch (error) {
       const cancelled = error instanceof CreationCancelled;
-      const configured = name === "Development" && !options.skipConfig;
       const recovery = [
         `cd ${quote(destination)}`,
         ...(name === "Installation" ? ["npm install"] : []),
-        ...(configured ? [] : ["npm run configure"]),
         "npm run dev",
       ].join("\n");
       throw new CreationError(

@@ -1,8 +1,8 @@
 # Harness examples
 
-The default registry exports one SDK order-lookup agent from `agents/release/`. Runtime and the connected tool executor run as separate processes; Studio uses the session HTTP/SSE API.
+The default registry exports two agents from `agents/release/`: an SDK order-lookup assistant and a data analyst with a sandbox. Runtime and the connected tool executor run as separate processes; Studio uses the session HTTP/SSE API.
 
-The eleven older demonstrations remain as source references under `agents/` and `legacy-registry.ts`, outside the release registry. Their descriptions below are historical and do not establish support in the new host.
+The ten older demonstrations remain as source references under `agents/`, outside the release registry. Their descriptions below are historical and do not establish support in the new host.
 
 ## Install and configure
 
@@ -10,15 +10,27 @@ Use the repository toolchain in [CONTRIBUTING.md](../CONTRIBUTING.md). From the 
 
 ```sh
 npm run setup
-npm run configure
 npm run dev
 ```
 
-Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 8787. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup.
+Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 8787. The first start stores the model provider in the Runtime vault. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup. `npm run configure` replaces the vault credential while the Runtime is already running.
 
-Model selection and API keys use `.env`: set `MODEL_PROVIDER`, `MODEL`, `MODEL_PROVIDER_API_KEY`, and (for custom endpoints) `MODEL_PROVIDER_BASE_URL`, or run `npm run configure`. Existing `.env/` directories require [manual migration](../runtime/README.md#upgrading-an-existing-starter); local state is never moved automatically.
+`MODEL_PROVIDER`, `MODEL`, and `MODEL_PROVIDER_API_KEY` (and `MODEL_PROVIDER_BASE_URL` for a custom endpoint) seed the vault once when they are already set. They are not the call-time store. Existing `.env/` directories require [manual migration](../runtime/README.md#upgrading-an-existing-starter); local state is never moved automatically.
 
 Optional integration variables are loaded from `.env`. Interior Design uses `OPENAI_API_KEY` and optional `OPENAI_IMAGE_MODEL` independently of the chat provider. Its selected chat model must support images. Codex continues using its own authentication. Never commit credentials.
+
+## Data analyst (sandbox)
+
+[`agents/release/analyst.ts`](./agents/release/analyst.ts) is one line on top of a plain agent:
+
+```ts
+Agent({ id: "analyst", instructions: "..." }).use(sandbox())
+```
+
+The model gets `bash`, `read`, `write`, `edit`, `grep` and `glob` on an isolated Linux machine with a persistent `/workspace`. The Runtime runs those tools itself and picks the machine: a microsandbox VM on macOS with Apple Silicon or Linux with KVM, otherwise an emulated shell. The `nylorun dev` banner prints which one, and `npx nylorun doctor sandbox` explains the choice. Try in Studio:
+
+- `Create sales.csv with three regions and numbers, then use Python to total them.`
+- `Download https://example.com with curl.` The request is blocked: the default `dev` network preset allows only package registries and code hosts.
 
 ## Generated shell and authored examples
 
@@ -35,7 +47,6 @@ The creator owns the shell files listed in `.scaffold-manifest.json`, including 
 | **Guardrails**      | `Publish the password is hunter2.`                                                              | The publish call is denied. The four policy surfaces are listed after this table.                                                                                   |
 | **Interactions**    | `Ask me what to name the note, then save it.`                                                   | Studio asks a question, then asks for approval before `write_note`.                                                                                                 |
 | **Local MCP**       | `Use the MCP tool to add 12 and 30.`                                                            | The bundled stdio MCP server is discovered, called, and closed cleanly when the server stops.                                                                       |
-| **Sandbox**         | `Create hello.txt containing hello, list the workspace, then read it.`                          | After Docker preflight, see isolated filesystem and shell tool activity.                                                                                            |
 | **Code Mode**       | `Calculate 100 / 4, convert that many celsius to fahrenheit, and include the current UTC time.` | One `run_code` call. The program uses `await tools.*` and returns one object (25 °C → 77 °F plus `iso`).                                                            |
 | **Subagents**       | `Ask the tool-use specialist to calculate 19 * 7.`                                              | A `delegate` call runs the child agent; the parent reports the specialist's answer. The other specialists are `instructions` (format-only) and `skills` (SKILL.md). |
 | **Coding Agent**    | `Add a goodbye function next to hello and show the file.`                                       | After Codex preflight and approval, `codex exec` runs in a temporary workspace.                                                                                     |
@@ -84,41 +95,6 @@ For example: `Preserve hello in the seeded hello.js, add an exported goodbye fun
 show the resulting file, and verify both functions.` Review that task in Studio's
 approval prompt before allowing execution.
 
-`GET /` is the application-owned agent list. Studio discovers agents through
-`GET /agents/v1/agents`, then reads each Runtime-served
-`/agents/:id/manifest.json`. Pass matching `basePath: "/agents"` when the app
-mounts `serveAgents` at `/agents` so discovery advertises those live URLs. The
-agent-scoped endpoints are:
-
-| Endpoint                                      | Purpose                                                     |
-| --------------------------------------------- | ----------------------------------------------------------- |
-| `GET /`                                       | Application agent list and manifests                        |
-| `GET /agents/v1/agents`                       | Agent IDs and manifest URLs                                 |
-| `GET /agents/:id/manifest.json`        | One neutral agent manifest                                  |
-| `POST /agents/:id/v1/ag-ui`            | AG-UI SSE run stream                                        |
-| `GET/POST /agents/:id/v1/sessions/...` | Sessions, canonical events, history, approvals, and replies |
-
-### Image input
-
-When an example manifest advertises `mediaInput`, Studio enables one JPEG, PNG, or WebP attachment
-per message (up to 8 MiB). It sends AG-UI's native base64 image input and the Hono host converts it
-to Harness's ordered text/media content. The raw image reaches the selected vision provider; do not
-upload sensitive images unless that provider is acceptable for the task. Studio displays the
-session-local preview through the examples server and never receives provider credentials.
-
-## Docker agents
-
-Docker is lazy and opt-in: all eleven agents remain visible if it is unavailable. Before trying
-Sandbox, run:
-
-```sh
-npm run docker:preflight
-```
-
-Containers have no network, a read-only root filesystem, dropped capabilities, no-new-privileges,
-non-root execution, and CPU, memory, PID, output, and time limits. The only mount is an isolated
-session workspace; Docker never receives your repository or home directory.
-
 ## Codex CLI
 
 The Coding Agent shells out to a host-installed Codex CLI. Auth is Codex's own
@@ -149,7 +125,7 @@ Capability modules stay small:
 - [review](./agents/interactions/approval.ts) requires approval before a write candidate is accepted.
 - [guardrails](./agents/guardrails/capability.ts) maps OpenAI-style input, output, tool-input, and tool-output checks onto middleware timing.
 - [skills](./agents/skills/capability.ts) is one `.use(await skills())` call: a SKILL.md catalog plus `load_skill`.
-- [sandbox](./agents/sandbox/capability.ts) and [codex](./agents/coding-agent/capability.ts) wrap host runtimes.
+- [codex](./agents/coding-agent/capability.ts) wraps a host runtime. For an isolated machine, use `.use(sandbox())` as in [analyst](./agents/release/analyst.ts).
 - [subagents](./agents/subagents/capability.ts) runs another `BuiltAgent` through a delegate tool.
 
 Add or remove skills on an agent with one capability. Author `name/SKILL.md` (frontmatter `name` + `description`) under [agents/skills/catalog](./agents/skills/catalog), then:
