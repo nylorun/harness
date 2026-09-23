@@ -107,8 +107,6 @@ export async function develop(
       { cwd: project, env: { ...process.env, PORT: String(options.port) } }
     );
     await runtime.ready(`http://127.0.0.1:${options.port}/ready`);
-    // Persistent Runtime answers /ready before saveAgent finishes (dx-improvements).
-    await runtime.line((line) => line.startsWith("Local project ready"));
   }
   async function startStudio(open) {
     if (stopping || !options.studio) return;
