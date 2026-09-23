@@ -11,7 +11,14 @@ export type {
   HarnessErrorDetails,
   HarnessErrorOptions,
 } from "./errors.js";
-export type { BuiltAgent } from "./types/agent.js";
+export type { AgentTool, BuiltAgent } from "./types/agent.js";
+export {
+  DELEGATE_INPUT_SCHEMA,
+  delegateManifest,
+  delegateOf,
+  delegatesOf,
+} from "./definition/delegate.js";
+export type { Delegate } from "./definition/delegate.js";
 export { capability, middleware, model, tool } from "./definition/helpers.js";
 export { ToolError, isToolError } from "./definition/tool-error.js";
 export { defineSchema } from "./definition/schema.js";
@@ -47,6 +54,7 @@ export type {
 } from "./types/manifest.js";
 export type {
   CapabilityDeclaration,
+  CapabilityInput,
   CapabilityItems,
   MiddlewareContributions,
   SkillRecord,
@@ -137,6 +145,7 @@ export type {
   ToolDefinition,
   ToolDescriptor,
   ToolExecutionContext,
+  AgentRef,
   ToolExecutionResume,
   ToolInputSchema,
   ToolOutputSchema,

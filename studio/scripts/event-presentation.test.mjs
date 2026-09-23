@@ -67,3 +67,26 @@ test("mergeStudioEvents prefers committed and keeps newest first", () => {
   assert.equal(merged[0]?.eventId, "b");
   assert.equal(merged.find((e) => e.eventId === "a")?.committed, true);
 });
+
+test("names delegations and the agent behind child actions", () => {
+  const agent = { id: "researcher", path: "support/researcher", delegationId: "d1" };
+  assert.equal(eventLabel({ type: "delegation.started" }), "Delegation started");
+  assert.equal(
+    eventSummary({ type: "delegation.started", payload: { agent, task: "Find order 7" } }),
+    "researcher: Find order 7",
+  );
+  assert.equal(
+    eventSummary({
+      type: "delegation.completed",
+      payload: { agent, status: "completed", outcome: { kind: "completed", output: "Shipped" } },
+    }),
+    "researcher completed: Shipped",
+  );
+  assert.equal(
+    eventSummary({
+      type: "action.pending",
+      payload: { agent, toolName: "search_orders", input: { query: "7" } },
+    }),
+    'researcher › Tool · search_orders: {"query":"7"}',
+  );
+});

@@ -7,6 +7,7 @@ import type {
   ToolSchemaSource,
 } from "../types/tool.js";
 import { prepareTool } from "./schema.js";
+import { delegateTool, isAgentItem } from "./delegate.js";
 
 export const tool = <
   InputSchema extends ToolInputSchema,
@@ -32,7 +33,7 @@ export function capability<Info = unknown>(declaration: {
   readonly id: string;
   readonly name?: string;
   readonly description?: string;
-  readonly tools?: readonly ToolDefinition<any, Info, any>[];
+  readonly tools?: readonly (ToolDefinition<any, Info, any> | import("../types/agent.js").AgentTool)[];
   readonly instructions?: string | readonly string[];
   /** Run before each turn or before every model call (step). */
   readonly before?: import("../types/dynamics.js").BeforeHooks<Info>;
@@ -55,7 +56,15 @@ export function capability<Info = unknown>(declaration: {
     ...(declaration.description === undefined
       ? {}
       : { description: declaration.description }),
-    ...(declaration.tools === undefined ? {} : { tools: declaration.tools }),
+    ...(declaration.tools === undefined
+      ? {}
+      : {
+          tools: declaration.tools.map((item) =>
+            isAgentItem(item)
+              ? delegateTool(item)
+              : (item as ToolDefinition<any, Info, any>)
+          ),
+        }),
     ...(instructions === undefined ? {} : { instructions }),
     ...(declaration.before === undefined ? {} : { before: declaration.before }),
     ...(declaration.after === undefined ? {} : { after: declaration.after }),

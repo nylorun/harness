@@ -1,4 +1,5 @@
 import {
+  delegateOf,
   implementationsFor,
   isToolError,
   normalizeToolDefinition,
@@ -19,9 +20,12 @@ const object = (value: unknown): Record<string, any> =>
 /** Executes code only after a host-issued claim. No engine dependency. */
 export async function executeAction(
   action: Action,
-  agent: BuiltAgent,
+  root: BuiltAgent,
   signal: AbortSignal
 ): Promise<ActionOutcome> {
+  // Work for an agent used as a tool runs that agent's code, served from the root's binding.
+  const agent = action.agent ? delegatedAgent(root, action.agent.id) : root;
+  const ref = action.agent ?? { id: root.id, path: root.id };
   if (action.kind === "hook")
     // All capabilities at this hook point run concurrently in one action. Never throws.
     return {
@@ -98,6 +102,7 @@ export async function executeAction(
     signal,
     info: ctx.info,
     session: { id: action.sessionId },
+    agent: ref,
     ...(ctx.resume ? { resume: ctx.resume as any } : {}),
     state: {
       get: (key) => state[key],
@@ -191,6 +196,13 @@ export async function executeAction(
       statePatch,
     };
   }
+}
+function delegatedAgent(root: BuiltAgent, id: string): BuiltAgent {
+  for (const capability of Object.values(implementationsFor(root))) {
+    const child = delegateOf(capability.tools?.[id])?.agent;
+    if (child) return child;
+  }
+  throw new Error(`Agent '${root.id}' does not use '${id}' as a tool`);
 }
 function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);

@@ -14,6 +14,7 @@ export async function createSkills(
   const agent = Agent({
     id: "skills",
     name: "Skills",
+    description: "Loads a SKILL.md procedure, such as a code review or a structured summary, and follows it.",
     instructions: exampleInstructions,
   })
     .use(modelSelection(deps.provider, deps.model))

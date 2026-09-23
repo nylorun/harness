@@ -10,6 +10,7 @@ export function createInstructions(deps: AgentDependencies): ExampleAgent {
   const agent = Agent({
     id: "instructions",
     name: "Instructions",
+    description: "Answers in exactly three short sentences of plain prose, from instructions alone. Has no tools.",
     instructions: [
       "You have no tools. Answer in exactly three short sentences.",
       "Do not use lists, headings, or code fences.",

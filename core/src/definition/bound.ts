@@ -6,6 +6,7 @@ import type {
 } from "../types/manifest.js";
 import type { SkillRecord } from "../types/middleware.js";
 import type { HookManifest } from "../types/dynamics.js";
+import type { Delegate } from "./delegate.js";
 import type {
   MiddlewareContributions,
   StepMiddleware,
@@ -38,6 +39,8 @@ export interface BoundToolDefinition<Info = unknown>
   readonly effects?: ToolEffects;
   readonly owner: ToolOwner;
   readonly source: ToolDefinition<any, any, any>;
+  /** Set when this tool is an agent used as a tool; the engine runs it. */
+  readonly delegate?: Delegate;
 }
 
 export interface BoundMiddleware {

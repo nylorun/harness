@@ -9,3 +9,9 @@ export interface BuiltAgent<Info = unknown, Output = string> {
   toJSON(): AgentManifest;
   getBinding(): AgentBinding;
 }
+
+/**
+ * An agent placed in another agent's `tools`: a built agent or an `Agent(...)` builder.
+ * It becomes a tool named after the agent's id that takes `{ task: string }`.
+ */
+export type AgentTool = Pick<BuiltAgent<any, any>, "id" | "manifest" | "getBinding">;

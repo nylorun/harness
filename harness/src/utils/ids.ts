@@ -10,3 +10,8 @@ export function createId(prefix: string): string {
   value.counts.set(prefix, count);
   return `${prefix}_${value.seed}_${count}`;
 }
+/** Run `fn` with its own id counters, seeded under the current scope, so concurrent work stays deterministic. */
+export function withNestedIds<T>(suffix: string, fn: () => T): T {
+  const value = scope.getStore();
+  return value ? scope.run({ seed: `${value.seed}_${suffix}`, counts: new Map() }, fn) : fn();
+}

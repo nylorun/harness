@@ -3,6 +3,7 @@ import type { InputEvent, MessageInput, TranscriptEntry } from "@nylorun/core/de
 import type { ObserveEvent } from "@nylorun/core/define";
 import type { JsonObject, JsonValue, Tripwire } from "@nylorun/core/define";
 import type {
+  AgentRef,
   RequiredInteraction,
   ToolExecutionResume,
   ToolOutcome,
@@ -116,7 +117,13 @@ export type ExecutionEvent = (
         | "observation.failed";
       readonly attributes?: JsonObject;
     }
-) & { readonly executionId: string; readonly sequence: number; readonly runId: string };
+) & {
+  readonly executionId: string;
+  readonly sequence: number;
+  readonly runId: string;
+  /** Set on events forwarded from an agent used as a tool. */
+  readonly agent?: AgentRef;
+};
 
 export interface RunOptions<Info = unknown> {
   readonly state?: ExecutionState;

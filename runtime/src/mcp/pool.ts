@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { AgentManifest, McpServerManifest } from "@nylorun/core/define";
+import { delegatesOf } from "@nylorun/core/define";
 import type { AuthorizeResult } from "../vault/service.js";
 import {
   callMcpTool,
@@ -41,7 +42,8 @@ export class McpPool {
     pluginRoots: Readonly<Record<string, string>>;
     signal?: AbortSignal;
   }): Promise<{ snapshot: McpSnapshot; diagnostics: McpDiagnostic[] }> {
-    const taken = declaredToolNames(input.manifest);
+    // Each agent names its own tools, so collisions are checked per agent.
+    const taken = new Map<string | undefined, Set<string>>();
     const tools: McpToolRecord[] = [];
     const diagnostics: McpDiagnostic[] = [];
     for (const declared of serversOf(input.manifest)) {
@@ -52,13 +54,16 @@ export class McpPool {
         continue;
       }
       try {
+        if (!taken.has(declared.agentId))
+          taken.set(declared.agentId, declaredToolNames(declared.manifest));
         const listed = await listMcpTools(opened.connection.client, {
           capabilityId: declared.capabilityId,
           serverName: declared.server.name,
-          taken,
+          taken: taken.get(declared.agentId)!,
         });
-        tools.push(...listed.tools);
+        tools.push(...listed.tools.map((tool) => owned(declared, tool)));
         diagnostics.push({
+          ...ownerOf(declared),
           capabilityId: declared.capabilityId,
           serverName: declared.server.name,
           outcome: "connected",
@@ -71,7 +76,7 @@ export class McpPool {
       } catch (error) {
         await opened.connection.close().catch(() => {});
         diagnostics.push(
-          diagnosticFromError(declared.capabilityId, declared.server.name, error),
+          owned(declared, diagnosticFromError(declared.capabilityId, declared.server.name, error)),
         );
       }
     }
@@ -95,18 +100,15 @@ export class McpPool {
     const diagnostics: McpDiagnostic[] = [];
     const seen = new Set<string>();
     for (const tool of input.tools) {
-      const key = `${tool.capabilityId}\0${tool.serverName}`;
+      const key = this.liveKey(input.sessionId, tool.agentId, tool.capabilityId, tool.serverName);
       if (seen.has(key)) continue;
       seen.add(key);
-      if (this.live.has(this.liveKey(input.sessionId, tool.capabilityId, tool.serverName)))
-        continue;
+      if (this.live.has(key)) continue;
       input.signal?.throwIfAborted();
-      const declared = serversOf(input.manifest).find(
-        (item) =>
-          item.capabilityId === tool.capabilityId && item.server.name === tool.serverName,
-      );
+      const declared = findServer(input.manifest, tool.agentId, tool.capabilityId, tool.serverName);
       if (!declared) {
         diagnostics.push({
+          ...(tool.agentId === undefined ? {} : { agentId: tool.agentId }),
           capabilityId: tool.capabilityId,
           serverName: tool.serverName,
           outcome: "failed",
@@ -126,6 +128,7 @@ export class McpPool {
 
   async call(input: {
     sessionId: string;
+    agentId?: string;
     capabilityId: string;
     serverName: string;
     serverToolName: string;
@@ -133,12 +136,14 @@ export class McpPool {
     manifest: AgentManifest;
     pluginRoots: Readonly<Record<string, string>>;
   }): Promise<Awaited<ReturnType<typeof callMcpTool>>> {
-    const key = this.liveKey(input.sessionId, input.capabilityId, input.serverName);
+    const key = this.liveKey(input.sessionId, input.agentId, input.capabilityId, input.serverName);
     let live = this.live.get(key);
     if (!live) {
-      const declared = serversOf(input.manifest).find(
-        (item) =>
-          item.capabilityId === input.capabilityId && item.server.name === input.serverName,
+      const declared = findServer(
+        input.manifest,
+        input.agentId,
+        input.capabilityId,
+        input.serverName,
       );
       if (!declared) throw new Error(`MCP server '${input.serverName}' is not declared`);
       const opened = await this.connectDeclared(input, declared);
@@ -161,15 +166,23 @@ export class McpPool {
     declared: DeclaredServer,
     connection: LiveConnection,
   ): void {
-    this.live.set(this.liveKey(sessionId, declared.capabilityId, declared.server.name), {
-      capabilityId: declared.capabilityId,
-      serverName: declared.server.name,
-      connection,
-    });
+    this.live.set(
+      this.liveKey(sessionId, declared.agentId, declared.capabilityId, declared.server.name),
+      {
+        capabilityId: declared.capabilityId,
+        serverName: declared.server.name,
+        connection,
+      },
+    );
   }
 
-  private liveKey(sessionId: string, capabilityId: string, serverName: string): string {
-    return JSON.stringify([sessionId, capabilityId, serverName]);
+  private liveKey(
+    sessionId: string,
+    agentId: string | undefined,
+    capabilityId: string,
+    serverName: string,
+  ): string {
+    return JSON.stringify([sessionId, agentId ?? null, capabilityId, serverName]);
   }
 
   private async connectDeclared(
@@ -182,8 +195,8 @@ export class McpPool {
     try {
       const connection = await openMcpServer({
         server: declared.server,
-        pluginRoot: input.pluginRoots[declared.capabilityId],
-        pluginData: join(this.options.dataDir, "plugin-data", declared.capabilityId),
+        pluginRoot: input.pluginRoots[pluginKey(declared)],
+        pluginData: join(this.options.dataDir, "plugin-data", ...pluginKey(declared).split("/")),
         authorize:
           declared.server.type === "stdio"
             ? undefined
@@ -197,21 +210,67 @@ export class McpPool {
     } catch (error) {
       return {
         ok: false,
-        diagnostic: diagnosticFromError(declared.capabilityId, declared.server.name, error),
+        diagnostic: owned(
+          declared,
+          diagnosticFromError(declared.capabilityId, declared.server.name, error),
+        ),
       };
     }
   }
 }
 
 interface DeclaredServer {
+  /** Absent for the session's root agent. */
+  readonly agentId?: string;
+  /** The manifest of the agent that declares the server. */
+  readonly manifest: AgentManifest;
   readonly capabilityId: string;
   readonly server: McpServerManifest;
 }
 
-function serversOf(manifest: AgentManifest): DeclaredServer[] {
+/** Servers of the root agent, then of each agent it uses as a tool. */
+export function serversOf(manifest: AgentManifest): DeclaredServer[] {
   const servers: DeclaredServer[] = [];
-  for (const capability of manifest.capabilities)
-    for (const server of Object.values(capability.mcpServers ?? {}))
-      servers.push({ capabilityId: capability.id, server });
+  const add = (agent: AgentManifest, agentId?: string) => {
+    for (const capability of agent.capabilities)
+      for (const server of Object.values(capability.mcpServers ?? {}))
+        servers.push({
+          ...(agentId === undefined ? {} : { agentId }),
+          manifest: agent,
+          capabilityId: capability.id,
+          server,
+        });
+  };
+  add(manifest);
+  for (const child of delegatesOf(manifest)) add(child.manifest, child.manifest.id);
   return servers;
+}
+
+function findServer(
+  manifest: AgentManifest,
+  agentId: string | undefined,
+  capabilityId: string,
+  serverName: string,
+): DeclaredServer | undefined {
+  return serversOf(manifest).find(
+    (item) =>
+      item.agentId === agentId &&
+      item.capabilityId === capabilityId &&
+      item.server.name === serverName,
+  );
+}
+
+/** Plugin roots of agents used as tools are registered as `<agent>/<capability>`. */
+function pluginKey(declared: DeclaredServer): string {
+  return declared.agentId === undefined
+    ? declared.capabilityId
+    : `${declared.agentId}/${declared.capabilityId}`;
+}
+
+function ownerOf(declared: DeclaredServer): { agentId?: string } {
+  return declared.agentId === undefined ? {} : { agentId: declared.agentId };
+}
+
+function owned<T extends object>(declared: DeclaredServer, value: T): T {
+  return { ...ownerOf(declared), ...value };
 }

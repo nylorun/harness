@@ -146,6 +146,16 @@ export interface ToolExecutionResume {
   readonly token?: JsonValue;
 }
 
+/**
+ * The agent a call belongs to. `path` is `"<root>"` or `"<root>/<child>"`; `delegationId`
+ * identifies one run of an agent used as a tool and is absent for the root agent.
+ */
+export interface AgentRef {
+  readonly id: string;
+  readonly path: string;
+  readonly delegationId?: string;
+}
+
 interface ToolExecutionContextBase {
   readonly executionId: string;
   readonly turnId: string;
@@ -164,6 +174,8 @@ interface ToolExecutionContextBase {
   readonly state: SessionStateBag;
   /** Session identity stub — Runtime fills this later. */
   readonly session: { readonly id: string };
+  /** The agent this call belongs to: the root agent, or an agent used as a tool. */
+  readonly agent?: AgentRef;
   /** Live progress stub — emits an observation when a listener is present. */
   progress(message: string, data?: JsonObject): void;
   /** Durable wait: park for a human/app response. */
