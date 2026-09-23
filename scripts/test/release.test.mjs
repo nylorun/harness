@@ -53,6 +53,11 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
         version,
       });
     }
+    await mkdir(join(directory, "runtime/src"), { recursive: true });
+    await writeFile(
+      join(directory, "runtime/src/version.ts"),
+      'export const RUNTIME_VERSION = "0.1.0-beta.1";\n',
+    );
     await writeJson(join(directory, "create-agent/compatibility.json"), {
       core: "0.1.0-beta.1",
       cli: "0.1.0-beta.1",
@@ -96,6 +101,10 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
       cli: "0.1.1-beta",
       "create-agent": "0.1.1-beta",
     });
+    assert.match(
+      await readFile(join(directory, "runtime/src/version.ts"), "utf8"),
+      /export const RUNTIME_VERSION = "0\.1\.1-beta";/,
+    );
     assert.deepEqual(plan.compatibility, {
       core: "0.1.0-beta.1",
       cli: "0.1.1-beta",
