@@ -107,10 +107,6 @@ try {
   );
 } finally {
   await app?.close();
-  try {
-    await stopRuntime(temporary);
-  } catch {
-    /* best-effort cleanup */
-  }
+  await stopRuntime(temporary).catch(() => {});
   await rm(temporary, { recursive: true, force: true });
 }

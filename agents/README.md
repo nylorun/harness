@@ -64,6 +64,28 @@ const assistant = Agent({
 
 Each subdirectory under the catalog must contain a `SKILL.md` with YAML frontmatter (`name`, `description`) per [Agent Skills](https://agentskills.io/home). Supporting files (for example `references/`) are available through `read_skill_resource` after `load_skill`. The helper sets both the manifest skill catalog and the on-disk skill records so you do not duplicate content.
 
+Declare MCP servers with `mcp(...)` (same map shape as agent-plugins `mcpServers` / manifest v3):
+
+```ts
+import { Agent, mcp } from "@nylorun/agents";
+
+const assistant = Agent({
+  id: "assistant",
+  name: "Assistant",
+  instructions: "Use the available tools.",
+}).use(
+  mcp({
+    github: {
+      name: "github",
+      type: "streamable-http",
+      url: "https://mcp.example.com/github",
+    },
+  })
+);
+```
+
+Each key must equal that server's `name`. Transports follow [Agent Plugins MCP servers](https://agent-plugins.org/plugin-authors/mcp-servers): `stdio`, `streamable-http`, and `sse`. Pass `{ id: "…" }` as the second argument to override the default capability id `"mcp"`.
+
 Use `session.observe({ cursor, signal })` for resumable canonical events, `session.inspect()` for waiting/uncertain state, and `approve`, `respond`, or `cancel` with an explicit stable idempotency key. Retry the same semantic command with the same key. `ownerUserId` must come from trusted server authentication. Application credentials are not browser credentials; browser applications need an authorized backend. Definition authoring is browser-bundleable.
 
 The Runtime destination is explicit, or defaults from `NYLORUN_RUNTIME_URL`. Application and executor keys default from `NYLORUN_SERVER_KEY` and `NYLORUN_EXECUTOR_KEY`. Implementation version defaults from `NYLORUN_IMPLEMENTATION_VERSION`, then `dev`. A host must provision executor scope for the agent id. Agents do not hash the manifest, and an in-flight action stays claimable after the registered digest changes. Model selection and model credentials belong to the Runtime.
