@@ -8,9 +8,10 @@ import { availablePort, develop } from "./lib/development.mjs";
 
 /**
  * Persistent Runtime answers /ready before the project runner finishes
- * registering agents. Poll Studio's proxied list until one appears.
+ * registering agents. Poll Studio's proxied list until `min` agents appear
+ * (not merely the first) so multi-agent projects do not race the assertion.
  */
-async function waitForAgents(studioUrl, timeoutMs = 30_000) {
+async function waitForAgents(studioUrl, min = 1, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   let last = "no response";
   while (Date.now() < deadline) {
@@ -18,7 +19,7 @@ async function waitForAgents(studioUrl, timeoutMs = 30_000) {
       const response = await fetch(`${studioUrl}/_studio/runtime/v1/agents`);
       if (response.ok) {
         const body = await response.json();
-        if (Array.isArray(body.agents) && body.agents.length > 0) return body;
+        if (Array.isArray(body.agents) && body.agents.length >= min) return body;
         last = `agents=${JSON.stringify(body.agents ?? null)}`;
       } else {
         last = `HTTP ${response.status}`;
@@ -28,7 +29,7 @@ async function waitForAgents(studioUrl, timeoutMs = 30_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`Timed out waiting for agents (${last}).`);
+  throw new Error(`Timed out waiting for ${min} agent(s) (${last}).`);
 }
 
 /** Stop the project-scoped Runtime daemon left up by `nylorun dev`. */
@@ -85,7 +86,8 @@ try {
     { runtimeUrl: "/_studio/runtime", local: true },
   );
   assert.match(await (await fetch(url)).text(), /<div id="root">/);
-  const agents = await waitForAgents(url);
+  // release/ ships assistant + sandbox analyst; wait for both, not the first.
+  const agents = await waitForAgents(url, 2);
   assert.equal(agents.agents.length, 2);
   // IPv4 and localhost are both valid same-origin entry points.
   const session = await fetch(
