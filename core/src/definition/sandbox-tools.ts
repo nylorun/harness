@@ -19,7 +19,7 @@ export const SANDBOX_INSTRUCTIONS =
 async function runtimeOnly(): Promise<never> {
   throw new ToolError(
     "sandbox.runtime-only",
-    "Sandbox tools run in the Nylorun Runtime. Open the session through a Runtime (openSession, `nylorun dev`) to use them."
+    "Sandbox tools run in the Nylorun Runtime. Run the agent with `nylorun dev` or `nylorun serve` to use them."
   );
 }
 

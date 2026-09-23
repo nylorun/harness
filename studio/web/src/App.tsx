@@ -28,6 +28,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import {
+  actionLabel,
   mergeStudioEvents,
   type StudioEvent,
 } from "@/event-presentation";
@@ -348,9 +349,7 @@ function SessionWorkspace({
                     open={event.type === "action.completed"}
                   >
                     <summary className="cursor-pointer text-sm font-medium">
-                      Tool ·{" "}
-                      {String(payload.toolName ?? payload.actionId ?? "action")}{" "}
-                      · {event.type.slice(7)}
+                      {actionLabel(payload)} · {event.type.slice(7)}
                     </summary>
                     <pre className="mt-2 overflow-auto whitespace-pre-wrap text-xs">
                       {pretty(

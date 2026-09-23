@@ -19,7 +19,7 @@ async function runtime(report: unknown): Promise<string> {
 
 const manifest = (sandbox?: Record<string, unknown>) =>
   ({
-    manifestSchemaVersion: 3,
+    manifestSchemaVersion: 4,
     id: "analyst",
     capabilities: [{ id: "sandbox", type: "agent", ...(sandbox ? { sandbox } : {}) }],
   }) as never;

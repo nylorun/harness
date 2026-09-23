@@ -40,9 +40,15 @@ export type StudioManifestTool = Readonly<{
   outputSchema?: Readonly<Record<string, unknown>>;
 }>;
 
+export type StudioHookPoint = Readonly<{
+  at: "before" | "after";
+  scope: "turn" | "step";
+}>;
+
 export type StudioCapabilityManifest = Readonly<{
   id: string;
   instructions?: readonly string[];
+  hooks?: readonly StudioHookPoint[];
   tools?: readonly StudioManifestTool[];
   model?: Readonly<{
     id?: string;

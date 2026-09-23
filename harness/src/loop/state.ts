@@ -100,6 +100,27 @@ const schema = z
     status: z.enum(["ready", "active", "completed", "paused", "cancelled", "failed"]),
     cancelledCalls: z.array(call).optional(),
     state: z.record(z.string(), json).optional(),
+    turn: z
+      .object({
+        turnId: id,
+        input: z.string().optional(),
+        patch: z
+          .object({
+            capabilities: z.record(z.string(), z.boolean()).optional(),
+            tools: z.record(z.string(), z.boolean()).optional(),
+            instructions: z.array(z.string()).optional(),
+          })
+          .strict()
+          .optional(),
+        attempts: z
+          .object({
+            afterStep: z.number().int().nonnegative(),
+            afterTurn: z.number().int().nonnegative(),
+          })
+          .strict(),
+      })
+      .strict()
+      .optional(),
     plan: z
       .object({
         turnId: id,
@@ -135,6 +156,11 @@ export function validateExecutionState(value: unknown): ExecutionState {
     const plan = parsed.plan;
     if (parsed.status === "paused" && !plan)
       throw new HarnessError("execution.invalid-state", "Paused execution requires a pending plan");
+    if (plan && parsed.turn && parsed.turn.turnId !== plan.turnId)
+      throw new HarnessError(
+        "execution.invalid-state",
+        "Turn hook state does not belong to the pending plan's turn",
+      );
     if (plan) {
       const ids = new Set<string>();
       const invocations = new Set<string>();

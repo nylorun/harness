@@ -26,6 +26,8 @@ export class ModelConfigurationDraft {
   #instructions = new SlotDraft<readonly string[]>();
   #tools = new SlotDraft<readonly BoundToolDefinition[]>();
   #model?: ModelSelection;
+  #excludedOwners = new Set<string>();
+  #excludedTools = new Set<string>();
 
   constructor(directive?: ModelDirective) {
     if (directive !== undefined)
@@ -132,6 +134,15 @@ export class ModelConfigurationDraft {
     });
   }
 
+  /** Hide tools from this model call: every tool a capability contributed, or tools by name. */
+  exclude(input: {
+    readonly capabilities?: readonly string[];
+    readonly tools?: readonly string[];
+  }): void {
+    for (const id of input.capabilities ?? []) this.#excludedOwners.add(id);
+    for (const name of input.tools ?? []) this.#excludedTools.add(name);
+  }
+
   clear(options?: Omit<ModelConfigurationMutationOptions, "order">): void {
     if (options?.reason !== undefined)
       checkedReason(options.reason, "configuration.invalid-reason", "Model configuration");
@@ -149,11 +160,15 @@ export class ModelConfigurationDraft {
         }),
       ),
     );
-    const sourcedTools = toolSlots.flatMap((slot) =>
-      slot.value.map((tool) =>
-        Object.freeze({ tool, contributor: contributor(slot.owner, slot.reason) }),
-      ),
-    );
+    const sourcedTools = toolSlots
+      .filter((slot) => !this.#excludedOwners.has(slot.owner.middlewareId))
+      .flatMap((slot) =>
+        slot.value
+          .filter((tool) => !this.#excludedTools.has(tool.name))
+          .map((tool) =>
+            Object.freeze({ tool, contributor: contributor(slot.owner, slot.reason) }),
+          ),
+      );
     const seen = new Set<string>();
     const duplicate = new Set<string>();
     for (const item of sourcedTools) {

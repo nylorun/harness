@@ -3,6 +3,7 @@ import {
   isToolError,
   normalizeToolDefinition,
   normalizedSchemasFor,
+  runHookPoint,
   type BuiltAgent,
   type JsonValue,
   type ToolExecutionContext,
@@ -21,33 +22,20 @@ export async function executeAction(
   agent: BuiltAgent,
   signal: AbortSignal
 ): Promise<ActionOutcome> {
+  if (action.kind === "hook")
+    // All capabilities at this hook point run concurrently in one action. Never throws.
+    return {
+      value: {
+        results: await runHookPoint(
+          implementationsFor(agent),
+          action.hook,
+          action.input
+        ),
+      },
+    };
   const impl = implementationsFor(agent)[action.capabilityId];
   if (!impl) throw new Error(`No capability ${action.capabilityId}`);
-  if (action.kind === "beforeModelCall") {
-    if (!impl.beforeModelCall)
-      throw new Error("Missing beforeModelCall implementation");
-    try {
-      return { value: (await impl.beforeModelCall(action.input as any)) ?? {} };
-    } catch (error) {
-      return { value: { block: message(error) } };
-    }
-  }
-  if (action.kind === "afterModelCall") {
-    if (!impl.afterModelCall)
-      throw new Error("Missing afterModelCall implementation");
-    try {
-      return {
-        value:
-          (await impl.afterModelCall(
-            action.input as any,
-            action.context as any
-          )) ?? {},
-      };
-    } catch (error) {
-      return { value: { block: message(error) } };
-    }
-  }
-  const raw = impl.tools?.[action.toolName ?? ""];
+  const raw = impl.tools?.[action.toolName];
   if (!raw) throw new Error("Missing tool implementation");
   const tool = normalizeToolDefinition(raw);
   const schemas = normalizedSchemasFor(tool);

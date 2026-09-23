@@ -2,7 +2,7 @@
 
 The default registry exports two agents from `agents/release/`: an SDK order-lookup assistant and a data analyst with a sandbox. Runtime and the connected tool executor run as separate processes; Studio uses the session HTTP/SSE API.
 
-The ten older demonstrations remain as source references under `agents/` and `legacy-registry.ts`, outside the release registry. Their descriptions below are historical and do not establish support in the new host.
+The ten older demonstrations remain as source references under `agents/`, outside the release registry. Their descriptions below are historical and do not establish support in the new host.
 
 ## Install and configure
 
@@ -94,28 +94,6 @@ workspace already contains `hello.js`; it does not need your repository or file 
 For example: `Preserve hello in the seeded hello.js, add an exported goodbye function,
 show the resulting file, and verify both functions.` Review that task in Studio's
 approval prompt before allowing execution.
-
-`GET /` is the application-owned agent list. Studio discovers agents through
-`GET /agents/v1/agents`, then reads each Runtime-served
-`/agents/:id/manifest.json`. Pass matching `basePath: "/agents"` when the app
-mounts `serveAgents` at `/agents` so discovery advertises those live URLs. The
-agent-scoped endpoints are:
-
-| Endpoint                                      | Purpose                                                     |
-| --------------------------------------------- | ----------------------------------------------------------- |
-| `GET /`                                       | Application agent list and manifests                        |
-| `GET /agents/v1/agents`                       | Agent IDs and manifest URLs                                 |
-| `GET /agents/:id/manifest.json`        | One neutral agent manifest                                  |
-| `POST /agents/:id/v1/ag-ui`            | AG-UI SSE run stream                                        |
-| `GET/POST /agents/:id/v1/sessions/...` | Sessions, canonical events, history, approvals, and replies |
-
-### Image input
-
-When an example manifest advertises `mediaInput`, Studio enables one JPEG, PNG, or WebP attachment
-per message (up to 8 MiB). It sends AG-UI's native base64 image input and the Hono host converts it
-to Harness's ordered text/media content. The raw image reaches the selected vision provider; do not
-upload sensitive images unless that provider is acceptable for the task. Studio displays the
-session-local preview through the examples server and never receives provider credentials.
 
 ## Codex CLI
 

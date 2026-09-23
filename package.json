@@ -33,8 +33,7 @@
     "examples:check": "npm run examples:check --workspace @nylorun/create-agent",
     "changeset": "changeset",
     "release:prepare": "node scripts/release/prepare.mjs",
-    "release:check": "node scripts/release/check.mjs",
-    "test:workers": "node scripts/smoke-workers.mjs"
+    "release:check": "node scripts/release/check.mjs"
   },
   "packageManager": "npm@11.15.0",
   "devDependencies": {

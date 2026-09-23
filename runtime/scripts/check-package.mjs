@@ -24,7 +24,6 @@ for (const path of [
   "dist/index.js",
   "dist/index.d.ts",
   "dist/node/index.js",
-  "dist/node/local-sessions.js",
   "dist/core/runtime.js",
   "dist/core/main.js",
   "dist/version.js",

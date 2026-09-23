@@ -78,7 +78,13 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
           signal
         );
         for (const item of response.actions) {
-          const action = ActionSchema.parse(item);
+          // Skip actions this SDK cannot run (e.g. from an older Runtime) instead of stalling discovery.
+          const parsed = ActionSchema.safeParse(item);
+          if (!parsed.success) {
+            report(parsed.error);
+            continue;
+          }
+          const action = parsed.data;
           const agent = agents.get(action.agentId);
           if (!agent || action.status !== "pending" || active.has(action.actionId))
             continue;

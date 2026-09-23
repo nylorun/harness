@@ -22,9 +22,13 @@ import type { HostModelSecret } from "../vault/service.js";
 import { modelsFor } from "./models.js";
 import { projectSecrets } from "./settings.js";
 
+export interface ModelPreview {
+  readonly invocationId: string;
+  readonly text: string;
+}
 export interface PiModelOptions {
   readonly root?: string;
-  readonly onPreview?: (preview: import("./defaults.js").ModelPreview) => void;
+  readonly onPreview?: (preview: ModelPreview) => void;
   readonly media?: Pick<RuntimeMedia, "dataUrl">;
   readonly readHostModel?: () => HostModelSecret | undefined;
   readonly writeHostCredential?: (credential: Credential) => void;

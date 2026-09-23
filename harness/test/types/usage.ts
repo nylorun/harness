@@ -181,3 +181,29 @@ const durableResult: Promise<DurableResult> = runDurable({
   host: durableHost,
 });
 void durableResult;
+
+// Scoped hooks: the scope picks the argument and return types.
+const hookedAgent = Agent<Info>({ id: "hooks" })
+  .before("turn", ({ input, info }) => ({
+    instructions: [`${input ?? ""} ${info?.tenantId ?? ""}`],
+  }))
+  .before("step", ({ step }) => (step > 3 ? { tools: { count: false } } : {}))
+  .after("step", ({ toolCalls, attempt }) =>
+    attempt < 2 && toolCalls.length ? { retry: "again" } : {},
+  )
+  .after("turn", ({ text }) => ({ text: text ?? "" }));
+void hookedAgent;
+// @ts-expect-error before("turn") runs once per turn and has no step index.
+Agent({ id: "hooks" }).before("turn", ({ step }) => ({ instructions: [String(step)] }));
+// @ts-expect-error after("turn") returns a TurnDecision, which has no deny list.
+Agent({ id: "hooks" }).after("turn", () => ({ deny: [{ id: "x", reason: "no" }] }));
+// @ts-expect-error Only "turn" and "step" are hook scopes.
+Agent({ id: "hooks" }).before("session", () => ({}));
+// @ts-expect-error beforeModelCall was replaced by before("step").
+Agent({ id: "hooks" }).beforeModelCall(() => ({}));
+const hookCapability: CapabilityDeclaration<Info> = {
+  id: "policy",
+  before: { step: ({ info }) => ({ instructions: [info?.tenantId ?? ""] }) },
+  after: { step: ({ text }) => (text ? {} : { block: "empty" }), turn: () => ({}) },
+};
+void hookCapability;

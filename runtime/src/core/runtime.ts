@@ -405,6 +405,7 @@ export class CoreRuntime {
           }
         }
     });
+    this.retireLegacyHooks();
     this.expireClaims();
     this.timer = setInterval(
       () => this.expireClaims(),
@@ -440,14 +441,56 @@ export class CoreRuntime {
           'event: work_available\ndata: {"type":"work_available"}\n\n'
         );
   }
+  /**
+   * Manifest v4 replaced beforeModelCall/afterModelCall with scoped hooks. Turns started under
+   * an older manifest cannot continue, and their hook actions no longer parse, so end them.
+   */
+  private retireLegacyHooks(): void {
+    this.store.tx(() => {
+      for (const action of this.store.all<{ actionId: string; kind: string; status: string }>(
+        "actions"
+      ))
+        if (
+          (action.kind === "beforeModelCall" || action.kind === "afterModelCall") &&
+          (action.status === "pending" || action.status === "claimed")
+        ) {
+          action.status = "cancelled";
+          this.store.put("actions", action.actionId, action);
+        }
+      for (const s of this.store.all<Session>("sessions"))
+        if (s.activeTurnId && s.manifest?.manifestSchemaVersion !== 4) {
+          this.store.event(s.id, s.activeTurnId, "turn.failed", {
+            error: {
+              code: "execution.incompatible",
+              message:
+                "This turn started under manifest schema 3; see MIGRATION.md for before/after hooks",
+            },
+          });
+          s.status = "failed";
+          s.activeTurnId = null;
+          this.store.put("sessions", s.id, s);
+        }
+    });
+  }
   private expireClaims(): void {
     const events: LiveEvent[] = [];
+    let redeliver = false;
     this.store.tx(() => {
       for (const action of this.store.all<Action>("actions"))
         if (
           action.status === "claimed" &&
           Date.parse(action.leaseExpiresAt!) <= Date.now()
         ) {
+          if (action.kind === "hook") {
+            // Hooks are pure by contract, so a lost claim is simply delivered again.
+            // The next claim bumps the generation, which fences any late result.
+            action.status = "pending";
+            action.claimId = null;
+            action.leaseExpiresAt = null;
+            this.store.put("actions", action.actionId, action);
+            redeliver = true;
+            continue;
+          }
           action.status = "uncertain";
           this.store.put("actions", action.actionId, action);
           const effect = this.store.get("effects", action.actionId);
@@ -466,6 +509,7 @@ export class CoreRuntime {
         }
     });
     events.forEach((e) => this.publish(e));
+    if (redeliver) this.notify();
   }
   private schedule(id: string): void {
     if (this.closing) return;
@@ -660,30 +704,44 @@ export class CoreRuntime {
         request.kind === "tool"
           ? pinnedTool(s.manifest, request.capabilityId, request.toolName)
           : undefined;
-      const action: Action = {
+      const base = {
         actionId: request.effectId,
         sessionId: request.sessionId,
         turnId: request.turnId,
         agentId: request.agentId,
         manifestHash: request.manifestHash,
         implementationVersion: s.implementationVersion,
-        kind: request.kind,
-        capabilityId: request.capabilityId!,
-        ...(request.toolName ? { toolName: request.toolName } : {}),
-        ...(tool?.inputSchema ? { inputSchema: tool.inputSchema } : {}),
-        ...(tool?.outputSchema ? { outputSchema: tool.outputSchema } : {}),
         input: request.input,
         context: request.context,
-        status: "pending",
+        status: "pending" as const,
         generation: 0,
         claimId: null,
         leaseExpiresAt: null,
       };
+      const action: Action =
+        request.kind === "hook"
+          ? {
+              ...base,
+              kind: "hook",
+              hook: {
+                at: request.hook!.at,
+                scope: request.hook!.scope,
+                capabilityIds: [...request.hook!.capabilityIds],
+              },
+            }
+          : {
+              ...base,
+              kind: "tool",
+              capabilityId: request.capabilityId!,
+              toolName: request.toolName!,
+              ...(tool?.inputSchema ? { inputSchema: tool.inputSchema } : {}),
+              ...(tool?.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+            };
       this.store.put("actions", action.actionId, action);
       event = this.store.event(s.id, s.activeTurnId, "action.pending", {
         actionId: action.actionId,
         kind: action.kind,
-        toolName: action.toolName,
+        ...actionTarget(action),
         input: action.input,
       });
       notify = true;
@@ -814,7 +872,7 @@ export class CoreRuntime {
         schedule = true;
         event = this.store.event(id, s.activeTurnId, "action.completed", {
           actionId: action.actionId,
-          toolName: action.toolName,
+          ...actionTarget(action),
           kind: action.kind,
           result: command.outcome.value,
         });
@@ -1652,4 +1710,9 @@ export async function startRuntime(
     await runtime.close();
     throw error;
   }
+}
+
+/** What an action runs, for events: a tool name, or a hook point and its capabilities. */
+function actionTarget(action: Action) {
+  return action.kind === "hook" ? { hook: action.hook } : { toolName: action.toolName };
 }

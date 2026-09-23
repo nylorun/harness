@@ -30,7 +30,7 @@ describe("DX v5.6 ergonomics", () => {
       ],
     });
     expect(agent.id).toBe("support");
-    expect(agent.manifest.manifestSchemaVersion).toBe(3);
+    expect(agent.manifest.manifestSchemaVersion).toBe(4);
     const extended = agent.use({ id: "extra", instructions: ["Extra."] });
     expect(extended).not.toBe(agent);
     expect(agent.build()).toBe(agent.build());
@@ -310,85 +310,5 @@ describe("DX v5.6 durable acceptance", () => {
     });
     expect(second.status).toBe("completed");
     expect(JSON.stringify(second.state)).toContain("yes");
-  });
-});
-
-describe("DX v5.6 dynamics", () => {
-  it("beforeModelCall can block; afterModelCall can deny tool calls", async () => {
-    const ran = vi.fn(async () => "nope");
-    const agent = Agent({ id: "a", name: "A", instructions: "Hi" })
-      .use(
-        capability({
-          id: "policy",
-          afterModelCall({ toolCalls }) {
-            if (toolCalls.some((call) => call.name === "danger"))
-              return {
-                deny: toolCalls
-                  .filter((call) => call.name === "danger")
-                  .map((call) => ({ id: call.id, reason: "blocked" })),
-              };
-            return {};
-          },
-        }),
-      )
-      .use({
-        id: "tools",
-        tools: [
-          tool({
-            name: "danger",
-            input: z.object({}),
-            run: ran,
-          }),
-        ],
-      })
-      .build();
-
-    let calls = 0;
-    const result = await runAgent(agent, {
-      input: "go",
-      onModelCall: async () => {
-        calls += 1;
-        if (calls === 1)
-          return { output: [{ type: "tool-call", id: "d", name: "danger", args: {} }] };
-        return "done";
-      },
-    });
-    expect(result.status).toBe("completed");
-    expect(ran).not.toHaveBeenCalled();
-    expect(agent.manifest.capabilities.some((item) => item.afterModelCall === true)).toBe(true);
-  });
-
-  it("writes session state from tools for beforeModelCall", async () => {
-    const seen: unknown[] = [];
-    const agent = Agent({ id: "a", name: "A" })
-      .use({
-        id: "t",
-        tools: [
-          tool({
-            name: "flag",
-            input: z.object({}),
-            async run(_args, ctx) {
-              ctx.state.set("escalated", true);
-              return "ok";
-            },
-          }),
-        ],
-      })
-      .beforeModelCall(({ state }) => {
-        seen.push(state.escalated);
-        return {};
-      })
-      .build();
-    let calls = 0;
-    await runAgent(agent, {
-      input: "go",
-      onModelCall: async () => {
-        calls += 1;
-        if (calls === 1)
-          return { output: [{ type: "tool-call", id: "1", name: "flag", args: {} }] };
-        return "done";
-      },
-    });
-    expect(seen).toContain(true);
   });
 });

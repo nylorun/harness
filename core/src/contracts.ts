@@ -8,6 +8,7 @@ import {
   parseSandboxDuration,
   parseSandboxSize,
 } from "./utils/sandbox.js";
+import { hookListIssue } from "./definition/hooks.js";
 export type { AgentManifest } from "./types/manifest.js";
 export const PROTOCOL_VERSION = 1;
 export const RequestIdSchema = z.string().min(1);
@@ -91,9 +92,15 @@ const toolManifestSchema = z
     outputSchema: jsonObject.optional(),
   })
   .strict();
+const hookPointSchema = z
+  .object({
+    at: z.enum(["before", "after"]),
+    scope: z.enum(["turn", "step"]),
+  })
+  .strict();
 export const AgentManifestSchema = z
   .object({
-    manifestSchemaVersion: z.literal(3),
+    manifestSchemaVersion: z.literal(4),
     id: z.string().min(1),
     name: z.string().min(1).optional(),
     description: z.string().optional(),
@@ -112,8 +119,13 @@ export const AgentManifestSchema = z
           tools: z.array(toolManifestSchema).optional(),
           mcpServers: z.record(z.string(), mcpServerSchema).optional(),
           sandbox: sandboxManifestSchema.optional(),
-          beforeModelCall: z.boolean().optional(),
-          afterModelCall: z.boolean().optional(),
+          hooks: z
+            .array(hookPointSchema)
+            .optional()
+            .superRefine((hooks, ctx) => {
+              const issue = hooks === undefined ? undefined : hookListIssue(hooks);
+              if (issue) ctx.addIssue({ code: "custom", message: issue });
+            }),
         })
         .strict()
     ),
@@ -471,25 +483,44 @@ export const RejectedResponseSchema = z.object({
   requestId: z.string().optional(),
 });
 export type RejectedResponse = z.infer<typeof RejectedResponseSchema>;
-export const ActionSchema = z.object({
+const actionBase = {
   actionId: z.string(),
   sessionId: z.string(),
   turnId: z.string(),
   agentId: z.string(),
   manifestHash: z.string(),
   implementationVersion: z.string(),
-  kind: z.enum(["tool", "beforeModelCall", "afterModelCall"]),
-  capabilityId: z.string(),
-  toolName: z.string().optional(),
-  inputSchema: jsonObject.optional(),
-  outputSchema: jsonObject.optional(),
   input: z.unknown(),
   context: jsonObject,
   status: z.enum(["pending", "claimed", "completed", "uncertain", "cancelled"]),
   generation: z.number().int().nonnegative(),
   claimId: z.string().nullable(),
   leaseExpiresAt: z.string().nullable(),
-});
+};
+/** The hook point an action runs, and the capabilities that registered it (manifest order). */
+export const ActionHookSchema = z
+  .object({
+    at: z.enum(["before", "after"]),
+    scope: z.enum(["turn", "step"]),
+    capabilityIds: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+export type ActionHook = z.infer<typeof ActionHookSchema>;
+export const ActionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    ...actionBase,
+    kind: z.literal("tool"),
+    capabilityId: z.string(),
+    toolName: z.string(),
+    inputSchema: jsonObject.optional(),
+    outputSchema: jsonObject.optional(),
+  }),
+  z.object({
+    ...actionBase,
+    kind: z.literal("hook"),
+    hook: ActionHookSchema,
+  }),
+]);
 export type Action = z.infer<typeof ActionSchema>;
 export const ActionClaimRequestSchema = z
   .object({

@@ -1,13 +1,4 @@
-import { join } from "node:path";
 import { isToolError, type JsonValue, type ToolDefinition, type ToolExecutionContext, type ToolOutcome, type ToolRunResult } from "@nylorun/core/define";
-import {
-  Runtime,
-  serveAgents,
-} from "../../runtime/dist/server/host.js";
-import type { RuntimeModelAdapter } from "../../runtime/dist/contracts.js";
-import { localSessions, localMedia } from "@nylorun/runtime/node";
-import { createRegistry } from "../agents/legacy-registry.js";
-import type { ImageEditor } from "../agents/interior-design/image-editor.js";
 
 /** Minimal ToolExecutionContext for unit tests under DX v5.6. */
 export function toolContext(
@@ -78,37 +69,4 @@ export async function invokeTool(
     }
     throw error;
   }
-}
-
-export async function createAgentServer(
-  options: {
-    root?: string;
-    adapter?: RuntimeModelAdapter;
-    provider?: string;
-    model?: string;
-    imageEditor?: ImageEditor;
-  } = {}
-) {
-  const root = options.root ?? process.cwd();
-  const media = localMedia({ root: join(root, ".data", "media") });
-  const agents = await createRegistry(
-    root,
-    options.adapter
-      ? {
-          provider: options.provider ?? "test",
-          model: options.model ?? "test-model",
-        }
-      : undefined,
-    { media, imageEditor: options.imageEditor }
-  );
-  const runtime = new Runtime({
-    media,
-    observer: () => {},
-    ...(options.adapter === undefined ? {} : { onModelCall: options.adapter }),
-    sessions: localSessions({ root: join(root, ".data", "sessions") }),
-  });
-  return Object.freeze({
-    app: serveAgents({ agents, runtime }),
-    close: async () => { await runtime.close(); await Promise.all(agents.map(agent => agent.close?.())); },
-  });
 }

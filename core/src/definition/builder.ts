@@ -12,11 +12,17 @@ import type {
 } from "../types/tool.js";
 import type { BuiltAgent } from "../types/agent.js";
 import type { AgentManifest } from "../types/manifest.js";
-import type { AfterModelCallFn, BeforeModelCallFn } from "../types/dynamics.js";
+import type {
+  AfterHook,
+  BeforeHook,
+  HookAt,
+  HookScope,
+} from "../types/dynamics.js";
 import type { Implementations } from "./implementations.js";
 import { assembleAgent, type CapabilityDynamics } from "./assemble.js";
 import { compileDeclaration } from "./declaration.js";
 import { agentFrom } from "./from.js";
+import { hooksFrom } from "./hooks.js";
 
 export interface AgentOptions<
   Schema extends ToolSchemaSource | undefined = undefined
@@ -40,8 +46,8 @@ interface BuilderSnapshot {
   readonly outputSchema?: ToolSchemaSource;
   readonly entries: readonly BoundMiddleware[];
   readonly dynamics: ReadonlyMap<string, CapabilityDynamics>;
-  readonly agentBefore?: BeforeModelCallFn;
-  readonly agentAfter?: AfterModelCallFn;
+  /** Builder-level problems, reported with the assembly diagnostics. */
+  readonly diagnostics?: readonly BuildDiagnostic[];
 }
 
 export class AgentBuildError extends HarnessError {
@@ -168,12 +174,8 @@ export class AgentBuilder<
     }
     const dynamics = new Map(this.#snapshot.dynamics);
     dynamics.set(compiled.bound.id, {
-      ...(compiled.beforeModelCall
-        ? { beforeModelCall: compiled.beforeModelCall }
-        : {}),
-      ...(compiled.afterModelCall
-        ? { afterModelCall: compiled.afterModelCall }
-        : {}),
+      ...(compiled.before ? { before: compiled.before } : {}),
+      ...(compiled.after ? { after: compiled.after } : {}),
       ...(compiled.middleware ? { middleware: compiled.middleware } : {}),
     });
     return AgentBuilder.withSnapshot({
@@ -183,41 +185,65 @@ export class AgentBuilder<
     });
   }
 
-  beforeModelCall(fn: BeforeModelCallFn<Info>): AgentBuilder<Info, Schema> {
-    const dynamics = new Map(this.#snapshot.dynamics);
-    const existing = dynamics.get("agent") ?? {};
-    dynamics.set("agent", {
-      ...existing,
-      beforeModelCall: fn as BeforeModelCallFn,
-    });
-    const entries = ensureAgentCapabilityFlag(
-      this.#snapshot.entries,
-      "beforeModelCall"
-    );
-    return AgentBuilder.withSnapshot({
-      ...this.#snapshot,
-      entries,
-      dynamics,
-      agentBefore: fn as BeforeModelCallFn,
-    });
+  /**
+   * Run `fn` before each turn (`"turn"`) or before every model call (`"step"`).
+   * The returned Patch applies to the whole turn or to that one model call.
+   */
+  before<S extends HookScope>(
+    scope: S,
+    fn: BeforeHook<S, Info>
+  ): AgentBuilder<Info, Schema> {
+    return this.addAgentHook("before", scope, fn);
   }
 
-  afterModelCall(fn: AfterModelCallFn<Info>): AgentBuilder<Info, Schema> {
+  /**
+   * Run `fn` after every model call (`"step"`) or after the turn's final answer (`"turn"`).
+   */
+  after<S extends HookScope>(
+    scope: S,
+    fn: AfterHook<S, Info>
+  ): AgentBuilder<Info, Schema> {
+    return this.addAgentHook("after", scope, fn);
+  }
+
+  private addAgentHook(
+    at: HookAt,
+    scope: HookScope,
+    fn: unknown
+  ): AgentBuilder<Info, Schema> {
+    if (typeof fn !== "function")
+      throw new HarnessError(
+        "configuration.invalid",
+        `${at}("${scope}") requires a function`
+      );
+    if (scope !== "turn" && scope !== "step")
+      throw new HarnessError(
+        "configuration.invalid",
+        `Unknown hook scope '${String(scope)}'; use "turn" or "step"`
+      );
     const dynamics = new Map(this.#snapshot.dynamics);
     const existing = dynamics.get("agent") ?? {};
-    dynamics.set("agent", {
+    const current = existing[at] as Record<string, unknown> | undefined;
+    if (current?.[scope] !== undefined)
+      return AgentBuilder.withSnapshot({
+        ...this.#snapshot,
+        diagnostics: Object.freeze([
+          ...(this.#snapshot.diagnostics ?? []),
+          Object.freeze({
+            code: "hook.duplicate",
+            message: `Agent hook ${at}("${scope}") is registered more than once`,
+          }),
+        ]),
+      });
+    const next: CapabilityDynamics = {
       ...existing,
-      afterModelCall: fn as AfterModelCallFn,
-    });
-    const entries = ensureAgentCapabilityFlag(
-      this.#snapshot.entries,
-      "afterModelCall"
-    );
+      [at]: Object.freeze({ ...current, [scope]: fn }),
+    };
+    dynamics.set("agent", next);
     return AgentBuilder.withSnapshot({
       ...this.#snapshot,
-      entries,
+      entries: withAgentHooks(this.#snapshot.entries, next),
       dynamics,
-      agentAfter: fn as AfterModelCallFn,
     });
   }
 
@@ -235,6 +261,10 @@ export class AgentBuilder<
   > {
     if (this.#agent) return this.#agent;
     if (this.#error) throw this.#error;
+    if (this.#snapshot.diagnostics?.length) {
+      this.#error = new AgentBuildError(this.#snapshot.diagnostics);
+      throw this.#error;
+    }
     const result = assembleAgent(
       this.#snapshot.entries,
       {
@@ -302,15 +332,15 @@ function nextMiddlewareId(entries: readonly BoundMiddleware[]): string {
   return id;
 }
 
-function ensureAgentCapabilityFlag(
+/** Record the agent-level hooks on the synthetic `"agent"` capability, creating it if needed. */
+function withAgentHooks(
   entries: readonly BoundMiddleware[],
-  flag: "beforeModelCall" | "afterModelCall"
+  dynamics: CapabilityDynamics
 ): readonly BoundMiddleware[] {
+  const hooks = hooksFrom(dynamics.before, dynamics.after);
   const index = entries.findIndex((item) => item.id === "agent");
   if (index >= 0) {
-    const current = entries[index]!;
-    if (current[flag]) return entries;
-    const next = Object.freeze({ ...current, [flag]: true });
+    const next = Object.freeze({ ...entries[index]!, hooks });
     return Object.freeze([
       ...entries.slice(0, index),
       next,
@@ -324,7 +354,7 @@ function ensureAgentCapabilityFlag(
       handle: async (_request: unknown, next: () => Promise<unknown>) => next(),
       hasMiddleware: false,
       contributions: Object.freeze({}),
-      [flag]: true,
+      hooks,
     } as BoundMiddleware),
   ]);
 }

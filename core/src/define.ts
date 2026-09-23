@@ -57,9 +57,28 @@ export type {
 export type {
   Patch,
   Decision,
-  BeforeModelCallFn,
-  AfterModelCallFn,
+  TurnDecision,
+  HookAt,
+  HookScope,
+  HookManifest,
+  HookState,
+  HookToolCall,
+  BeforeHook,
+  AfterHook,
+  BeforeHooks,
+  AfterHooks,
+  BeforeTurnArgs,
+  BeforeStepArgs,
+  AfterStepArgs,
+  AfterTurnArgs,
 } from "./types/dynamics.js";
+export {
+  HOOK_POINTS,
+  hasHook,
+  hookListIssue,
+  hooksFrom,
+  runHookPoint,
+} from "./definition/hooks.js";
 export type {
   ModelCandidate,
   ModelControls,
