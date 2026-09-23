@@ -87,7 +87,9 @@ Artifacts are saved under `.tmp/release-artifacts/` for inspection.
 1. Merge the release PR after CI passes.
 2. Open **Actions → Publish reviewed release → Run workflow** on `main`.
 3. Enter the full 40-character SHA of the merge/squash commit that changed the
-   release plan. Do not use an unrelated later commit.
+   release plan. Prefer that prepare commit. A later main tip is allowed only
+   when `.release/plan.json` is unchanged since prepare (for example a
+   smoke/script fix finishing an interrupted publish).
 4. Review the validated candidate artifacts and approve the `npm` environment.
 5. Check the workflow summary, npm versions/dist-tags, and package GitHub releases.
 
@@ -110,7 +112,7 @@ model calls. Tags use `@nylorun/<package>@<version>`.
 | Missing/older dist-tag after publication | Prefer rerunning the same commit so publish can retry `npm dist-tag add` (needs a classic token such as `NPM_BOOTSTRAP_TOKEN`). Otherwise an npm administrator must run `npm dist-tag add @nylorun/<pkg>@<version> <channel>`; OIDC alone does not authenticate standalone tag edits |
 | A newer dist-tag exists | Do not move it backward; prepare a newer release |
 | `Tag … points to a different commit` on a channel promotion | Expected when version tags already exist from an earlier publish of the same versions. Publish tooling allows this when the version is already on the registry; fix/rerun on a commit that updates `.release/plan.json` if an older publish script still rejects it |
-| Public creator smoke or GitHub release creation failed | Inspect the already-published versions, then rerun the same commit |
+| Public creator smoke or GitHub release creation failed | Inspect the already-published versions. If smoke needs a code fix, land it on main then rerun publish for that tip (plan unchanged; packages skip on matching integrity). Otherwise rerun the same prepare commit |
 
 Publication cannot be treated as an atomic transaction. Do not delete/reuse a
 published version to recover. Record the affected versions and ship a corrective

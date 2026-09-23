@@ -241,14 +241,38 @@ export async function verifyReleaseCommit(repo, sha) {
   });
   if (head !== sha)
     throw new Error("Checkout does not match the requested release commit.");
+  const planPath = ".release/plan.json";
   const diff = await run(
     "git",
-    ["diff", "--name-only", `${sha}^`, sha, "--", ".release/plan.json"],
+    ["diff", "--name-only", `${sha}^`, sha, "--", planPath],
     { cwd: repo, capture: true },
   );
-  if (!diff)
-    throw new Error(
-      "The selected commit must introduce or update the release plan.",
+  if (!diff) {
+    // Allow a main tip that still carries the prepared plan unchanged so a
+    // smoke/script fix can finish publish without bumping package versions.
+    const prior = await run(
+      "git",
+      ["log", "-1", "--format=%H", `${sha}^`, "--", planPath],
+      { cwd: repo, capture: true },
     );
-  await readFile(join(repo, ".release/plan.json"));
+    if (!prior)
+      throw new Error(
+        "The selected commit must introduce or update the release plan.",
+      );
+    const [current, prepared] = await Promise.all([
+      run("git", ["show", `${sha}:${planPath}`], {
+        cwd: repo,
+        capture: true,
+      }),
+      run("git", ["show", `${prior}:${planPath}`], {
+        cwd: repo,
+        capture: true,
+      }),
+    ]);
+    if (current !== prepared)
+      throw new Error(
+        "The selected commit must introduce or update the release plan.",
+      );
+  }
+  await readFile(join(repo, planPath));
 }
