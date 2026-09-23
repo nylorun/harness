@@ -14,8 +14,7 @@
     "start": "nylorun serve",
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "codex:preflight": "node scripts/codex-preflight.mjs",
-    "docker:preflight": "node scripts/docker-preflight.mjs"
+    "codex:preflight": "node scripts/codex-preflight.mjs"
   },
   "dependencies": {
     "zod": "^4.6.5",

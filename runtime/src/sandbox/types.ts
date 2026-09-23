@@ -1,0 +1,74 @@
+/**
+ * Backend contract for Runtime-owned sandboxes. Only files under `adapters/sandbox/` implement it
+ * and import a substrate SDK; everything else in the Runtime talks to this interface.
+ */
+import type { SandboxNetworkPreset } from "@nylorun/core/define";
+
+export type SandboxBackendName = "microsandbox" | "virtual";
+export type SandboxIsolation = "vm" | "process";
+
+export interface SandboxProbe {
+  readonly name: SandboxBackendName;
+  readonly available: boolean;
+  readonly isolation: SandboxIsolation;
+  /** Why the backend is unavailable, or a short description when it is. */
+  readonly reason?: string;
+  readonly version?: string;
+}
+
+/** Egress policy after presets are expanded. Always-blocked ranges are the backend's job. */
+export interface ResolvedNetwork {
+  readonly preset: SandboxNetworkPreset;
+  /** Exact host names allowed over HTTPS/HTTP. */
+  readonly hosts: readonly string[];
+  /** Domain suffixes such as ".pythonhosted.org", from "*.pythonhosted.org". */
+  readonly suffixes: readonly string[];
+}
+
+export interface SandboxSpec {
+  /** Stable backend name for this sandbox; unique per Runtime scope and session. */
+  readonly key: string;
+  readonly image: string;
+  readonly cpus: number;
+  readonly memoryMiB: number;
+  readonly network: ResolvedNetwork;
+}
+
+export interface ExecRequest {
+  readonly command: string;
+  readonly cwd: string;
+  readonly timeoutMs: number;
+}
+
+export interface ExecResult {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  /** The process was actually stopped (timeout or cancellation). */
+  readonly killed: boolean;
+  readonly timedOut: boolean;
+}
+
+export interface SandboxHandle {
+  exec(request: ExecRequest, signal: AbortSignal): Promise<ExecResult>;
+  /** Returns undefined when the file does not exist. */
+  readFile(path: string): Promise<string | undefined>;
+  /** Parent directories must already exist. */
+  writeFile(path: string, content: string): Promise<void>;
+  /** Release compute; files persist. */
+  stop(): Promise<void>;
+}
+
+export interface SandboxBackend {
+  readonly name: SandboxBackendName;
+  readonly isolation: SandboxIsolation;
+  probe(): Promise<SandboxProbe>;
+  /** A reason this backend cannot meet the spec, or undefined when it can. */
+  unmet(spec: SandboxSpec): string | undefined;
+  /** Reattach to an existing sandbox (starting it if stopped) or create a new one. */
+  open(spec: SandboxSpec): Promise<SandboxHandle>;
+  /** Delete compute and files. Missing sandboxes are ignored. */
+  remove(key: string): Promise<void>;
+  /** Keys of sandboxes this backend holds whose key starts with the prefix. */
+  list(prefix: string): Promise<readonly string[]>;
+}

@@ -1,6 +1,13 @@
 /** Public wire contracts only. Never import checkpoint or engine modules here. */
 import { z } from "zod";
 import type { AgentManifest } from "./types/manifest.js";
+import {
+  SANDBOX_NETWORK_PRESETS,
+  SANDBOX_TOOL_NAMES,
+  isSandboxHostPattern,
+  parseSandboxDuration,
+  parseSandboxSize,
+} from "./utils/sandbox.js";
 export type { AgentManifest } from "./types/manifest.js";
 export const PROTOCOL_VERSION = 1;
 export const RequestIdSchema = z.string().min(1);
@@ -40,6 +47,42 @@ const skillManifestSchema = z
     description: z.string().min(1),
   })
   .strict();
+const sandboxManifestSchema = z
+  .object({
+    image: z.string().min(1).optional(),
+    network: z
+      .object({
+        preset: z.enum(SANDBOX_NETWORK_PRESETS).optional(),
+        allow: z
+          .array(
+            z.string().refine(isSandboxHostPattern, {
+              message: "network.allow entries must be host names such as api.github.com or *.example.com",
+            })
+          )
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    resources: z
+      .object({
+        cpus: z.number().int().min(1).max(64).optional(),
+        memory: z
+          .string()
+          .refine((value) => parseSandboxSize(value) !== undefined, {
+            message: "resources.memory must be a size such as 512MiB or 2GiB",
+          })
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    idle: z
+      .string()
+      .refine((value) => parseSandboxDuration(value) !== undefined, {
+        message: "idle must be a duration such as 30s, 15m or 1h",
+      })
+      .optional(),
+  })
+  .strict();
 const toolManifestSchema = z
   .object({
     name: z.string().min(1),
@@ -68,6 +111,7 @@ export const AgentManifestSchema = z
           skills: z.record(z.string(), skillManifestSchema).optional(),
           tools: z.array(toolManifestSchema).optional(),
           mcpServers: z.record(z.string(), mcpServerSchema).optional(),
+          sandbox: sandboxManifestSchema.optional(),
           beforeModelCall: z.boolean().optional(),
           afterModelCall: z.boolean().optional(),
         })
@@ -81,7 +125,23 @@ export const AgentManifestSchema = z
     const names = new Set<string>();
     const servers = new Set<string>();
     const skills = new Set<string>();
+    let sandboxes = 0;
     for (const capability of manifest.capabilities) {
+      if (capability.sandbox) {
+        sandboxes += 1;
+        if (sandboxes > 1)
+          ctx.addIssue({
+            code: "custom",
+            message: "At most one capability may declare a sandbox",
+          });
+        const declared = new Set((capability.tools ?? []).map((tool) => tool.name));
+        for (const name of SANDBOX_TOOL_NAMES)
+          if (!declared.has(name))
+            ctx.addIssue({
+              code: "custom",
+              message: `Sandbox capability '${capability.id}' must declare the built-in '${name}' tool`,
+            });
+      }
       if (ids.has(capability.id))
         ctx.addIssue({ code: "custom", message: "Duplicate capability id" });
       ids.add(capability.id);

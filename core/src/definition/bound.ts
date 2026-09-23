@@ -1,5 +1,9 @@
 import type { JsonObject } from "../types/shared.js";
-import type { McpServerManifest, SkillManifest } from "../types/manifest.js";
+import type {
+  McpServerManifest,
+  SandboxManifest,
+  SkillManifest,
+} from "../types/manifest.js";
 import type { SkillRecord } from "../types/middleware.js";
 import type {
   MiddlewareContributions,
@@ -52,6 +56,7 @@ export interface BoundMiddleware {
   readonly skills?: Readonly<Record<string, SkillManifest>>;
   readonly skillRecords?: Readonly<Record<string, SkillRecord>>;
   readonly mcpServers?: Readonly<Record<string, McpServerManifest>>;
+  readonly sandbox?: SandboxManifest;
   /** Package directory for a plugin capability. Not a manifest field. */
   readonly pluginRoot?: string;
 }

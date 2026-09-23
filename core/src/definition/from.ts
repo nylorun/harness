@@ -126,6 +126,9 @@ export function agentFrom<Info = unknown>(
         ...(capability.mcpServers === undefined
           ? {}
           : { mcpServers: capability.mcpServers }),
+        ...(capability.sandbox === undefined
+          ? {}
+          : { sandbox: capability.sandbox }),
         ...(capability.skills === undefined
           ? {}
           : { skills: capability.skills }),
@@ -364,6 +367,13 @@ function normalizeCapability(
       : {}),
     ...(skills === undefined ? {} : { skills }),
     ...(mcpServers === undefined ? {} : { mcpServers }),
+    ...(capability.sandbox === undefined
+      ? {}
+      : {
+          sandbox: deepFreeze(
+            copyJsonObject(capability.sandbox as unknown as JsonObject, "sandbox")
+          ) as CapabilityManifest["sandbox"],
+        }),
     ...(capability.beforeModelCall ? { beforeModelCall: true } : {}),
     ...(capability.afterModelCall ? { afterModelCall: true } : {}),
   });

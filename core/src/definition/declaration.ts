@@ -67,6 +67,9 @@ export function compileDeclaration<State>(
       Object.keys(declaration.mcpServers).length === 0
         ? {}
         : { mcpServers: declaration.mcpServers }),
+      ...(declaration.sandbox === undefined
+        ? {}
+        : { sandbox: declaration.sandbox }),
       ...(declaration.pluginRoot === undefined
         ? {}
         : { pluginRoot: declaration.pluginRoot }),

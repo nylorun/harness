@@ -86,7 +86,7 @@ try {
   );
   assert.match(await (await fetch(url)).text(), /<div id="root">/);
   const agents = await waitForAgents(url);
-  assert.equal(agents.agents.length, 1);
+  assert.equal(agents.agents.length, 2);
   // IPv4 and localhost are both valid same-origin entry points.
   const session = await fetch(
     `${url}/_studio/runtime/v1/sessions/smoke-local`,

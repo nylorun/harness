@@ -5,7 +5,6 @@ import { createCodingAgent } from "./coding-agent/agent.js";
 import { createGuardrails } from "./guardrails/agent.js";
 import { createInteractions } from "./interactions/agent.js";
 import { createMcpAgent } from "./mcp/agent.js";
-import { createSandbox } from "./sandbox/agent.js";
 import { createInstructions } from "./instructions/agent.js";
 import { createInteriorDesign } from "./interior-design/agent.js";
 import { createSkills } from "./skills/agent.js";
@@ -46,7 +45,6 @@ export async function createRegistry(
     await createGuardrails(deps),
     createInteractions(deps),
     createMcpAgent(deps),
-    createSandbox(deps),
     await createCodeMode(deps),
     await createSubagents(deps),
     createCodingAgent(deps),

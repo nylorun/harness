@@ -6,7 +6,11 @@ import type {
   ModelConfigurationMutationOptions,
 } from "./model.js";
 import type { InputEvent, TranscriptEntry } from "./transcript.js";
-import type { McpServerManifest, SkillManifest } from "./manifest.js";
+import type {
+  McpServerManifest,
+  SandboxManifest,
+  SkillManifest,
+} from "./manifest.js";
 
 /** Skill files held on the developer binding. Not a manifest field. */
 export interface SkillRecord {
@@ -103,6 +107,8 @@ export interface CapabilityDeclaration<Info = unknown> {
   /** File contents for load_skill. Omitted from the manifest. */
   readonly skillRecords?: Readonly<Record<string, SkillRecord>>;
   readonly mcpServers?: Readonly<Record<string, McpServerManifest>>;
+  /** Runtime-owned sandbox requirements. Declare the built-in sandbox tools alongside it. */
+  readonly sandbox?: SandboxManifest;
   /** Resolved package directory. Not projected into the manifest. */
   readonly pluginRoot?: string;
   /**

@@ -61,6 +61,9 @@ function projectCapability(item: BoundMiddleware): CapabilityManifest {
       : { tools: item.tools.map((tool) => projectTool(tool)) }),
     ...(item.skills === undefined ? {} : { skills: item.skills }),
     ...(item.mcpServers === undefined ? {} : { mcpServers: item.mcpServers }),
+    ...(item.sandbox === undefined
+      ? {}
+      : { sandbox: copyJsonObject(item.sandbox as unknown as JsonObject, "sandbox") }),
     ...(item.beforeModelCall ? { beforeModelCall: true } : {}),
     ...(item.afterModelCall ? { afterModelCall: true } : {}),
   };

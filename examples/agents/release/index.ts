@@ -1,2 +1,3 @@
 import { assistant } from "./agent.js";
-export const agents = [assistant];
+import { analyst } from "./analyst.js";
+export const agents = [assistant, analyst];
