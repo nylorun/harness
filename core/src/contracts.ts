@@ -283,6 +283,26 @@ export type HostModelView =
       readonly authType: "api_key" | "oauth";
       readonly baseUrl?: string;
     };
+export const SelectHostModelRequestSchema = z
+  .object({
+    ...vaultWriteBase,
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    baseUrl: z.string().min(1).optional(),
+  })
+  .strict();
+export type SelectHostModelRequest = z.infer<
+  typeof SelectHostModelRequestSchema
+>;
+export type HostModelProviderInfo = {
+  readonly id: string;
+  readonly name: string;
+  readonly model: string;
+  readonly authType: "api_key" | "oauth";
+  readonly baseUrl?: string;
+  readonly lastUpdated: string;
+  readonly active: boolean;
+};
 export interface VaultInfo {
   readonly id: string;
   readonly name: string;

@@ -17,11 +17,14 @@ export async function proxyRuntime(
     (/^\/v1\/(agents|sessions)$/.test(path) ||
       /^\/v1\/sessions\/[^/]+(?:\/(items|events))?$/.test(path) ||
       path === "/v1/host/model" ||
-      path === "/v1/host/models");
+      path === "/v1/host/models" ||
+      path === "/v1/host/providers");
   const write =
     (method === "PUT" && /^\/v1\/sessions\/[^/]+$/.test(path)) ||
     (method === "POST" && /^\/v1\/sessions\/[^/]+\/commands$/.test(path));
-  const hostWrite = method === "PUT" && path === "/v1/host/model";
+  const hostWrite =
+    method === "PUT" &&
+    (path === "/v1/host/model" || path === "/v1/host/model/selection");
   if (!read && !write && !hostWrite)
     return fail(404, "Unsupported Studio operation");
   if ((write || hostWrite) && request.headers.origin !== options.origin)
