@@ -2,6 +2,8 @@ import type { JsonObject } from "@nylorun/core/define";
 import type { AgentManifest } from "@nylorun/core/define";
 
 export interface McpToolRecord {
+  /** The agent used as a tool that declares the server; absent for the session's root agent. */
+  readonly agentId?: string;
   readonly capabilityId: string;
   readonly serverName: string;
   readonly serverToolName: string;
@@ -18,6 +20,8 @@ export interface McpSnapshot {
 }
 
 export interface McpDiagnostic {
+  /** The agent used as a tool that declares the server; absent for the session's root agent. */
+  readonly agentId?: string;
   readonly capabilityId: string;
   readonly serverName: string;
   readonly outcome: "connected" | "refused" | "failed";

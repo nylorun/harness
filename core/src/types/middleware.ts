@@ -6,6 +6,7 @@ import type {
   ModelConfigurationMutationOptions,
 } from "./model.js";
 import type { InputEvent, TranscriptEntry } from "./transcript.js";
+import type { AgentTool } from "./agent.js";
 import type {
   McpServerManifest,
   SandboxManifest,
@@ -123,6 +124,11 @@ export interface CapabilityDeclaration<Info = unknown> {
   /** Run after each model call (step) or after the turn's final answer. */
   readonly after?: AfterHooks<Info>;
 }
+
+/** What `.use()` accepts: a capability whose `tools` may also hold agents used as tools. */
+export type CapabilityInput<Info = unknown> = Omit<CapabilityDeclaration<Info>, "tools"> & {
+  readonly tools?: CapabilityItems<ToolDefinition<any, Info, any> | AgentTool>;
+};
 
 export interface MiddlewareContributions {
   readonly instructions?: readonly string[];

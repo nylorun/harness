@@ -46,18 +46,38 @@ const LABELS: Readonly<Record<string, string>> = {
   "action.completed": "Action completed",
   "action.uncertain": "Action uncertain",
   "effect.uncertain": "Effect uncertain",
+  "delegation.started": "Delegation started",
+  "delegation.completed": "Delegation completed",
 };
+
+/** The agent used as a tool that an event belongs to; undefined for the session's root agent. */
+export function agentOf(
+  payload: unknown,
+): Readonly<{ id: string; path: string; delegationId?: string }> | undefined {
+  const agent = record(record(payload).agent);
+  return typeof agent.id === "string" && typeof agent.path === "string"
+    ? {
+        id: agent.id,
+        path: agent.path,
+        ...(typeof agent.delegationId === "string"
+          ? { delegationId: agent.delegationId }
+          : {}),
+      }
+    : undefined;
+}
 
 /** Names what an action runs: `Hook · before step (a, b)` or `Tool · name`. */
 export function actionLabel(payload: Readonly<Record<string, unknown>>): string {
   const hook = payload.hook as
     | { at?: unknown; scope?: unknown; capabilityIds?: unknown }
     | undefined;
+  const agent = agentOf(payload);
+  const owner = agent ? `${agent.id} › ` : "";
   if (hook && typeof hook === "object") {
     const ids = Array.isArray(hook.capabilityIds) ? hook.capabilityIds.join(", ") : "";
-    return `Hook · ${String(hook.at)} ${String(hook.scope)}${ids ? ` (${ids})` : ""}`;
+    return `${owner}Hook · ${String(hook.at)} ${String(hook.scope)}${ids ? ` (${ids})` : ""}`;
   }
-  return `Tool · ${text(payload.toolName, text(payload.actionId, "action"))}`;
+  return `${owner}Tool · ${text(payload.toolName, text(payload.actionId, "action"))}`;
 }
 
 export function eventLabel(event: Pick<LiveEvent, "type">): string {
@@ -97,6 +117,15 @@ export function eventSummary(event: Pick<LiveEvent, "type" | "payload">): string
       if (event.type === "action.completed")
         return `${name}: ${compact(payload.result ?? payload.outcome)}`;
       return name;
+    }
+    case "delegation.started":
+      return `${agentOf(payload)?.id ?? "agent"}: ${compact(payload.task)}`;
+    case "delegation.completed": {
+      const outcome = record(payload.outcome);
+      const status = text(payload.status, "settled");
+      return `${agentOf(payload)?.id ?? "agent"} ${status}: ${compact(
+        outcome.kind === "completed" ? outcome.output : (outcome.message ?? outcome),
+      )}`;
     }
     case "effect.uncertain":
       return text(

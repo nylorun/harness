@@ -47,6 +47,7 @@ import {
 } from "@nylorun/harness/run";
 import { hashManifest } from "@nylorun/core/compatibility";
 import {
+  delegateManifest,
   schemaFromJSON,
   type AgentManifest,
   type JsonObject,
@@ -66,7 +67,7 @@ import { scrub } from "../redact.js";
 import { createKekFile, defaultKekPath, readVaultKek } from "../vault/kek.js";
 import { VaultError } from "../vault/error.js";
 import { VaultService, type AuthorizeResult } from "../vault/service.js";
-import { McpPool } from "../mcp/pool.js";
+import { McpPool, serversOf } from "../mcp/pool.js";
 import { SandboxManager, sandboxCapabilityOf } from "../sandbox/manager.js";
 import { defaultSandboxBackends } from "../sandbox/select.js";
 import type { SandboxBackend } from "../sandbox/types.js";
@@ -131,6 +132,7 @@ function sessionToolsOf(
 ): readonly DurableSessionTool[] | undefined {
   if (!snapshot?.mcpTools.length) return undefined;
   return snapshot.mcpTools.map((tool) => ({
+    ...(tool.agentId === undefined ? {} : { agentId: tool.agentId }),
     capabilityId: tool.capabilityId,
     name: tool.name,
     ...(tool.description === undefined
@@ -144,12 +146,21 @@ function sessionToolsOf(
 }
 function mcpToolOf(
   session: Session,
-  capabilityId?: string,
-  toolName?: string
+  request: Pick<HostEffect, "agent" | "capabilityId" | "toolName">
 ): McpToolRecord | undefined {
   return session.mcpSnapshot?.mcpTools.find(
-    (tool) => tool.capabilityId === capabilityId && tool.name === toolName
+    (tool) =>
+      tool.agentId === request.agent?.id &&
+      tool.capabilityId === request.capabilityId &&
+      tool.name === request.toolName
   );
+}
+/** The manifest of the agent an effect belongs to: the root, or an agent it uses as a tool. */
+function manifestFor(
+  manifest: AgentManifest,
+  agent: HostEffect["agent"]
+): AgentManifest | undefined {
+  return agent ? delegateManifest(manifest, agent.id) : manifest;
 }
 function pinnedTool(
   manifest: AgentManifest,
@@ -503,6 +514,7 @@ export class CoreRuntime {
             events.push(
               this.store.event(s.id, s.activeTurnId, "action.uncertain", {
                 actionId: action.actionId,
+                ...(action.agent ? { agent: action.agent } : {}),
               })
             );
           }
@@ -681,13 +693,31 @@ export class CoreRuntime {
                   : "pending",
             };
       }
+      if (request.kind === "delegation") {
+        // Lifecycle points of an agent used as a tool: journaled once, so replays never re-emit.
+        const outcome = { value: null };
+        this.store.put("effects", request.effectId, {
+          request,
+          status: "completed",
+          outcome,
+        });
+        const settled = request.effectId.endsWith(":settled");
+        event = this.store.event(
+          s.id,
+          s.activeTurnId,
+          settled ? "delegation.completed" : "delegation.started",
+          { agent: request.agent, ...(request.input as object) }
+        );
+        return { status: "completed", outcome };
+      }
+      const agentManifest = manifestFor(s.manifest, request.agent);
+      if (!agentManifest)
+        throw new Error(`Agent '${request.agent?.id ?? ""}' is not used as a tool`);
       const mcpTool =
-        request.kind === "tool"
-          ? mcpToolOf(s, request.capabilityId, request.toolName)
-          : undefined;
+        request.kind === "tool" ? mcpToolOf(s, request) : undefined;
       const sandboxTool =
         request.kind === "tool" && !mcpTool
-          ? sandboxCapabilityOf(s.manifest, request.capabilityId, request.toolName)
+          ? sandboxCapabilityOf(agentManifest, request.capabilityId, request.toolName)
           : undefined;
       this.store.put("effects", request.effectId, {
         request,
@@ -702,7 +732,7 @@ export class CoreRuntime {
       }
       const tool =
         request.kind === "tool"
-          ? pinnedTool(s.manifest, request.capabilityId, request.toolName)
+          ? pinnedTool(agentManifest, request.capabilityId, request.toolName)
           : undefined;
       const base = {
         actionId: request.effectId,
@@ -717,6 +747,7 @@ export class CoreRuntime {
         generation: 0,
         claimId: null,
         leaseExpiresAt: null,
+        ...(request.agent ? { agent: request.agent } : {}),
       };
       const action: Action =
         request.kind === "hook"
@@ -1124,7 +1155,11 @@ export class CoreRuntime {
               action.sessionId,
               action.turnId,
               "action.claimed",
-              { actionId, generation: action.generation }
+              {
+                actionId,
+                generation: action.generation,
+                ...(action.agent ? { agent: action.agent } : {}),
+              }
             );
             return {
               action,
@@ -1380,7 +1415,9 @@ export class CoreRuntime {
             ? request.headers["last-event-id"]
             : undefined);
         if (method === "GET" && path[3] === "items")
-          return json(this.store.history(id, cursor));
+          return json(
+            this.store.history(id, cursor, url.searchParams.get("agent") ?? undefined)
+          );
         if (method === "GET" && path[3] === "events") {
           const history = this.store.history(id, cursor);
           const set = this.observers.get(id) ?? new Set<ServerResponse>();
@@ -1464,12 +1501,7 @@ export class CoreRuntime {
   }
   private async prepareMcp(id: string, signal: AbortSignal): Promise<void> {
     const s = this.session(id);
-    const declared = s.manifest.capabilities.some(
-      (capability: { mcpServers?: object }) =>
-        capability.mcpServers !== undefined &&
-        Object.keys(capability.mcpServers).length > 0
-    );
-    if (!declared) return;
+    if (serversOf(s.manifest).length === 0) return;
     if (!s.mcpSnapshot) {
       const found = await this.mcp.discover({
         sessionId: id,
@@ -1513,13 +1545,14 @@ export class CoreRuntime {
   }
   private async callMcpTool(request: HostEffect): Promise<unknown> {
     const s = this.session(request.sessionId);
-    const tool = mcpToolOf(s, request.capabilityId, request.toolName);
+    const tool = mcpToolOf(s, request);
     if (!tool)
       throw new Error(
         `MCP tool '${request.toolName ?? ""}' is not in the session snapshot`
       );
     return this.mcp.call({
       sessionId: s.id,
+      ...(tool.agentId === undefined ? {} : { agentId: tool.agentId }),
       capabilityId: tool.capabilityId,
       serverName: tool.serverName,
       serverToolName: tool.serverToolName,
@@ -1533,8 +1566,9 @@ export class CoreRuntime {
     signal: AbortSignal
   ): Promise<unknown> {
     const s = this.session(request.sessionId);
+    // Agents used as tools share the session's sandbox; the tree declares one sandbox spec.
     const capability = sandboxCapabilityOf(
-      s.manifest,
+      manifestFor(s.manifest, request.agent),
       request.capabilityId,
       request.toolName
     );
@@ -1714,5 +1748,8 @@ export async function startRuntime(
 
 /** What an action runs, for events: a tool name, or a hook point and its capabilities. */
 function actionTarget(action: Action) {
-  return action.kind === "hook" ? { hook: action.hook } : { toolName: action.toolName };
+  return {
+    ...(action.kind === "hook" ? { hook: action.hook } : { toolName: action.toolName }),
+    ...(action.agent ? { agent: action.agent } : {}),
+  };
 }

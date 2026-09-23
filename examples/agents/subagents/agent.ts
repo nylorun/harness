@@ -1,5 +1,4 @@
 import { Agent } from "@nylorun/agents/define";
-import { delegateTo } from "./capability.js";
 import { createInstructions } from "../instructions/agent.js";
 import { createSkills } from "../skills/agent.js";
 import { createToolUse } from "../tool-use/agent.js";
@@ -10,7 +9,11 @@ import {
   type ExampleAgent,
 } from "../shared/types.js";
 
-/** A parent agent that delegates to the Instructions, Skills, and Tool Use examples. */
+/**
+ * A parent that delegates to the Instructions, Skills, and Tool Use examples.
+ * Each agent in `tools` becomes a tool named after its id; its description is the routing text.
+ * The engine runs each one with a fresh context and returns only its final answer.
+ */
 export async function createSubagents(
   deps: AgentDependencies,
 ): Promise<ExampleAgent> {
@@ -19,28 +22,16 @@ export async function createSubagents(
     createSkills(deps),
     createToolUse(deps),
   ]);
-  const agent = Agent({
+  return Agent({
     id: "subagents",
     name: "Subagents",
-    instructions: exampleInstructions,
+    instructions: [
+      exampleInstructions,
+      "Do not do specialist work yourself. Delegate each task to the matching agent.",
+      "Write each task so it stands on its own: the agent sees nothing but the task.",
+    ],
+    tools: [instructions, skills, toolUse],
   })
     .use(modelSelection(deps.provider, deps.model))
-    .use(
-      delegateTo({
-        instructions: instructions,
-        skills: skills,
-        "tool-use": toolUse,
-      }),
-    )
-    .use({
-      id: "coordinator",
-      instructions: [
-        "Do not do specialist work yourself. Delegate each task to the matching specialist.",
-        "instructions: format-constrained prose with no tools.",
-        "skills: load and follow a SKILL.md procedure.",
-        "tool-use: calculate, now, or convert.",
-      ],
-    })
     .build();
-  return agent;
 }

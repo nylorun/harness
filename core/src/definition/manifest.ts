@@ -9,6 +9,7 @@ import type { JsonObject } from "../types/shared.js";
 import type { ToolSchemaSource } from "../types/tool.js";
 import { bindOutputContract } from "./output-contract.js";
 import { normalizedSchemasFor } from "./schema.js";
+import { delegateOf } from "./delegate.js";
 
 import { copyJsonObject, deepFreeze } from "../utils/immutable.js";
 
@@ -74,6 +75,7 @@ function projectTool(
   tool: NonNullable<BoundMiddleware["tools"]>[number]
 ): ToolManifest {
   const schemas = normalizedSchemasFor(tool);
+  const delegate = delegateOf(tool);
   return {
     name: tool.name,
     ...(tool.description === undefined
@@ -83,5 +85,6 @@ function projectTool(
     ...(schemas.outputSchema === undefined
       ? {}
       : { outputSchema: schemas.outputSchema.jsonSchema }),
+    ...(delegate === undefined ? {} : { agent: delegate.manifest }),
   };
 }

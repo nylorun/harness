@@ -9,6 +9,8 @@ import {
   parseSandboxSize,
 } from "./utils/sandbox.js";
 import { hookListIssue } from "./definition/hooks.js";
+import { DELEGATE_INPUT_SCHEMA } from "./definition/delegate.js";
+import { canonical } from "./utils/canonical.js";
 export type { AgentManifest } from "./types/manifest.js";
 export const PROTOCOL_VERSION = 1;
 export const RequestIdSchema = z.string().min(1);
@@ -90,6 +92,7 @@ const toolManifestSchema = z
     description: z.string().optional(),
     inputSchema: jsonObject,
     outputSchema: jsonObject.optional(),
+    agent: z.lazy((): z.ZodType<AgentManifest> => AgentManifestSchema).optional(),
   })
   .strict();
 const hookPointSchema = z
@@ -133,6 +136,9 @@ export const AgentManifestSchema = z
   })
   .strict()
   .superRefine((manifest, ctx) => {
+    delegationIssues(manifest as AgentManifest, (message) =>
+      ctx.addIssue({ code: "custom", message })
+    );
     const ids = new Set<string>();
     const names = new Set<string>();
     const servers = new Set<string>();
@@ -203,6 +209,34 @@ export const AgentManifestSchema = z
       }
     }
   }) as unknown as z.ZodType<AgentManifest>;
+/** Agents used as tools: one level deep, `{ task }` input, one shared sandbox spec. */
+function delegationIssues(manifest: AgentManifest, issue: (message: string) => void): void {
+  const sandboxes = new Set<string>();
+  const addSandboxes = (agent: AgentManifest) => {
+    for (const capability of agent.capabilities)
+      if (capability.sandbox) sandboxes.add(canonical(capability.sandbox));
+  };
+  addSandboxes(manifest);
+  for (const capability of manifest.capabilities)
+    for (const tool of capability.tools ?? []) {
+      const child = tool.agent;
+      if (!child) continue;
+      if (tool.name !== child.id)
+        issue(`Tool '${tool.name}' must be named after the agent it runs ('${child.id}')`);
+      if (!child.description?.trim() || tool.description !== child.description)
+        issue(`Agent tool '${tool.name}' must carry the agent's non-empty description`);
+      if (canonical(tool.inputSchema) !== canonical(DELEGATE_INPUT_SCHEMA))
+        issue(`Agent tool '${tool.name}' must take the standard { task } input`);
+      if (tool.outputSchema !== undefined)
+        issue(`Agent tool '${tool.name}' must not declare outputSchema; the agent's outputSchema applies`);
+      for (const inner of child.capabilities)
+        if (inner.tools?.some((item) => item.agent !== undefined))
+          issue(`'${child.id}' delegates to another agent; nested delegation is not supported yet`);
+      addSandboxes(child);
+    }
+  if (sandboxes.size > 1)
+    issue("An agent and the agents it uses as tools must declare identical sandboxes");
+}
 const absolutePath = z.string().min(1).refine(
   (value) => value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value),
   { message: "plugin root must be an absolute path" },
@@ -483,6 +517,14 @@ export const RejectedResponseSchema = z.object({
   requestId: z.string().optional(),
 });
 export type RejectedResponse = z.infer<typeof RejectedResponseSchema>;
+/** The agent a call belongs to. Set on work for an agent used as a tool; absent for the root. */
+export const AgentRefSchema = z
+  .object({
+    id: z.string().min(1),
+    path: z.string().min(1),
+    delegationId: z.string().min(1).optional(),
+  })
+  .strict();
 const actionBase = {
   actionId: z.string(),
   sessionId: z.string(),
@@ -496,6 +538,7 @@ const actionBase = {
   generation: z.number().int().nonnegative(),
   claimId: z.string().nullable(),
   leaseExpiresAt: z.string().nullable(),
+  agent: AgentRefSchema.optional(),
 };
 /** The hook point an action runs, and the capabilities that registered it (manifest order). */
 export const ActionHookSchema = z

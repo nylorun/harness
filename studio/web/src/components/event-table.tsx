@@ -19,10 +19,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  agentOf,
   eventLabel,
   eventSummary,
   type StudioEvent,
 } from "@/event-presentation";
+
+const ROOT = "root";
 
 function time(value: string): string {
   return dayjs(value).format("HH:mm:ss");
@@ -45,10 +48,26 @@ export function EventTable({
     [events],
   );
   const activeTypes = selectedTypes ?? eventTypes;
-  const visibleEvents =
-    selectedTypes === undefined
-      ? events
-      : events.filter((event) => selectedTypes.includes(event.type));
+  // Agents used as tools, by path; events without one belong to the root agent.
+  const [agent, setAgent] = useState<string | undefined>();
+  const agents = useMemo(
+    () =>
+      [
+        ...new Set(
+          events.flatMap((event) => {
+            const path = agentOf(event.payload)?.path;
+            return path ? [path] : [];
+          }),
+        ),
+      ].sort(),
+    [events],
+  );
+  const visibleEvents = events.filter(
+    (event) =>
+      (selectedTypes === undefined || selectedTypes.includes(event.type)) &&
+      (agent === undefined ||
+        (agentOf(event.payload)?.path ?? ROOT) === agent),
+  );
   const filterLabel =
     selectedTypes === undefined || selectedTypes.length === eventTypes.length
       ? "All event types"
@@ -74,12 +93,37 @@ export function EventTable({
         <span className="text-xs text-muted-foreground">
           {events.length} total
         </span>
+        {agents.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-auto w-44 justify-between font-normal"
+              >
+                <span className="truncate">{agent ?? "All agents"}</span>
+                <ChevronDown className="size-4 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {[undefined, ROOT, ...agents].map((value) => (
+                <DropdownMenuCheckboxItem
+                  key={value ?? "all"}
+                  checked={agent === value}
+                  onCheckedChange={() => setAgent(value)}
+                >
+                  {value ?? "All agents"}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               variant="outline"
               size="sm"
-              className="ml-auto w-44 justify-between font-normal"
+              className={`${agents.length > 0 ? "" : "ml-auto "}w-44 justify-between font-normal`}
             >
               <span className="truncate">{filterLabel}</span>
               <ChevronDown className="size-4 opacity-50" />

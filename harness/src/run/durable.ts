@@ -4,7 +4,8 @@ import type { ExecutionInput, ExecutionState, RunResult } from "../types/executi
 import type { JsonObject } from "@nylorun/core/define";
 import type { Implementations } from "@nylorun/core/define";
 import type { ActionOutcome } from "@nylorun/core/contracts";
-import type { HookAt, HookScope } from "@nylorun/core/define";
+import type { AgentRef, HookAt, HookScope, ModelAdapter } from "@nylorun/core/define";
+import type { DelegationHost } from "../loop/delegation.js";
 import { HOOK_POINTS, hasHook } from "@nylorun/core/define";
 import type { AgentDefinition } from "../definition/agent-definition.js";
 import type { HookRunner } from "../loop/step/hooks.js";
@@ -38,7 +39,10 @@ export interface HostEffect {
   readonly turnId: string;
   readonly agentId: string;
   readonly manifestHash: string;
-  readonly kind: "model" | "tool" | "hook";
+  /** `delegation` journals when an agent used as a tool starts and settles; hosts record it and resolve it at once. */
+  readonly kind: "model" | "tool" | "hook" | "delegation";
+  /** Set on work for an agent used as a tool; `agentId` stays the session's root agent. */
+  readonly agent?: AgentRef;
   readonly capabilityId?: string;
   readonly toolName?: string;
   /** For `hook` effects: the hook point and every capability that registered it, in manifest order. */
@@ -73,6 +77,8 @@ export type DurableResult =
     };
 /** Discovered tool advertised for this execution. It is not part of the hashed manifest. */
 export interface DurableSessionTool {
+  /** The agent used as a tool that owns this tool; absent for the root agent. */
+  readonly agentId?: string;
   readonly capabilityId: string;
   readonly name: string;
   readonly description?: string;
@@ -135,7 +141,7 @@ export async function runDurable(options: {
     input: unknown,
     context: Record<string, unknown>,
     identity: string,
-    target: Pick<HostEffect, "capabilityId" | "toolName" | "hook"> = {},
+    target: Pick<HostEffect, "capabilityId" | "toolName" | "hook" | "agent"> = {},
   ): Promise<ActionOutcome> => {
     const effectId = `${checkpoint.turnId}:${checkpoint.segment}:${kind}:${identity}`;
     const request: HostEffect = JSON.parse(
@@ -165,124 +171,155 @@ export async function runDurable(options: {
     }
     return result.outcome;
   };
-  let patchTail: Promise<void> = Promise.resolve();
-  const hostedTool = (
-    capabilityId: string,
-    tool: {
-      readonly name: string;
-      readonly description?: string;
-      readonly inputSchema: JsonObject;
-      readonly outputSchema?: JsonObject;
-    },
-  ) => ({
-    name: tool.name,
-    ...(tool.description === undefined ? {} : { description: tool.description }),
-    inputSchema: schemaFromJSON(tool.inputSchema),
-    ...(tool.outputSchema ? { outputSchema: schemaFromJSON(tool.outputSchema) } : {}),
-    async execute(args: unknown, ctx: any) {
-      const previous = patchTail;
-      let release!: () => void;
-      patchTail = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      try {
-        const outcome = await effect(
-          "tool",
-          args,
-          {
-            executionId: ctx.executionId,
-            turnId: ctx.turnId,
-            stepId: ctx.stepId,
-            callId: ctx.callId,
-            invocationId: ctx.invocationId,
-            idempotencyKey: ctx.idempotencyKey,
-            info: ctx.info,
-            state: ctx.state.entries(),
-            resume: ctx.resume,
-          },
-          ctx.invocationId,
-          { capabilityId, toolName: tool.name },
-        );
-        // Apply concurrently resolved patches in manifest call order, independent of host I/O timing.
-        await previous;
-        for (const [key, value] of Object.entries(outcome.statePatch ?? {}))
-          ctx.state.set(key, value);
-        const value = outcome.value as any;
-        return value?.kind === "interaction-required"
-          ? {
-              ...value,
-              interaction: {
-                ...value.interaction,
-                id: `${checkpoint.turnId}:${checkpoint.segment}:interaction:${ctx.invocationId}`,
-              },
-            }
-          : value;
-      } finally {
-        await previous;
-        release();
-      }
-    },
-  });
-  const implementations: Record<string, Implementations[string]> = {};
-  const sessionTools = options.sessionTools ?? [];
-  for (const capability of manifest.capabilities) {
-    const tools: Record<string, any> = {};
-    for (const tool of capability.tools ?? []) tools[tool.name] = hostedTool(capability.id, tool);
-    for (const tool of sessionTools)
-      if (tool.capabilityId === capability.id) tools[tool.name] = hostedTool(capability.id, tool);
-    implementations[capability.id] = {
-      tools,
-      // Hooks run through runHooks below, one effect per hook point; these only satisfy binding.
-      ...hookPlaceholders(capability.hooks),
-    };
-  }
-  const definition = definitionFor(
-    agentFrom(
-      manifest,
-      implementations,
-      sessionTools.length === 0
-        ? undefined
-        : {
-            sessionTools: sessionTools.map((tool) => ({
-              capabilityId: tool.capabilityId,
-              name: tool.name,
-            })),
-          },
-    ),
-  );
-  // Manifest reconstruction must retain definition identity, including schemas and instructions.
-  if (definition.hash !== checkpoint.manifestHash)
-    throw new HarnessError("execution.incompatible", "Reconstructed definition hash mismatch");
-  // All capabilities registered at a hook point share one effect, so one executor round trip.
-  const runHooks: HookRunner = async ({ point, capabilityIds, args, identity }) => {
-    const outcome = await effect("hook", args, { info: checkpoint.info }, identity, {
-      hook: { at: point.at, scope: point.scope, capabilityIds },
+  /** Tools of one agent. Each agent keeps its own patch order; children namespace their effects. */
+  const hostedTools = (ref?: AgentRef) => {
+    let patchTail: Promise<void> = Promise.resolve();
+    return (
+      capabilityId: string,
+      tool: {
+        readonly name: string;
+        readonly description?: string;
+        readonly inputSchema: JsonObject;
+        readonly outputSchema?: JsonObject;
+      },
+    ) => ({
+      name: tool.name,
+      ...(tool.description === undefined ? {} : { description: tool.description }),
+      inputSchema: schemaFromJSON(tool.inputSchema),
+      ...(tool.outputSchema ? { outputSchema: schemaFromJSON(tool.outputSchema) } : {}),
+      async execute(args: unknown, ctx: any) {
+        const previous = patchTail;
+        let release!: () => void;
+        patchTail = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        try {
+          const outcome = await effect(
+            "tool",
+            args,
+            {
+              executionId: ctx.executionId,
+              turnId: ctx.turnId,
+              stepId: ctx.stepId,
+              callId: ctx.callId,
+              invocationId: ctx.invocationId,
+              idempotencyKey: ref
+                ? `${ref.delegationId}/${ctx.idempotencyKey}`
+                : ctx.idempotencyKey,
+              info: ctx.info,
+              state: ctx.state.entries(),
+              resume: ctx.resume,
+            },
+            scoped(ref, ctx.invocationId),
+            { capabilityId, toolName: tool.name, ...(ref ? { agent: ref } : {}) },
+          );
+          // Apply concurrently resolved patches in manifest call order, independent of host I/O timing.
+          await previous;
+          for (const [key, value] of Object.entries(outcome.statePatch ?? {}))
+            ctx.state.set(key, value);
+          const value = outcome.value as any;
+          return value?.kind === "interaction-required"
+            ? {
+                ...value,
+                interaction: {
+                  ...value.interaction,
+                  id: `${checkpoint.turnId}:${checkpoint.segment}:interaction:${ctx.invocationId}`,
+                },
+              }
+            : value;
+        } finally {
+          await previous;
+          release();
+        }
+      },
     });
-    const results = (outcome.value as { results?: unknown } | null)?.results;
-    return results !== null && typeof results === "object" && !Array.isArray(results)
-      ? (results as Record<string, unknown>)
-      : {};
   };
-  const hosted: AgentDefinition = Object.freeze({ ...definition, runHooks });
+  const sessionTools = options.sessionTools ?? [];
+  /** Rebuild one agent from its manifest with every tool and hook routed through host effects. */
+  const hostedDefinition = (agent: AgentManifest, ref?: AgentRef): AgentDefinition => {
+    const hostedTool = hostedTools(ref);
+    const owned = sessionTools.filter((tool) => (tool.agentId ?? manifest.id) === agent.id);
+    const implementations: Record<string, Implementations[string]> = {};
+    for (const capability of agent.capabilities) {
+      const tools: Record<string, any> = {};
+      // Agents used as tools are rebuilt from their manifest body; the engine runs them.
+      for (const tool of capability.tools ?? [])
+        if (!tool.agent) tools[tool.name] = hostedTool(capability.id, tool);
+      for (const tool of owned)
+        if (tool.capabilityId === capability.id) tools[tool.name] = hostedTool(capability.id, tool);
+      implementations[capability.id] = {
+        tools,
+        // Hooks run through runHooks below, one effect per hook point; these only satisfy binding.
+        ...hookPlaceholders(capability.hooks),
+      };
+    }
+    const definition = definitionFor(
+      agentFrom(
+        agent,
+        implementations,
+        owned.length === 0
+          ? undefined
+          : {
+              sessionTools: owned.map((tool) => ({
+                capabilityId: tool.capabilityId,
+                name: tool.name,
+              })),
+            },
+      ),
+    );
+    // All capabilities registered at a hook point share one effect, so one executor round trip.
+    const runHooks: HookRunner = async ({ point, capabilityIds, args, identity }) => {
+      const outcome = await effect("hook", args, { info: checkpoint.info }, scoped(ref, identity), {
+        hook: { at: point.at, scope: point.scope, capabilityIds },
+        ...(ref ? { agent: ref } : {}),
+      });
+      const results = (outcome.value as { results?: unknown } | null)?.results;
+      return results !== null && typeof results === "object" && !Array.isArray(results)
+        ? (results as Record<string, unknown>)
+        : {};
+    };
+    return Object.freeze({ ...definition, runHooks });
+  };
+  const modelCall =
+    (ref?: AgentRef): ModelAdapter =>
+    async (call, ctx) =>
+      (
+        await effect(
+          "model",
+          call,
+          { request: ctx.request, invocationId: ctx.invocationId },
+          scoped(ref, ctx.invocationId),
+          ref ? { agent: ref } : {},
+        )
+      ).value as any;
+  const delegation: DelegationHost = {
+    child: (delegate, ref) => ({
+      definition: hostedDefinition(delegate.manifest, ref),
+      onModelCall: modelCall(ref),
+    }),
+    async announce(phase, ref, payload) {
+      await effect("delegation", payload, {}, `${ref.delegationId}:${phase}`, { agent: ref });
+    },
+  };
+  const hosted = hostedDefinition(manifest);
+  // Manifest reconstruction must retain definition identity, including schemas and instructions.
+  if (hosted.hash !== checkpoint.manifestHash)
+    throw new HarnessError("execution.incompatible", "Reconstructed definition hash mismatch");
   try {
     const result = await withDeterministicIds(`${checkpoint.turnId}_${checkpoint.segment}`, () =>
-      execute(hosted, {
-        state:
-          checkpoint.state ??
-          initializeExecutionState(definition, { executionId: checkpoint.sessionId }),
-        input: checkpoint.input,
-        info: checkpoint.info,
-        signal: options.signal,
-        onModelCall: async (call, ctx) =>
-          (
-            await effect(
-              "model",
-              call,
-              { request: ctx.request, invocationId: ctx.invocationId },
-              ctx.invocationId,
-            )
-          ).value as any,
-      }),
+      execute(
+        hosted,
+        {
+          state:
+            checkpoint.state ??
+            initializeExecutionState(hosted, { executionId: checkpoint.sessionId }),
+          input: checkpoint.input,
+          info: checkpoint.info,
+          signal: options.signal,
+          onModelCall: modelCall(),
+        },
+        { delegation },
+      ),
     );
     return { status: result.status, checkpoint: { ...checkpoint, state: result.state }, result };
   } catch (error) {
@@ -295,6 +332,11 @@ export async function runDurable(options: {
       effectIds: [...pending.keys()],
     };
   }
+}
+
+/** Effect identities of an agent used as a tool live under its delegation. */
+function scoped(ref: AgentRef | undefined, identity: string): string {
+  return ref ? `${ref.delegationId}/${identity}` : identity;
 }
 
 function hookPlaceholders(hooks: AgentManifest["capabilities"][number]["hooks"]) {
