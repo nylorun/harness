@@ -9,6 +9,7 @@ import {
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { createClient } from "@nylorun/agents/client";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ModelSettings } from "@/components/model-settings";
 import { AgentManifestPanel } from "@/components/agent-manifest-panel";
 import { EventDetails } from "@/components/event-details";
 import { EventTable } from "@/components/event-table";
@@ -107,11 +108,16 @@ function Workspace() {
         connection={connection}
         activeAgentId={agentId}
         activeSessionId={sessionId}
+        settingsActive={location.pathname === "/settings"}
       />
       <SidebarInset className="flex h-svh min-h-0 min-w-0 flex-col overflow-hidden">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
           <SidebarTrigger />
-          <strong>{agent?.name ?? "Nylorun Studio"}</strong>
+          <strong>
+            {location.pathname === "/settings"
+              ? "Model provider"
+              : (agent?.name ?? "Nylorun Studio")}
+          </strong>
           <Badge variant="outline">Local beta</Badge>
           <Button
             className="ml-auto"
@@ -126,7 +132,9 @@ function Workspace() {
             {error}
           </p>
         )}
-        {agent && sessionId ? (
+        {location.pathname === "/settings" ? (
+          <ModelSettings />
+        ) : agent && sessionId ? (
           <SessionWorkspace
             key={sessionId}
             agent={agent}

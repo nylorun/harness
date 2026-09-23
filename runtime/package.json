@@ -29,7 +29,8 @@
     "./configuration": {
       "types": "./dist/configuration.d.ts",
       "import": "./dist/configuration.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",

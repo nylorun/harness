@@ -12,7 +12,6 @@ export type CreateOptions = Readonly<{
   studio: boolean;
   open: boolean;
   yes: boolean;
-  skipConfig?: boolean;
 }>;
 
 export type Process = Readonly<{

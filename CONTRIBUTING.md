@@ -26,7 +26,6 @@ nvm install
 nvm use
 npm install --global npm@11.15.0
 npm run setup
-npm run configure
 npm run dev
 ```
 
@@ -35,9 +34,10 @@ regenerate examples, or change local credentials/data. Package consumer Node
 support remains separate from the pinned contributor toolchain.
 
 Studio opens at `http://127.0.0.1:4161`; Runtime listens on port 8787.
-Run `npm run configure` before startup. Provider settings and API keys live in
-`examples/.env`; local credentials, OAuth, and SQLite live in gitignored
-`examples/.nylorun/`. Advanced examples retain their own historical data paths.
+The first run starts the Runtime and stores the model provider in its vault under
+gitignored `examples/.nylorun/`. The Runtime outlives `npm run dev`; stop it with
+`npx nylorun down` and inspect it with `npx nylorun runtime status`. `npm run configure` replaces that credential while the
+Runtime is running. Advanced examples retain their own historical data paths.
 
 ## Development
 
@@ -46,6 +46,9 @@ Run `npm run configure` before startup. Provider settings and API keys live in
 | `npm run dev` | Supported local example with package rebuilds and Studio |
 | `npm run dev -- --no-open` | Keep the browser closed |
 | `npm run dev -- --no-studio` | Run only the agent server |
+| `npm run dev -- --no-autostart` | Fail instead of starting a Runtime (use in CI) |
+| `npx nylorun up` / `npx nylorun down` | Start or stop the local Runtime directly |
+| `npx nylorun runtime status` | Report the active scope, port and pid |
 | `npm run dev -- --port 4200 --studio-port 4201` | Choose different ports |
 | `npm run dev:starter` | Preview a fresh starter against local packages |
 | `npm run build` | Build all seven packages |
@@ -95,8 +98,8 @@ See [RELEASING.md](./RELEASING.md) for administrators and
 |---|---|
 | Toolchain mismatch | Use Node 24 and npm 11; setup prints the detected versions |
 | Missing/stale package build | Stop development and run `npm run setup` |
-| Occupied port | Stop the other service or choose root development ports |
-| Model setup error | Run `npm run configure`; check integration-specific setup |
+| Occupied port | The CLI exits 4 and names the port; stop the other service or pass `--port` |
+| Model setup error | Run `npx nylorun up`, then `npm run configure`, or replace the vault credential from Studio |
 | Generated-file conflict | Move the intended change into the template/recipe, then sync |
 | Interrupted release preparation | Inspect the diff; do not blindly rerun or discard it |
 

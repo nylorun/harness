@@ -248,6 +248,41 @@ export const RotateCredentialRequestSchema = z
 export type RotateCredentialRequest = z.infer<
   typeof RotateCredentialRequestSchema
 >;
+export const PutHostModelRequestSchema = z
+  .object({
+    ...vaultWriteBase,
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    baseUrl: z.string().min(1).optional(),
+    auth: z.discriminatedUnion("type", [
+      z
+        .object({
+          type: z.literal("api_key"),
+          key: z.string().min(1),
+          env: z.record(z.string(), z.string()).optional(),
+        })
+        .strict(),
+      z
+        .object({
+          type: z.literal("oauth"),
+          refresh: z.string().min(1),
+          access: z.string().min(1),
+          expires: z.number(),
+        })
+        .passthrough(),
+    ]),
+  })
+  .strict();
+export type PutHostModelRequest = z.infer<typeof PutHostModelRequestSchema>;
+export type HostModelView =
+  | { readonly configured: false }
+  | {
+      readonly configured: true;
+      readonly provider: string;
+      readonly model: string;
+      readonly authType: "api_key" | "oauth";
+      readonly baseUrl?: string;
+    };
 export interface VaultInfo {
   readonly id: string;
   readonly name: string;
@@ -404,9 +439,50 @@ export interface ExecutorScope {
 export const ExecutorNotificationSchema = z.object({
   type: z.literal("work_available"),
 });
+export const ExecutorRegistrationSchema = z
+  .object({
+    agentId: z.string().min(1),
+    implementationVersion: z.string().min(1),
+    manifestHash: z.string().min(1).optional(),
+    token: z.string().min(16),
+  })
+  .strict();
+export const RegisterExecutorsRequestSchema = z
+  .object({
+    executors: z.array(ExecutorRegistrationSchema).min(1).max(64),
+  })
+  .strict();
+export const RegisterExecutorsResponseSchema = z.object({
+  executors: z.array(
+    z.object({
+      agentId: z.string(),
+      implementationVersion: z.string(),
+      rotated: z.boolean(),
+    })
+  ),
+});
+export const ExecutorSummarySchema = z.object({
+  agentId: z.string(),
+  implementationVersion: z.string(),
+  manifestHash: z.string().optional(),
+  connected: z.boolean(),
+  updatedAt: z.string(),
+});
+export const ListExecutorsResponseSchema = z.object({
+  executors: z.array(ExecutorSummarySchema),
+});
+export type ExecutorRegistration = z.infer<typeof ExecutorRegistrationSchema>;
+export type RegisterExecutorsResponse = z.infer<
+  typeof RegisterExecutorsResponseSchema
+>;
+export type ExecutorSummary = z.infer<typeof ExecutorSummarySchema>;
+// Health fields added after the beta stay optional so a new client can parse an older Runtime.
 export const HealthResponseSchema = z.object({
   status: z.literal("ok"),
   service: z.string(),
+  version: z.string().optional(),
+  scopeId: z.string().optional(),
+  pid: z.number().int().positive().optional(),
 });
 export const ReadyResponseSchema = z.object({
   status: z.enum(["ready", "not_ready"]),

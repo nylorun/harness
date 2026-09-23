@@ -2,16 +2,14 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../dist/arguments.js";
 
 describe("creator arguments", () => {
-  it("configures by default, including with --yes", () => {
-    expect(parse(["demo"]).skipConfig).toBe(false);
+  it("installs by default, including with --yes", () => {
     expect(parse(["demo", "--yes"])).toMatchObject({
       yes: true,
-      skipConfig: false,
+      studio: true,
     });
   });
-  it("combines explicit skipping with Studio selection", () => {
-    expect(parse(["demo", "--skip-config", "--no-studio"])).toMatchObject({
-      skipConfig: true,
+  it("can create a headless project", () => {
+    expect(parse(["demo", "--no-studio"])).toMatchObject({
       studio: false,
     });
   });
@@ -20,7 +18,7 @@ describe("creator arguments", () => {
     expect(parse(["demo", "--no-open"])).toMatchObject({ open: false });
   });
   it("rejects unknown options", () => {
-    expect(() => parse(["demo", "--skip-conf"])).toThrow("Usage:");
+    expect(() => parse(["demo", "--skip-config"])).toThrow("Usage:");
     expect(() => parse(["demo", "--studio"])).toThrow("Usage:");
   });
 });

@@ -15,15 +15,19 @@ export async function proxyRuntime(
   const read =
     method === "GET" &&
     (/^\/v1\/(agents|sessions)$/.test(path) ||
-      /^\/v1\/sessions\/[^/]+(?:\/(items|events))?$/.test(path));
+      /^\/v1\/sessions\/[^/]+(?:\/(items|events))?$/.test(path) ||
+      path === "/v1/host/model" ||
+      path === "/v1/host/models");
   const write =
     (method === "PUT" && /^\/v1\/sessions\/[^/]+$/.test(path)) ||
     (method === "POST" && /^\/v1\/sessions\/[^/]+\/commands$/.test(path));
-  if (!read && !write) return fail(404, "Unsupported Studio operation");
-  if (write && request.headers.origin !== options.origin)
+  const hostWrite = method === "PUT" && path === "/v1/host/model";
+  if (!read && !write && !hostWrite)
+    return fail(404, "Unsupported Studio operation");
+  if ((write || hostWrite) && request.headers.origin !== options.origin)
     return fail(403, "Studio mutations require a same-origin request");
   let body: string | undefined;
-  if (write) {
+  if (write || hostWrite) {
     if (!request.headers["content-type"]?.startsWith("application/json"))
       return fail(415, "JSON required");
     let text = "";
@@ -40,8 +44,8 @@ export async function proxyRuntime(
     }
     if (!value || typeof value !== "object" || Array.isArray(value))
       return fail(400, "JSON object required");
-    if (method === "PUT") value.ownerUserId = "local-developer";
-    else if (!["message", "cancel"].includes(value.type))
+    if (!hostWrite && method === "PUT") value.ownerUserId = "local-developer";
+    else if (!hostWrite && !["message", "cancel"].includes(value.type))
       return fail(
         400,
         "This Studio release supports message and cancel commands",

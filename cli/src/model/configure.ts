@@ -1,9 +1,10 @@
 import type { Readable, Writable } from "node:stream";
-import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { saveEnvironment } from "../environment.js";
-import type { AuthInteraction, CredentialStore } from "@earendil-works/pi-ai";
-import { ProjectCredentialStore } from "@nylorun/runtime/configuration";
+import type {
+  AuthInteraction,
+  Credential,
+  CredentialStore,
+} from "@earendil-works/pi-ai";
 import { modelsFor, type Selection } from "@nylorun/runtime/configuration";
 
 export class ConfigurationCancelled extends Error {
@@ -14,6 +15,13 @@ export class ConfigurationCancelled extends Error {
   }
 }
 
+export type PromptedModel = {
+  provider: string;
+  model: string;
+  baseUrl?: string;
+  auth: Credential;
+};
+
 // Internal options also allow isolated prompt tests without changing process globals.
 export async function configureProvider(
   options: {
@@ -22,35 +30,32 @@ export async function configureProvider(
     input?: Readable;
     output?: Writable;
   } = {}
-) {
-  const root = options.root ?? process.cwd();
+): Promise<PromptedModel> {
   const output = options.output ?? process.stdout;
   const controller = new AbortController();
   const signal = controller.signal;
   const forwardAbort = () => controller.abort(options.signal!.reason);
   options.signal?.throwIfAborted();
-  let enteredKey: string | undefined;
-  let enteredEnvironment: Record<string, string | undefined> = {};
-  const oauthStore = new ProjectCredentialStore(
-    join(root, ".nylorun", "auth.json"),
-    join(root, ".env", "auth.json")
-  );
+  let captured: Credential | undefined;
   const store: CredentialStore = {
-    read: (id) => oauthStore.read(id),
-    list: () => oauthStore.list(),
-    delete: (id) => oauthStore.delete(id),
-    async modify(id, fn) {
-      const next = await fn(await oauthStore.read(id));
-      if (next?.type === "api_key") {
-        if (next.key === "") throw new Error("An API key is required.");
-        enteredKey = next.key;
-        enteredEnvironment = { ...next.env };
-        return next;
-      }
-      return oauthStore.modify(id, async () => next);
+    async read() {
+      return undefined;
+    },
+    async list() {
+      return [];
+    },
+    async delete() {},
+    async modify(_id, fn) {
+      const next = await fn(captured);
+      if (next?.type === "api_key" && !next.key)
+        throw new Error("An API key is required.");
+      if (next) captured = next;
+      return next ?? captured;
     },
   };
-  const models = modelsFor({ provider: "", model: "" }, store);
+  const models = modelsFor({ provider: "", model: "" }, store, {
+    environment: false,
+  });
   const providers = models.getProviders();
   const prompt = createInterface({
     input: options.input ?? process.stdin,
@@ -93,10 +98,10 @@ export async function configureProvider(
         model,
         custom: { baseUrl },
       };
-      const customModels = modelsFor(selection, store);
+      const customModels = modelsFor(selection, store, { environment: false });
       if (!(await customModels.checkAuth("custom", { signal })))
         await customModels.login("custom", "api_key", interaction());
-      await save(selection);
+      return prompted(selection);
     } else {
       const chosen = providers[choice - 1];
       if (!chosen) throw new Error("Choose a listed provider.");
@@ -122,10 +127,8 @@ export async function configureProvider(
         }
         await models.login(chosen.id, method, interaction());
       }
-      await save({ provider: chosen.id, model: model.id });
+      return prompted({ provider: chosen.id, model: model.id });
     }
-    signal.throwIfAborted();
-    output.write("Provider configuration saved.\n");
   } catch (error) {
     throw signal.aborted ? signal.reason : error;
   } finally {
@@ -163,20 +166,18 @@ export async function configureProvider(
     };
   }
 
-  async function save(selection: Selection) {
+  function prompted(selection: Selection): PromptedModel {
     signal.throwIfAborted();
-    await saveEnvironment(
-      root,
-      {
-        ...enteredEnvironment,
-        MODEL_PROVIDER: selection.provider,
-        MODEL: selection.model,
-        MODEL_PROVIDER_BASE_URL: selection.custom?.baseUrl,
-        ...(enteredKey === undefined
-          ? {}
-          : { MODEL_PROVIDER_API_KEY: enteredKey }),
-      },
-      signal
-    );
+    if (!captured)
+      throw new Error("An API key or OAuth credential is required.");
+    output.write("Provider configuration saved.\n");
+    return {
+      provider: selection.provider,
+      model: selection.model,
+      ...(selection.custom?.baseUrl
+        ? { baseUrl: selection.custom.baseUrl }
+        : {}),
+      auth: captured,
+    };
   }
 }

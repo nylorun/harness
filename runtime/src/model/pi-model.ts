@@ -1,7 +1,8 @@
-import { join } from "node:path";
 import type {
   AssistantMessage,
   Context,
+  Credential,
+  CredentialStore,
   ImageContent,
   Message,
   TextContent,
@@ -17,15 +18,16 @@ import type {
 } from "../contracts.js";
 import type { RuntimeMedia } from "../adapters/media.js";
 import { scrub } from "../redact.js";
-import { ProjectCredentialStore } from "./auth-store.js";
-import { modelsFor, type Selection } from "./models.js";
-import { modelSelection, projectSecrets } from "./settings.js";
+import type { HostModelSecret } from "../vault/service.js";
+import { modelsFor } from "./models.js";
+import { projectSecrets } from "./settings.js";
 
 export interface PiModelOptions {
   readonly root?: string;
   readonly onPreview?: (preview: import("./defaults.js").ModelPreview) => void;
-  readonly selection?: Selection;
   readonly media?: Pick<RuntimeMedia, "dataUrl">;
+  readonly readHostModel?: () => HostModelSecret | undefined;
+  readonly writeHostCredential?: (credential: Credential) => void;
 }
 const emptyUsage = (): Usage => ({
   input: 0,
@@ -41,20 +43,23 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
   return async (call, context) => {
     context.signal.throwIfAborted();
     const root = options.root ?? process.cwd();
-    const configured = options.selection ?? modelSelection(root);
+    const stored = options.readHostModel?.();
+    if (!stored)
+      throw new Error(
+        "Model provider is not configured. Start nylorun dev in a terminal, or set it in Studio.",
+      );
     const requested = call.model?.id;
     const selection = {
-      ...configured,
-      model: requested?.startsWith(`${configured.provider}/`)
-        ? requested.slice(configured.provider.length + 1)
-        : (requested ?? configured.model),
+      provider: stored.provider,
+      model: requested?.startsWith(`${stored.provider}/`)
+        ? requested.slice(stored.provider.length + 1)
+        : (requested ?? stored.model),
+      ...(stored.baseUrl ? { custom: { baseUrl: stored.baseUrl } } : {}),
     };
     const registry = modelsFor(
       selection,
-      new ProjectCredentialStore(
-        join(root, ".nylorun", "auth.json"),
-        join(root, ".env", "auth.json"),
-      ),
+      hostCredentialStore(stored, options.writeHostCredential),
+      { environment: false },
     );
     const selected = registry.getModel(selection.provider, selection.model);
     if (!selected) throw new Error("Unknown model. Run nylorun configure.");
@@ -226,7 +231,10 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
       messages,
       tools,
     };
-    const secrets = projectSecrets(root);
+    const secrets = [
+      ...projectSecrets(root),
+      ...credentialSecrets(stored.credential),
+    ];
     // Publish only portable references, never the materialized provider image bytes.
     context.reportPreparedCall?.({
       adapter: "runtime.pi-ai",
@@ -333,10 +341,46 @@ export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
         String(
           scrub(
             error instanceof Error ? error.message : String(error),
-            projectSecrets(root),
+            secrets,
           ),
         ),
       );
     }
   };
+}
+
+function hostCredentialStore(
+  stored: HostModelSecret,
+  write: ((credential: Credential) => void) | undefined,
+): CredentialStore {
+  let current: Credential = stored.credential as Credential;
+  return {
+    async read(providerId) {
+      if (providerId !== stored.provider) return undefined;
+      return current;
+    },
+    async list() {
+      return [{ providerId: stored.provider, type: current.type }];
+    },
+    async modify(providerId, fn) {
+      if (providerId !== stored.provider) return fn(undefined);
+      const next = await fn(current);
+      if (next === undefined) return current;
+      write?.(next);
+      current = next;
+      return next;
+    },
+    async delete() {
+      throw new Error(
+        "Replace the model provider through nylorun dev or Studio.",
+      );
+    },
+  };
+}
+
+function credentialSecrets(credential: HostModelSecret["credential"]): string[] {
+  const values = [credential.key, credential.access, credential.refresh];
+  if (credential.env)
+    values.push(...Object.values(credential.env));
+  return values.filter((value): value is string => Boolean(value));
 }

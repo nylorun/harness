@@ -13,6 +13,12 @@ const output = execFileSync(
 );
 rmSync(cache, { recursive: true, force: true });
 const files = JSON.parse(output)[0].files.map((entry) => entry.path);
+const version = readFileSync("dist/version.js", "utf8");
+const declared = /RUNTIME_VERSION = "([^"]+)"/.exec(version)?.[1];
+if (declared !== pkg.version)
+  throw new Error(
+    `RUNTIME_VERSION is ${declared} but package.json is ${pkg.version}; update runtime/src/version.ts.`,
+  );
 for (const path of [
   "dist/configuration.js",
   "dist/index.js",
@@ -21,6 +27,7 @@ for (const path of [
   "dist/node/local-sessions.js",
   "dist/core/runtime.js",
   "dist/core/main.js",
+  "dist/version.js",
   "README.md",
   "CHANGELOG.md",
   "LICENSE",

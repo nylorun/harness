@@ -11,7 +11,7 @@ export function modelSelection(root = process.cwd()): Selection {
   if (provider !== undefined || model !== undefined || baseUrl !== undefined) {
     if (!provider?.trim() || !model?.trim())
       throw new Error(
-        "Set both MODEL_PROVIDER and MODEL, or run nylorun configure."
+        "Set both MODEL_PROVIDER and MODEL.",
       );
     if (provider === "custom" && !baseUrl?.trim())
       throw new Error("Set MODEL_PROVIDER_BASE_URL for MODEL_PROVIDER=custom.");
@@ -56,7 +56,9 @@ export function modelSelection(root = process.cwd()): Selection {
   } catch {
     /* Report one actionable setup error without file or credential contents. */
   }
-  throw new Error("Run nylorun configure to connect a model provider.");
+  throw new Error(
+    "Model provider is not configured. Start nylorun dev in a terminal, or set it in Studio.",
+  );
 }
 export function projectSecrets(root = process.cwd()): readonly string[] {
   const values = Object.entries(process.env)

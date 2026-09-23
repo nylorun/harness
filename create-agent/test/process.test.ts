@@ -7,11 +7,11 @@ import { getEventListeners } from "node:events";
 import { expect, it } from "vitest";
 import { runCommand, CreationCancelled } from "../dist/process.js";
 
-it("the real CLI rejects noninteractive creation before making the destination", async () => {
+it("the real CLI rejects unknown options before making the destination", async () => {
   const root = await mkdtemp(join(tmpdir(), "creator-cli-"));
   try {
     const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
-    const child = spawn(process.execPath, [cli, "demo", "--yes"], {
+    const child = spawn(process.execPath, [cli, "demo", "--skip-config"], {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -24,7 +24,7 @@ it("the real CLI rejects noninteractive creation before making the destination",
       child.once("close", resolve);
     });
     expect(status).toBe(1);
-    expect(output).toContain("--skip-config");
+    expect(output).toContain("Usage:");
     expect(await readdir(root)).toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });

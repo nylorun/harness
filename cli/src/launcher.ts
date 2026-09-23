@@ -1,4 +1,8 @@
 import { runProject } from "./project-runner.js";
-export async function start(entry = "dist/agents/index.js"): Promise<void> {
-  await runProject(entry);
+import type { Scope } from "./scope.js";
+export async function serve(
+  entry = "dist/agents/index.js",
+  options: { autostart?: boolean; scope?: Scope } = {}
+): Promise<void> {
+  await runProject(entry, options);
 }

@@ -15,6 +15,14 @@ export function canonical(value: unknown): string {
     );
   return JSON.stringify(value) ?? "null";
 }
+export interface ExecutorRow {
+  agentId: string;
+  tokenHash: string;
+  implementationVersion: string;
+  manifestHash?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 export class Store {
   readonly db: DatabaseSync;
   constructor(path: string) {
@@ -34,7 +42,8 @@ export class Store {
         name TEXT NOT NULL,
         owner_user_id TEXT NOT NULL,
         metadata_json TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        scope TEXT NOT NULL DEFAULT 'user'
       );
       CREATE INDEX IF NOT EXISTS vaults_owner ON vaults(owner_user_id);
       CREATE TABLE IF NOT EXISTS vault_credentials(
@@ -67,7 +76,16 @@ export class Store {
         id TEXT PRIMARY KEY,
         body_hash TEXT NOT NULL,
         response TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS executors(
+        agent_id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        implementation_version TEXT NOT NULL,
+        manifest_hash TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );`);
+    migrateVaultScope(this.db);
   }
   tx<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
@@ -96,6 +114,46 @@ export class Store {
         `INSERT INTO ${table}(id,body) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body`,
       )
       .run(id, JSON.stringify(body));
+  }
+  // Executors carry a bearer secret, so they use typed columns with a database-enforced unique
+  // token hash instead of flowing through the generic JSON document helpers above.
+  allExecutors(): ExecutorRow[] {
+    return this.db
+      .prepare(
+        "SELECT agent_id,token_hash,implementation_version,manifest_hash,created_at,updated_at FROM executors",
+      )
+      .all()
+      .map((r) => ({
+        agentId: String(r.agent_id),
+        tokenHash: String(r.token_hash),
+        implementationVersion: String(r.implementation_version),
+        manifestHash: r.manifest_hash == null ? undefined : String(r.manifest_hash),
+        createdAt: String(r.created_at),
+        updatedAt: String(r.updated_at),
+      }));
+  }
+  putExecutor(row: Omit<ExecutorRow, "createdAt">): void {
+    this.db
+      .prepare(
+        `INSERT INTO executors(agent_id,token_hash,implementation_version,manifest_hash,created_at,updated_at)
+         VALUES(?,?,?,?,?,?)
+         ON CONFLICT(agent_id) DO UPDATE SET
+           token_hash=excluded.token_hash,
+           implementation_version=excluded.implementation_version,
+           manifest_hash=excluded.manifest_hash,
+           updated_at=excluded.updated_at`,
+      )
+      .run(
+        row.agentId,
+        row.tokenHash,
+        row.implementationVersion,
+        row.manifestHash ?? null,
+        row.updatedAt,
+        row.updatedAt,
+      );
+  }
+  deleteExecutor(agentId: string): void {
+    this.db.prepare("DELETE FROM executors WHERE agent_id=?").run(agentId);
   }
   event(
     sessionId: string,
@@ -162,4 +220,17 @@ export class Store {
       cursor: last ? JSON.parse(String(last.body)).cursor : null,
     };
   }
+}
+
+function migrateVaultScope(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(vaults)").all() as {
+    name: string;
+  }[];
+  if (!columns.some((column) => column.name === "scope"))
+    db.exec(
+      "ALTER TABLE vaults ADD COLUMN scope TEXT NOT NULL DEFAULT 'user'",
+    );
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS vaults_one_host ON vaults(scope) WHERE scope = 'host'",
+  );
 }

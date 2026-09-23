@@ -14,7 +14,6 @@ export function publicCreatorArguments(version) {
     "create-agent",
     "application",
     "--yes",
-    "--skip-config",
   ];
 }
 

@@ -201,9 +201,7 @@ export async function develop(
       }`
     );
     log(
-      `[dev] Live conversations require provider setup: npm run configure --prefix ${JSON.stringify(
-        project
-      )}`
+      `[dev] Live conversations use the Runtime vault. The first start prompts, or replace the credential while it is running: npx nylorun configure`
     );
     if (stopping) throw new Error("Development stopped.");
     watcher = watch(

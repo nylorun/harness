@@ -2,15 +2,20 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-export async function develop(args: readonly string[]): Promise<number> {
+/**
+ * Everything that can be checked without contacting the host, so a project that cannot run
+ * never causes a Runtime to be started on its behalf.
+ */
+export function developmentPreflight(args: readonly string[]): string {
   if (
     new Set(args).size !== args.length ||
-    args.some((arg) => !["--no-studio", "--no-open"].includes(arg))
+    args.some(
+      (arg) => !["--no-studio", "--no-open", "--no-autostart"].includes(arg),
+    )
   )
-    throw new Error("Usage: nylorun dev [--no-studio] [--no-open]");
-  const port = Number(process.env.PORT ?? 8787);
-  if (!Number.isInteger(port) || port < 1 || port > 65535)
-    throw new Error("PORT must be between 1 and 65535");
+    throw new Error(
+      "Usage: nylorun dev [--no-studio] [--no-open] [--no-autostart]",
+    );
   const require = createRequire(join(process.cwd(), "package.json"));
   let tsx: string;
   try {
@@ -24,6 +29,10 @@ export async function develop(args: readonly string[]): Promise<number> {
     } catch {
       throw new Error("Install @nylorun/studio or use --no-studio");
     }
+  return tsx;
+}
+export async function develop(args: readonly string[]): Promise<number> {
+  const tsx = developmentPreflight(args);
   const child = spawn(
     process.execPath,
     [

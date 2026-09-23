@@ -11,6 +11,12 @@ afterEach(() => {
 });
 it("completes a signed Gemini tool conversation across the published engine/runtime interfaces", async () => {
   vi.stubEnv("GEMINI_API_KEY", "fixture-key");
+  const readHostModel = () => ({
+    provider: "google",
+    model: "gemini-flash-latest",
+    authType: "api_key" as const,
+    credential: { type: "api_key" as const, key: "fixture-key" },
+  });
   let requests = 0;
   vi.stubGlobal(
     "fetch",
@@ -68,9 +74,7 @@ it("completes a signed Gemini tool conversation across the published engine/runt
     .build();
   const result = await runAgent(agent, {
     input: "Add 19 and 7",
-    onModelCall: piModel({
-      selection: { provider: "google", model: "gemini-flash-latest" },
-    }),
+    onModelCall: piModel({ readHostModel }),
   });
   expect(result).toMatchObject({ status: "completed", output: "26" });
   expect(requests).toBe(2);

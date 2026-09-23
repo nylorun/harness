@@ -1,7 +1,6 @@
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseEnv } from "node:util";
 import { PassThrough, Writable } from "node:stream";
 import { getEventListeners } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
@@ -64,12 +63,19 @@ async function fixture(answers = ["1", "1"]) {
 
 it("saves selection after authentication and cleans up prompt and abort listeners", async () => {
   const test = await fixture();
-  login.mockResolvedValue(undefined);
+  login.mockImplementation(async () =>
+    state.store!.modify("fixture", async () => ({
+      type: "api_key",
+      key: "fixture-key",
+    }))
+  );
   const controller = new AbortController();
-  await configureProvider({ ...test, signal: controller.signal });
-  expect(parseEnv(await readFile(join(test.root, ".env"), "utf8"))).toEqual({
-    MODEL_PROVIDER: "fixture",
-    MODEL: "fixture-model",
+  await expect(
+    configureProvider({ ...test, signal: controller.signal })
+  ).resolves.toMatchObject({
+    provider: "fixture",
+    model: "fixture-model",
+    auth: { type: "api_key", key: "fixture-key" },
   });
   expect(test.text()).toContain("Provider configuration saved.");
   expect(test.text()).not.toContain("Return to Studio");
@@ -88,14 +94,19 @@ it("defaults to API keys and saves entered provider settings without a vault", a
       env: { PROVIDER_ACCOUNT: "account" },
     }))
   );
-  await configureProvider(test);
+  await expect(configureProvider(test)).resolves.toMatchObject({
+    provider: "fixture",
+    model: "fixture-model",
+    auth: {
+      type: "api_key",
+      key: "key-with-#-and-'",
+      env: { PROVIDER_ACCOUNT: "account" },
+    },
+  });
   expect(login).toHaveBeenCalledWith("fixture", "api_key", expect.anything());
   const text = await readFile(join(test.root, ".env"), "utf8");
   expect(text).toContain("# integration\nINTEGRATION=keep\n");
-  expect(parseEnv(text)).toMatchObject({
-    MODEL_PROVIDER_API_KEY: "key-with-#-and-'",
-    PROVIDER_ACCOUNT: "account",
-  });
+  expect(text).not.toContain("key-with");
   await expect(
     readFile(join(test.root, ".nylorun/auth.json"))
   ).rejects.toThrow();
@@ -113,14 +124,14 @@ it("keeps explicitly selected OAuth credentials separate from dotenv", async () 
   login.mockImplementation(async () =>
     state.store!.modify("fixture", async () => credential)
   );
-  await configureProvider(test);
+  await expect(configureProvider(test)).resolves.toMatchObject({
+    provider: "fixture",
+    model: "fixture-model",
+    auth: credential,
+  });
   expect(login).toHaveBeenCalledWith("fixture", "oauth", expect.anything());
-  expect(
-    JSON.parse(await readFile(join(test.root, ".nylorun/auth.json"), "utf8"))
-  ).toEqual({ fixture: credential });
-  expect(await readFile(join(test.root, ".env"), "utf8")).not.toContain(
-    "oauth-access"
-  );
+  await expect(readFile(join(test.root, ".nylorun/auth.json"))).rejects.toThrow();
+  await expect(readFile(join(test.root, ".env"))).rejects.toThrow();
 });
 
 it.each(["SIGINT", "SIGTERM"] as const)(
@@ -210,11 +221,16 @@ it.each([false, true])(
       '{"provider":"old","model":"old"}'
     );
     if (otherFile) await writeFile(join(test.root, "config/keep.json"), "{}");
-    login.mockResolvedValue(undefined);
-    await configureProvider(test);
-    expect(
-      parseEnv(await readFile(join(test.root, ".env"), "utf8")).MODEL
-    ).toBe("fixture-model");
+    login.mockImplementation(async () =>
+      state.store!.modify("fixture", async () => ({
+        type: "api_key",
+        key: "next-key",
+      }))
+    );
+    await expect(configureProvider(test)).resolves.toMatchObject({
+      model: "fixture-model",
+      auth: { key: "next-key" },
+    });
     expect(await readFile(join(test.root, "config/model.json"), "utf8")).toBe(
       '{"provider":"old","model":"old"}'
     );

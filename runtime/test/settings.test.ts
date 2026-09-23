@@ -22,7 +22,7 @@ it("reads legacy selection only when the new file is absent", async () => {
   expect(modelSelection(root)).toEqual(current);
   for (const invalid of ["{", "null", "{}", '{"provider":"","model":"x"}']) {
     await writeFile(join(root, ".env/model.json"), invalid);
-    expect(() => modelSelection(root)).toThrow("Run nylorun configure");
+    expect(() => modelSelection(root)).toThrow("Model provider is not configured");
   }
 });
 

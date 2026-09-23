@@ -16,16 +16,17 @@ Create a local agent project (Studio enabled by default):
 npm create @nylorun/agent@beta my-agent
 ```
 
-Then follow the terminal prompts to configure a model provider and start development.
+The creator installs dependencies and starts development. The first start asks for a model provider and stores it in the Runtime vault.
 
 Useful flags (after `--`):
 
 | Flag | Effect |
 |---|---|
-| `--skip-config` | Skip provider setup (required when stdin/stdout are not interactive) |
 | `--no-studio` | Scaffold a headless project without Studio |
+| `--no-open` | Start development without opening a browser |
+| `--yes` | Accept npm install prompts |
 
-The creator scaffolds, installs, configures, and starts the project. The generated app depends on the SDK and CLI; Studio is a development dependency. The `@nylorun/cli` package provides `nylorun` and brings the OSS runtime.
+The generated app depends on the SDK and CLI; Studio is a development dependency. The `@nylorun/cli` package provides `nylorun` and brings the OSS runtime.
 
 ## Develop this repository
 
@@ -38,7 +39,7 @@ npm run setup
 npm run dev
 ```
 
-`npm run setup` installs both lockfiles and builds packages. Before starting the examples app, run `npm run configure`.
+`npm run setup` installs both lockfiles and builds packages. `npm run dev` starts a local Runtime and stores the model provider in its vault on first run. The Runtime keeps running after you stop `dev`, so sessions survive a source change; `npx nylorun down` stops it.
 
 ## Packages
 

@@ -1,14 +1,16 @@
-import { parseEnv } from "node:util";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
+import { startRuntime } from "@nylorun/runtime/core";
 
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const roots: string[] = [];
+const runtimes: { close(): Promise<void> }[] = [];
 afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   );
@@ -18,12 +20,27 @@ async function run(
 ) {
   const root = await mkdtemp(join(tmpdir(), "configure-cli-"));
   roots.push(root);
+  const serverKey = "server-token-value-16";
+  const runtime = await startRuntime({
+    sqlitePath: join(root, "runtime.sqlite"),
+    serverToken: serverKey,
+    executors: [],
+    vaultKek: Buffer.alloc(32, 7).toString("base64"),
+    port: 0,
+  });
+  const port = new URL(runtime.url).port;
+  runtimes.push(runtime);
   // Configuration must work even before the application's agent graph can load.
   await writeFile(join(root, "nylorun.config.ts"), "invalid typescript !");
   const child = spawn(process.execPath, [cli, "configure"], {
     cwd: root,
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, MODEL_PROVIDER_API_KEY: "" },
+    env: {
+      ...process.env,
+      PORT: port,
+      NYLORUN_SERVER_KEY: serverKey,
+      MODEL_PROVIDER_API_KEY: "",
+    },
   });
   let text = "";
   child.stdout!.on("data", (data) => {
@@ -39,7 +56,7 @@ async function run(
       child.once("error", reject);
       child.once("close", resolve);
     });
-    return { root, code, text };
+    return { root, code, text, runtimeUrl: runtime.url, serverKey };
   } finally {
     clearTimeout(timer);
   }
@@ -61,13 +78,18 @@ it("configures a custom provider using scripted stdin and no live model calls", 
     }
   });
   expect(result.code, result.text).toBe(0);
-  expect(
-    parseEnv(await readFile(join(result.root, ".env"), "utf8")).MODEL
-  ).toBe("fixture");
-  expect(
-    parseEnv(await readFile(join(result.root, ".env"), "utf8"))
-      .MODEL_PROVIDER_API_KEY
-  ).toBe("fixture-key");
+  const stored = await fetch(`${result.runtimeUrl}/v1/host/model`, {
+    headers: { authorization: `Bearer ${result.serverKey}` },
+  });
+  const body = await stored.json();
+  expect(body).toMatchObject({
+    configured: true,
+    provider: "custom",
+    model: "fixture",
+    authType: "api_key",
+  });
+  expect(JSON.stringify(body)).not.toContain("fixture-key");
+  await expect(readFile(join(result.root, ".env"), "utf8")).rejects.toThrow();
 });
 
 it.each(["SIGINT", "SIGTERM", "EOF"] as const)(

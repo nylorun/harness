@@ -7,11 +7,10 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "configure": "nylorun configure",
     "dev": "nylorun dev",
-    "studio": "nylorun studio --runtime-url http://127.0.0.1:8787",
+    "studio": "nylorun studio",
     "build": "node -e \"import('node:fs/promises').then(async ({rm,cp}) => { await rm('dist', { recursive: true, force: true }); await cp('agents', 'dist/agents', { recursive: true, filter: (source) => !source.endsWith('.ts') }); })\" && tsc -p tsconfig.json",
-    "start": "nylorun start",
+    "start": "nylorun serve",
     "check": "tsc --noEmit"
   },
   "dependencies": {

@@ -10,13 +10,12 @@ Use the repository toolchain in [CONTRIBUTING.md](../CONTRIBUTING.md). From the 
 
 ```sh
 npm run setup
-npm run configure
 npm run dev
 ```
 
-Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 8787. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup.
+Root development rebuilds local packages and serves Studio on port 4161 and Runtime on port 8787. The first start stores the model provider in the Runtime vault. Use `npm run dev -- --no-studio` without Studio. From this directory, `npm run studio` attaches the packaged dashboard to an existing host; `npm run build` and `npm start` exercise production startup. `npm run configure` replaces the vault credential while the Runtime is already running.
 
-Model selection and API keys use `.env`: set `MODEL_PROVIDER`, `MODEL`, `MODEL_PROVIDER_API_KEY`, and (for custom endpoints) `MODEL_PROVIDER_BASE_URL`, or run `npm run configure`. Existing `.env/` directories require [manual migration](../runtime/README.md#upgrading-an-existing-starter); local state is never moved automatically.
+`MODEL_PROVIDER`, `MODEL`, and `MODEL_PROVIDER_API_KEY` (and `MODEL_PROVIDER_BASE_URL` for a custom endpoint) seed the vault once when they are already set. They are not the call-time store. Existing `.env/` directories require [manual migration](../runtime/README.md#upgrading-an-existing-starter); local state is never moved automatically.
 
 Optional integration variables are loaded from `.env`. Interior Design uses `OPENAI_API_KEY` and optional `OPENAI_IMAGE_MODEL` independently of the chat provider. Its selected chat model must support images. Codex continues using its own authentication. Never commit credentials.
 
