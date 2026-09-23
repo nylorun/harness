@@ -121,8 +121,7 @@ export async function runDelegation(
       outcome = { kind: "failed", code: cause.code, message: cause.message };
     else if (cause instanceof Error)
       outcome = { kind: "failed", code: "delegation.failed", message: cause.message };
-    else
-      outcome = { kind: "failed", code: "delegation.failed", message: String(cause) };
+    else outcome = { kind: "failed", code: "delegation.failed", message: String(cause) };
   }
   await host.announce?.("settled", ref, {
     status,

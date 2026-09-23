@@ -235,7 +235,9 @@ describe("agents used as tools, in process", () => {
       }
       if (!results(call).length)
         return {
-          output: [{ type: "tool-call", id: "d1", name: "researcher", args: { task: "triage order" } }],
+          output: [
+            { type: "tool-call", id: "d1", name: "researcher", args: { task: "triage order" } },
+          ],
         };
       return results(call)
         .map((item) => `${item.status}:${decode(item.text)}`)
@@ -322,7 +324,9 @@ describe("agents used as tools, in process", () => {
       onModelCall: async (call) => {
         calls += 1;
         if (calls > 1) {
-          failureText = results(call).map((item) => decode(item.text)).join(" | ");
+          failureText = results(call)
+            .map((item) => decode(item.text))
+            .join(" | ");
           return failureText;
         }
         return {
