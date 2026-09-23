@@ -74,7 +74,7 @@ Keep credentials and SQLite in gitignored `.nylorun/`; provider configuration us
 
 Explicit in-process engine execution remains available to host authors through `@nylorun/harness/run`; it is not loaded by the application SDK. OSS and Cloud consume the harness independently.
 
-The release workflow covers local text and ordinary tools. Advanced examples remain source references outside the default registry. Media, approvals UI, subagents, deployment recipes, and broad recovery/conformance gates remain for later releases.
+The release workflow covers local text and ordinary tools. Advanced examples remain source references outside the default registry. Media, approvals UI, deployment recipes, and broad recovery/conformance gates remain for later releases. Subagents (agents used as tools, one level deep) ship with this branch; see [the SDK](agents/README.md).
 
 ## Execution API rename
 

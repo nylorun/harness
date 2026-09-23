@@ -196,6 +196,151 @@ describe("agents used as tools, in process", () => {
     expect(result.status).toBe("cancelled");
     expect(started).toBe(2);
   });
+
+  it("lets a child load its own skills", async () => {
+    const researcher = Agent({
+      id: "researcher",
+      description: "Investigates with a skill.",
+      instructions: "Load the skill, then answer.",
+    })
+      .use({
+        id: "skills",
+        skills: { triage: { name: "triage", description: "Triage an issue." } },
+        skillRecords: {
+          triage: {
+            name: "triage",
+            description: "Triage an issue.",
+            instructions: "Label P0 when the order is lost.",
+          },
+        },
+      })
+      .build();
+    const parent = Agent({
+      id: "support",
+      instructions: "Delegate.",
+      tools: [researcher],
+    }).build();
+    const seen: { tools: string[]; loaded?: string }[] = [];
+    const adapter: ModelAdapter = async (call) => {
+      if (call.tools.some((item) => item.name === "load_skill")) {
+        const done = results(call);
+        if (!done.length) {
+          seen.push({ tools: call.tools.map((item) => item.name) });
+          return {
+            output: [{ type: "tool-call", id: "s1", name: "load_skill", args: { name: "triage" } }],
+          };
+        }
+        seen.push({ tools: call.tools.map((item) => item.name), loaded: done[0]!.text });
+        return "skill used";
+      }
+      if (!results(call).length)
+        return {
+          output: [{ type: "tool-call", id: "d1", name: "researcher", args: { task: "triage order" } }],
+        };
+      return results(call)
+        .map((item) => `${item.status}:${decode(item.text)}`)
+        .join(" | ");
+    };
+    const result = await run({
+      binding: bindingFromAgent(parent),
+      input: "help",
+      onModelCall: adapter,
+    });
+    expect(result.status).toBe("completed");
+    if (result.status !== "completed") return;
+    expect(result.output).toBe("completed:skill used");
+    expect(seen[0]!.tools).toContain("load_skill");
+    expect(JSON.stringify(seen[1]!.loaded)).toContain("Label P0 when the order is lost.");
+  });
+
+  it.each(["ask", "approve", "sleep", "waitFor"] as const)(
+    "turns a child's %s into interaction-unsupported the child can see",
+    async (kind) => {
+      const interactive = tool({
+        name: "search_orders",
+        input: z.object({ query: z.string() }),
+        run: async (_args, ctx) => {
+          if (kind === "ask") return ctx.ask("Which order?");
+          if (kind === "approve") return ctx.approve("Refund?");
+          if (kind === "sleep") return ctx.sleep("1s");
+          return ctx.waitFor("order.updated");
+        },
+      });
+      const parent = agents({ childTools: [interactive] });
+      const seen: string[] = [];
+      const { adapter } = scripted((_task, found) => {
+        seen.push(found);
+        return "gave up";
+      });
+      const result = await run({
+        binding: bindingFromAgent(parent),
+        input: "x",
+        onModelCall: adapter,
+      });
+      expect(result.status).toBe("completed");
+      expect(seen[0]).toContain("can't ask for input");
+    },
+  );
+
+  it("reports mixed concurrent success and failure to the parent", async () => {
+    const parent = agents();
+    const adapter: ModelAdapter = async (call) => {
+      const done = results(call);
+      if (isChild(call)) {
+        if (userText(call) === "A") return "answer A";
+        return "";
+      }
+      if (!done.length)
+        return {
+          output: [
+            { type: "tool-call", id: "d1", name: "researcher", args: { task: "A" } },
+            { type: "tool-call", id: "d2", name: "researcher", args: { task: "B" } },
+          ],
+        };
+      return done.map((item) => `${item.status}:${decode(item.text)}`).join(" | ");
+    };
+    const result = await run({
+      binding: bindingFromAgent(parent),
+      input: "x",
+      onModelCall: adapter,
+    });
+    expect(result.status === "completed" && result.output).toBe(
+      "completed:answer A | failed:The agent finished without an answer.",
+    );
+  });
+
+  it("settles a missing local child as a failed tool result with matching events", async () => {
+    const parent = agents();
+    const restored = Agent.from(JSON.parse(JSON.stringify(parent.manifest)), {});
+    const events: ExecutionEvent[] = [];
+    let calls = 0;
+    let failureText = "";
+    const result = await run({
+      binding: bindingFromAgent(restored),
+      input: "x",
+      onEvent: (event) => void events.push(event),
+      onModelCall: async (call) => {
+        calls += 1;
+        if (calls > 1) {
+          failureText = results(call).map((item) => decode(item.text)).join(" | ");
+          return failureText;
+        }
+        return {
+          output: [{ type: "tool-call", id: "d1", name: "researcher", args: { task: "A" } }],
+        };
+      },
+    });
+    expect(result.status).toBe("completed");
+    if (result.status !== "completed") return;
+    expect(failureText).toContain("no local implementation");
+    expect(result.output).toContain("no local implementation");
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["delegation.started", "delegation.completed"]),
+    );
+    const completed = events.find((event) => event.type === "delegation.completed") as any;
+    expect(completed.status).toBe("failed");
+    expect(completed.attributes.code).toBe("execution.invalid-input");
+  });
 });
 
 describe("agents used as tools, durable", () => {
