@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SkillRecord } from "@nylorun/core/define";
+import matter from "gray-matter";
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -123,25 +124,26 @@ export function parseSkill(
   text: string,
   directoryName: string
 ): { name: string; description: string; instructions: string } | undefined {
-  const match = /^-{3}\r?\n([\s\S]*?)\r?\n-{3}(?:\r?\n|$)/.exec(text);
-  if (!match) return undefined;
-  const fields: Record<string, string> = {};
-  for (const raw of (match[1] ?? "").split(/\r?\n/)) {
-    if (!raw.trim() || raw.trimStart().startsWith("#")) continue;
-    const line = /^([\w-]+)\s*:\s*(.*)$/.exec(raw);
-    if (!line || line[1] === "metadata") continue;
-    fields[line[1]!] = unquote(line[2] ?? "");
+  let parsed: ReturnType<typeof matter>;
+  try {
+    parsed = matter(text);
+  } catch {
+    return undefined;
   }
-  const name = fields.name?.trim() ?? "";
-  const description = fields.description?.trim() ?? "";
+  const name = asTrimmedString(parsed.data.name);
+  const description = asTrimmedString(parsed.data.description);
   if (!name || !description || description.length > 1024) return undefined;
   if (name.length > 64 || !SKILL_NAME.test(name) || name !== directoryName)
     return undefined;
   return {
     name,
     description,
-    instructions: text.slice(match[0].length).replace(/^\r?\n/, ""),
+    instructions: parsed.content.replace(/^\r?\n/, ""),
   };
+}
+
+function asTrimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function readResources(
@@ -200,14 +202,4 @@ function isInside(root: string, target: string): boolean {
   return (
     rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel))
   );
-}
-
-function unquote(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  )
-    return trimmed.slice(1, -1);
-  return trimmed;
 }

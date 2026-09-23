@@ -133,3 +133,28 @@ it("skips invalid skills and keeps siblings", () => {
     true
   );
 });
+
+it("parses YAML frontmatter with gray-matter including quoted colons", () => {
+  const root = catalog();
+  write(
+    root,
+    "pdf-processing/SKILL.md",
+    '---\nname: pdf-processing\ndescription: "Use this skill when: the user asks about PDFs"\nlicense: Apache-2.0\n---\nExtract text.\n'
+  );
+  write(
+    root,
+    "invalid-yaml/SKILL.md",
+    "---\nname: invalid-yaml\ndescription: Use this skill when: unquoted colon breaks YAML\n---\nNope.\n"
+  );
+  const diagnostics: { code: string }[] = [];
+  const loaded = loadSkillsFromDirectory(root, diagnostics as never);
+  expect(loaded["pdf-processing"]).toMatchObject({
+    name: "pdf-processing",
+    description: "Use this skill when: the user asks about PDFs",
+    instructions: "Extract text.\n",
+  });
+  expect(loaded["invalid-yaml"]).toBeUndefined();
+  expect(diagnostics.some((item) => item.code === "skills.skill-skipped")).toBe(
+    true
+  );
+});
