@@ -1,9 +1,28 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, cp, symlink, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, cp, symlink, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import { root } from "./lib/repo.mjs";
 import { availablePort, develop } from "./lib/development.mjs";
+
+async function stopRuntime(project) {
+  await new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      [join(root, "cli/dist/cli.js"), "down"],
+      { cwd: project, stdio: "ignore" },
+    );
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+  try {
+    const pid = Number(await readFile(join(project, ".nylorun/runtime.pid"), "utf8"));
+    if (Number.isSafeInteger(pid) && pid > 0) process.kill(pid, "SIGKILL");
+  } catch {
+    /* already stopped */
+  }
+}
 
 // Exercise the repository supervisor without reading or changing developer credentials/data.
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-root-smoke-"));
@@ -55,6 +74,8 @@ try {
   );
   assert.ok(session.ok, await session.text());
   await app.close();
+  // Persistent Runtime outlives `nylorun dev` (dx-improvements); stop it for this disposable project.
+  await stopRuntime(temporary);
   await availablePort(port);
   await availablePort(studioPort);
   console.log(
@@ -62,5 +83,6 @@ try {
   );
 } finally {
   await app?.close();
+  await stopRuntime(temporary);
   await rm(temporary, { recursive: true, force: true });
 }
