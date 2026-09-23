@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0-beta
+
+### Minor Changes
+
+- b8d822a: Studio session chat includes a searchable model+provider selector backed by connected Runtime vault providers.
+- b8d822a: Studio Model Settings lists multiple vault-stored providers, adds credentials through a sheet, and switches the active provider/model via Runtime host vault APIs.
+- b8d822a: Studio Vault module lists, adds, updates, and deletes Runtime user-vault credentials through the agents SDK proxy; secrets stay in Runtime.
+- b8d822a: Breaking beta: replace `beforeModelCall` / `afterModelCall` with scoped hooks. Register `before("turn" | "step", fn)` and `after("step" | "turn", fn)` on the agent, or `before: { turn, step }` / `after: { step, turn }` on a capability. `before("turn")` runs once per turn and its `Patch` applies to every model call in the turn; the new `after("turn")` returns a `TurnDecision` for the final answer. `after` hooks take one argument and receive `attempt`, and `retry` now retries instead of failing the run. The manifest moves to `manifestSchemaVersion: 4` with `capabilities[].hooks`, and `BeforeModelCallFn`, `AfterModelCallFn` and the `beforeModelCall` / `afterModelCall` action kinds are removed. Every capability registered at a hook point now runs in one `hook` executor action, an expired hook claim is offered again instead of becoming uncertain, and the durable engine version is `hosted-2`. Hook toggles now hide a capability's tools, or one tool of a multi-tool capability, instead of having no effect or failing. Studio lists each capability's hooks with how often they run and labels hook actions. See MIGRATION.md.
+
+### Patch Changes
+
+- Pin agents to the tested release.
+- Updated dependencies [b8d822a]
+- Updated dependencies [b8d822a]
+- Updated dependencies [b8d822a]
+- Updated dependencies [b8d822a]
+- Updated dependencies
+  - @nylorun/agents@0.4.0-beta
+
 ## 0.6.1-beta
 
 ### Patch Changes

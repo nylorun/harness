@@ -1,5 +1,25 @@
 # @nylorun/core
 
+## 0.3.0-beta
+
+### Minor Changes
+
+- b8d822a: Studio Model Settings lists multiple vault-stored providers, adds credentials through a sheet, and switches the active provider/model via Runtime host vault APIs.
+- b8d822a: Let a running Runtime learn its executors instead of receiving them all at startup.
+  `PUT /v1/executors` registers or rotates scoped executor credentials with the application
+  credential, `DELETE /v1/executors/:agentId` removes one, and `GET /v1/executors` lists them
+  without disclosing secrets. Registrations persist in SQLite with the token hashed at rest and
+  are restored on the next start; scopes supplied through `NYLORUN_EXECUTORS_JSON` still apply
+  to that process, take precedence for their agent, and are never written to the database. An
+  unchanged registration is idempotent and keeps open streams, while a rotation ends the
+  replaced token's work stream and stops it authorizing. Unauthenticated `/health` now also
+  reports the Runtime version, a non-reversible scope digest of the database path, and the
+  process id; all three are optional in the contract so an older host still parses. Token
+  hashing is adequate only because these credentials are high-entropy values minted by the
+  host; it is not a password derivation.
+- b8d822a: Add `sandbox()`: one `.use(sandbox())` gives an agent Runtime-executed `bash`, `read`, `write`, `edit`, `grep` and `glob` tools on an isolated machine with a persistent `/workspace`. The Runtime selects a microsandbox microVM where available, otherwise an in-process virtual shell, enforces deny-by-default egress presets, owns sandbox lifecycle, and reports its choice through `GET /v1/host/sandbox`, the `nylorun dev` banner and `nylorun doctor sandbox`.
+- b8d822a: Breaking beta: replace `beforeModelCall` / `afterModelCall` with scoped hooks. Register `before("turn" | "step", fn)` and `after("step" | "turn", fn)` on the agent, or `before: { turn, step }` / `after: { step, turn }` on a capability. `before("turn")` runs once per turn and its `Patch` applies to every model call in the turn; the new `after("turn")` returns a `TurnDecision` for the final answer. `after` hooks take one argument and receive `attempt`, and `retry` now retries instead of failing the run. The manifest moves to `manifestSchemaVersion: 4` with `capabilities[].hooks`, and `BeforeModelCallFn`, `AfterModelCallFn` and the `beforeModelCall` / `afterModelCall` action kinds are removed. Every capability registered at a hook point now runs in one `hook` executor action, an expired hook claim is offered again instead of becoming uncertain, and the durable engine version is `hosted-2`. Hook toggles now hide a capability's tools, or one tool of a multi-tool capability, instead of having no effect or failing. Studio lists each capability's hooks with how often they run and labels hook actions. See MIGRATION.md.
+
 ## 0.2.0-beta
 
 ### Minor Changes

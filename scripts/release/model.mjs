@@ -1,4 +1,4 @@
-import { readFile, rm } from "node:fs/promises";
+import { readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import semver from "semver";
 import applyReleasePlan from "@changesets/apply-release-plan";
@@ -87,6 +87,21 @@ export async function prepareVersions(repo, channel) {
       join(repo, "create-agent/compatibility.json"),
       calculated.plan.compatibility,
     );
+    // Runtime advertises its package version via RUNTIME_VERSION; CLI refuses mismatched hosts.
+    const runtimeVersion = calculated.plan.packages.runtime;
+    if (runtimeVersion) {
+      const versionPath = join(repo, "runtime/src/version.ts");
+      const current = await readFile(versionPath, "utf8");
+      const next = current.replace(
+        /export const RUNTIME_VERSION = "[^"]+";/,
+        `export const RUNTIME_VERSION = "${runtimeVersion}";`,
+      );
+      if (next === current)
+        throw new Error(
+          `Could not update RUNTIME_VERSION to ${runtimeVersion} in runtime/src/version.ts`,
+        );
+      await writeFile(versionPath, next);
+    }
   } else if (legacy) {
     throw new Error(
       "Clear legacy prerelease state before a latest dist-tag promotion.",
