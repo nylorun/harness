@@ -154,6 +154,14 @@ export async function runProject(
     console.log(
       `Local project ready at ${url}; ${agents.length} connected agent(s).`
     );
+    const sandbox = await (
+      await import("./doctor.js")
+    ).sandboxBanner(
+      url,
+      credentials.serverKey,
+      agents.map((agent) => agent.manifest)
+    );
+    if (sandbox) console.log(sandbox);
     await new Promise<void>((settle) => {
       const finish = () => {
         if (!stopping) void close();

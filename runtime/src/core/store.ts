@@ -35,6 +35,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS checkpoints(id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS effects(id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS sandboxes(id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, body TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS events_session ON events(session_id, sequence);
       CREATE TABLE IF NOT EXISTS vaults(
@@ -114,6 +115,9 @@ export class Store {
         `INSERT INTO ${table}(id,body) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body`,
       )
       .run(id, JSON.stringify(body));
+  }
+  delete(table: string, id: string): void {
+    this.db.prepare(`DELETE FROM ${table} WHERE id=?`).run(id);
   }
   // Executors carry a bearer secret, so they use typed columns with a database-enforced unique
   // token hash instead of flowing through the generic JSON document helpers above.

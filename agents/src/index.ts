@@ -58,3 +58,9 @@ export type {
 } from "./skills/index.js";
 export { mcp, McpError } from "./mcp/index.js";
 export type { McpCapability, McpOptions } from "./mcp/index.js";
+export { sandbox, SandboxError } from "./sandbox/index.js";
+export type {
+  SandboxCapability,
+  SandboxCapabilityOptions,
+  SandboxOptions,
+} from "./sandbox/index.js";

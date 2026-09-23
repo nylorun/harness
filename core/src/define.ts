@@ -16,6 +16,22 @@ export { capability, middleware, model, tool } from "./definition/helpers.js";
 export { ToolError, isToolError } from "./definition/tool-error.js";
 export { defineSchema } from "./definition/schema.js";
 export { hashManifest } from "./utils/hash.js";
+export {
+  createSandboxTools,
+  SANDBOX_INSTRUCTIONS,
+} from "./definition/sandbox-tools.js";
+export {
+  SANDBOX_DEFERRED_FIELDS,
+  SANDBOX_FIELDS,
+  SANDBOX_NETWORK_PRESETS,
+  SANDBOX_TOOL_NAMES,
+  SANDBOX_WORKSPACE,
+  isSandboxHostPattern,
+  isSandboxToolName,
+  parseSandboxDuration,
+  parseSandboxSize,
+} from "./utils/sandbox.js";
+export type { SandboxToolName } from "./utils/sandbox.js";
 export type { Implementations } from "./definition/implementations.js";
 
 export type {
@@ -23,6 +39,8 @@ export type {
   CapabilityManifest,
   McpServerManifest,
   RuntimeManifest,
+  SandboxManifest,
+  SandboxNetworkPreset,
   SkillManifest,
   ToolManifest,
   ManifestSchemaVersion,

@@ -27,7 +27,7 @@ import {
 } from "./runtime-host.js";
 import { localCredentials } from "./project-runner.js";
 
-const usage = `nylorun <runtime|up|down|logs|dev|serve|configure|studio>
+const usage = `nylorun <runtime|up|down|logs|dev|serve|configure|studio|doctor>
 
   runtime start [--foreground] [--restart] [--port <n>] [--db <path>] [--global]
   runtime stop [--global] [--timeout <seconds>]
@@ -40,7 +40,8 @@ const usage = `nylorun <runtime|up|down|logs|dev|serve|configure|studio>
   dev [--no-studio] [--no-open] [--no-autostart] [--port <n>]
   serve [entry] [--no-autostart] [--port <n>]
   configure [--global]
-  studio [--runtime-url <http(s)-url>] [--port <n>] [--no-open]`;
+  studio [--runtime-url <http(s)-url>] [--port <n>] [--no-open]
+  doctor sandbox [--json]  show which sandbox backend this machine offers`;
 
 interface Flags {
   scope: ScopeRequest;
@@ -253,6 +254,15 @@ async function main() {
     rawCommand in aliases ? [aliases[rawCommand]!, ...rawArgs] : rawArgs;
 
   if (command === "runtime") return await runtimeCommand(args);
+
+  if (command === "doctor") {
+    const [topic, ...options] = args;
+    if (topic !== "sandbox" || options.some((option) => option !== "--json"))
+      throw usageError("Usage: nylorun doctor sandbox [--json]");
+    const { doctorSandbox } = await import("./doctor.js");
+    await doctorSandbox({ json: options.includes("--json") });
+    return;
+  }
 
   if (command === "dev") {
     const flags = parseFlags(args, {

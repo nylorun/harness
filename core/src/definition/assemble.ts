@@ -110,6 +110,7 @@ export function assembleAgent(
           ...(item.mcpServers === undefined
             ? {}
             : { mcpServers: item.mcpServers }),
+          ...(item.sandbox === undefined ? {} : { sandbox: item.sandbox }),
           ...(item.skills === undefined ? {} : { skills: item.skills }),
           ...(item.skillRecords === undefined
             ? {}
@@ -125,6 +126,24 @@ export function assembleAgent(
 
   const skilled = attachSkillTools(frozen);
   diagnostics.push(...skilled.diagnostics);
+  // The wire schema rejects tool names shared across capabilities; report them at build time
+  // with both owners. Duplicates within one capability keep their registration-time error.
+  const toolOwners = new Map<string, string>();
+  for (const item of skilled.items)
+    for (const entry of item.tools ?? []) {
+      const owner = toolOwners.get(entry.name);
+      if (owner !== undefined && owner !== item.id)
+        diagnostics.push(
+          diagnostic(
+            "tool.duplicate-name",
+            `Tool '${entry.name}' is declared by capabilities '${owner}' and '${item.id}'` +
+              (owner === "sandbox" || item.id === "sandbox"
+                ? "; sandbox() provides built-in bash, read, write, edit, grep and glob tools, so rename yours"
+                : "")
+          )
+        );
+      else toolOwners.set(entry.name, item.id);
+    }
 
   if (diagnostics.length)
     return Object.freeze({

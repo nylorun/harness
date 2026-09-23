@@ -86,6 +86,30 @@ const assistant = Agent({
 
 Each key must equal that server's `name`. Transports follow [Agent Plugins MCP servers](https://agent-plugins.org/plugin-authors/mcp-servers): `stdio`, `streamable-http`, and `sse`. Pass `{ id: "…" }` as the second argument to override the default capability id `"mcp"`.
 
+Give an agent an isolated computer with `sandbox()`:
+
+```ts
+import { Agent, sandbox } from "@nylorun/agents";
+
+const analyst = Agent({
+  id: "analyst",
+  instructions: "Analyse the data the user gives you. Use Python.",
+}).use(sandbox());
+```
+
+The model gets `bash`, `read`, `write`, `edit`, `grep` and `glob` on a Linux machine with a persistent `/workspace`. These tools run in the Runtime, not in your process, so sandbox-only agents need no connected executor. The agent declares what it needs; the Runtime decides where it runs (a microsandbox VM where the machine supports it, otherwise an emulated shell). Every option is optional plain data:
+
+```ts
+.use(sandbox({
+  image: "python:3.13",                           // any OCI image; default python:3.13-slim
+  network: { preset: "dev", allow: ["api.example.com"] }, // "none" | "dev" (default) | "open"
+  resources: { cpus: 2, memory: "2GiB" },
+  idle: "15m",                                    // stop compute when idle; files persist
+}))
+```
+
+The `dev` preset allows package registries and code hosts. Private networks, loopback, the host and cloud metadata endpoints are always blocked. Options from the full design that are not in this version (`setup`, `files`, `secrets`, `mount`, `onStart`, `scope`, ...) throw a `SandboxError` that says so. See [the sandbox design](../docs/design/sandboxes.md).
+
 Use `session.observe({ cursor, signal })` for resumable canonical events, `session.inspect()` for waiting/uncertain state, and `approve`, `respond`, or `cancel` with an explicit stable idempotency key. Retry the same semantic command with the same key. `ownerUserId` must come from trusted server authentication. Application credentials are not browser credentials; browser applications need an authorized backend. Definition authoring is browser-bundleable.
 
 The Runtime destination is explicit, or defaults from `NYLORUN_RUNTIME_URL`. Application and executor keys default from `NYLORUN_SERVER_KEY` and `NYLORUN_EXECUTOR_KEY`. Implementation version defaults from `NYLORUN_IMPLEMENTATION_VERSION`, then `dev`. A host must provision executor scope for the agent id. Agents do not hash the manifest, and an in-flight action stays claimable after the registered digest changes. Model selection and model credentials belong to the Runtime.

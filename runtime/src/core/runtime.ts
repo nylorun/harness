@@ -13,9 +13,11 @@ import {
   writeFileSync,
   readFileSync,
   realpathSync,
+  mkdtempSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   AgentManifestSchema,
   CreateCredentialRequestSchema,
@@ -65,6 +67,9 @@ import { createKekFile, defaultKekPath, readVaultKek } from "../vault/kek.js";
 import { VaultError } from "../vault/error.js";
 import { VaultService, type AuthorizeResult } from "../vault/service.js";
 import { McpPool } from "../mcp/pool.js";
+import { SandboxManager, sandboxCapabilityOf } from "../sandbox/manager.js";
+import { defaultSandboxBackends } from "../sandbox/select.js";
+import type { SandboxBackend } from "../sandbox/types.js";
 import type {
   McpDiagnostic,
   McpSnapshot,
@@ -82,6 +87,14 @@ export interface RuntimeOptions {
   vaultKek?: Buffer | string | null;
   vaultKekPath?: string;
   vaultFetch?: typeof fetch;
+  sandbox?: {
+    /** `auto` (default), `microsandbox` or `virtual`. Defaults to NYLORUN_SANDBOX. */
+    backend?: string;
+    /** Host directory for virtual-backend workspaces. Defaults beside the SQLite file. */
+    root?: string;
+    /** Replace the backend list. Tests only. */
+    backends?: readonly SandboxBackend[];
+  };
 }
 interface Session {
   id: string;
@@ -231,8 +244,10 @@ export class CoreRuntime {
   private readonly registry = new ExecutorRegistry();
   private readonly scopeId: string;
   private readonly mcp: McpPool;
+  private readonly sandbox: SandboxManager;
   private server?: Server;
   private closing = false;
+  private closed = false;
   private readonly lockPath?: string;
   private readonly timer: NodeJS.Timeout;
   constructor(private readonly options: RuntimeOptions) {
@@ -343,6 +358,31 @@ export class CoreRuntime {
       dataDir: dirname(options.sqlitePath),
       authorize: (sessionId, request) => this.authorize(sessionId, request),
     });
+    const ephemeral = options.sqlitePath === ":memory:";
+    const sandboxRoot =
+      options.sandbox?.root ??
+      (ephemeral
+        ? mkdtempSync(join(tmpdir(), "nylorun-sandboxes-"))
+        : join(dirname(options.sqlitePath), "sandboxes"));
+    this.sandbox = new SandboxManager({
+      scope: ephemeral ? `m${randomUUID().slice(0, 8)}` : this.scopeId,
+      store: this.store,
+      backends:
+        options.sandbox?.backends ?? defaultSandboxBackends({ root: sandboxRoot }),
+      preference: options.sandbox?.backend ?? process.env.NYLORUN_SANDBOX,
+      ephemeral,
+      emit: (sessionId, turnId, type, payload) => {
+        if (this.closed) return;
+        const event = this.store.tx(() =>
+          this.store.event(sessionId, turnId, type, payload)
+        );
+        this.publish(event);
+      },
+    });
+    if (!ephemeral && this.sandbox.hasRecords())
+      void this.sandbox
+        .reconcile((id) => !this.closed && !!this.store.get("sessions", id))
+        .catch(() => undefined);
     this.store.tx(() => {
       for (const effect of this.store.all("effects"))
         if (effect.status === "invoking") {
@@ -572,7 +612,7 @@ export class CoreRuntime {
     request: HostEffect,
     signal: AbortSignal
   ): Promise<EffectResolution> {
-    let invoke: "model" | "mcp" | undefined;
+    let invoke: "model" | "mcp" | "sandbox" | undefined;
     let notify = false;
     let event: LiveEvent | undefined;
     const resolution = this.store.tx((): EffectResolution | undefined => {
@@ -601,12 +641,19 @@ export class CoreRuntime {
         request.kind === "tool"
           ? mcpToolOf(s, request.capabilityId, request.toolName)
           : undefined;
+      const sandboxTool =
+        request.kind === "tool" && !mcpTool
+          ? sandboxCapabilityOf(s.manifest, request.capabilityId, request.toolName)
+          : undefined;
       this.store.put("effects", request.effectId, {
         request,
-        status: request.kind === "model" || mcpTool ? "invoking" : "pending",
+        status:
+          request.kind === "model" || mcpTool || sandboxTool
+            ? "invoking"
+            : "pending",
       });
-      if (request.kind === "model" || mcpTool) {
-        invoke = mcpTool ? "mcp" : "model";
+      if (request.kind === "model" || mcpTool || sandboxTool) {
+        invoke = mcpTool ? "mcp" : sandboxTool ? "sandbox" : "model";
         return undefined;
       }
       const tool =
@@ -649,7 +696,9 @@ export class CoreRuntime {
       const value =
         invoke === "mcp"
           ? await this.callMcpTool(request)
-          : await this.invokeModel(request, signal);
+          : invoke === "sandbox"
+            ? await this.callSandboxTool(request, signal)
+            : await this.invokeModel(request, signal);
       return this.store.tx(() => {
         const s = this.session(request.sessionId);
         if (
@@ -1421,6 +1470,26 @@ export class CoreRuntime {
       pluginRoots: s.pluginRoots ?? {},
     });
   }
+  private async callSandboxTool(
+    request: HostEffect,
+    signal: AbortSignal
+  ): Promise<unknown> {
+    const s = this.session(request.sessionId);
+    const capability = sandboxCapabilityOf(
+      s.manifest,
+      request.capabilityId,
+      request.toolName
+    );
+    if (!capability)
+      throw new Error(`'${request.toolName ?? ""}' is not a sandbox tool`);
+    return this.sandbox.run(
+      { id: s.id, activeTurnId: s.activeTurnId, manifest: s.manifest },
+      capability,
+      request.toolName as never,
+      request.input,
+      signal
+    );
+  }
   async authorize(
     sessionId: string,
     request: { url: string; serverName?: string }
@@ -1460,6 +1529,8 @@ export class CoreRuntime {
     }
     if (path[2] === "models" && path.length === 3 && method === "GET")
       return hostModelCatalog();
+    if (path[2] === "sandbox" && path.length === 3 && method === "GET")
+      return this.sandbox.report();
     if (path[2] === "providers" && path.length === 3 && method === "GET")
       return this.vault.listHostProviders();
     if (path[2] === "model" && path.length === 3 && method === "GET")
@@ -1561,6 +1632,8 @@ export class CoreRuntime {
     // Providers must honor AbortSignal. Keep storage open until any in-flight journal writes have drained.
     while (this.running.size)
       await new Promise((resolve) => setTimeout(resolve, 10));
+    await this.sandbox.close();
+    this.closed = true;
     this.store.db.close();
     if (this.lockPath) unlinkSync(this.lockPath);
   }
