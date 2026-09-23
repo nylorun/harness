@@ -22,6 +22,7 @@ import {
   CreateVaultRequestSchema,
   PutAgentRequestSchema,
   PutHostModelRequestSchema,
+  SelectHostModelRequestSchema,
   PutSessionRequestSchema,
   RegisterExecutorsRequestSchema,
   RotateCredentialRequestSchema,
@@ -1459,11 +1460,22 @@ export class CoreRuntime {
     }
     if (path[2] === "models" && path.length === 3 && method === "GET")
       return hostModelCatalog();
+    if (path[2] === "providers" && path.length === 3 && method === "GET")
+      return this.vault.listHostProviders();
     if (path[2] === "model" && path.length === 3 && method === "GET")
       return this.vault.getHostModel();
     if (path[2] === "model" && path.length === 3 && method === "PUT")
       return this.vault.putHostModel(
         PutHostModelRequestSchema.parse(await this.body(request))
+      );
+    if (
+      path[2] === "model" &&
+      path[3] === "selection" &&
+      path.length === 4 &&
+      method === "PUT"
+    )
+      return this.vault.selectHostModel(
+        SelectHostModelRequestSchema.parse(await this.body(request))
       );
     fail(404, "Route not found");
   }

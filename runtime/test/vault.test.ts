@@ -536,6 +536,109 @@ it("keeps the host model credential out of user vaults and responses", async () 
         )
       ).body,
     ).toEqual({ vaults: [] });
+    const listed = await json(
+      await fetch(`${runtime.url}/v1/host/providers`, { headers: server }),
+    );
+    expect(listed.status).toBe(200);
+    expect(listed.body).toMatchObject({
+      providers: [
+        {
+          id: "custom",
+          name: "Custom OpenAI-compatible",
+          model: "fixture",
+          authType: "api_key",
+          active: true,
+        },
+      ],
+    });
+    expect(JSON.stringify(listed.body)).not.toContain(secret);
+    const second = await json(
+      await fetch(`${runtime.url}/v1/host/model`, {
+        method: "PUT",
+        headers: server,
+        body: JSON.stringify({
+          requestId: "host-3",
+          idempotencyKey: "host-model-second",
+          provider: "custom",
+          model: "other-fixture",
+          baseUrl: "https://models.example.test/v2",
+          auth: { type: "api_key", key: `${secret}-2` },
+        }),
+      }),
+    );
+    expect(second.status).toBe(200);
+    expect(second.body).toMatchObject({
+      configured: true,
+      provider: "custom",
+      model: "other-fixture",
+    });
+    const afterSecond = await json(
+      await fetch(`${runtime.url}/v1/host/providers`, { headers: server }),
+    );
+    expect(afterSecond.body).toMatchObject({
+      providers: [
+        {
+          id: "custom",
+          model: "other-fixture",
+          active: true,
+        },
+      ],
+    });
+    const openai = await json(
+      await fetch(`${runtime.url}/v1/host/model`, {
+        method: "PUT",
+        headers: server,
+        body: JSON.stringify({
+          requestId: "host-4",
+          idempotencyKey: "host-model-openai",
+          provider: "openai",
+          model: (
+            (catalog.body as { providers: { id: string; models: { id: string }[] }[] })
+              .providers.find((provider) => provider.id === "openai")
+              ?.models[0]?.id ?? "gpt-4o-mini"
+          ),
+          auth: { type: "api_key", key: `${secret}-openai` },
+        }),
+      }),
+    );
+    expect(openai.status).toBe(200);
+    expect(openai.body).toMatchObject({
+      configured: true,
+      provider: "openai",
+    });
+    const both = await json(
+      await fetch(`${runtime.url}/v1/host/providers`, { headers: server }),
+    );
+    expect(
+      (both.body as { providers: { id: string; active: boolean }[] }).providers
+        .map((provider) => provider.id)
+        .sort(),
+    ).toEqual(["custom", "openai"]);
+    expect(
+      (both.body as { providers: { id: string; active: boolean }[] }).providers.find(
+        (provider) => provider.id === "openai",
+      )?.active,
+    ).toBe(true);
+    const selected = await json(
+      await fetch(`${runtime.url}/v1/host/model/selection`, {
+        method: "PUT",
+        headers: server,
+        body: JSON.stringify({
+          requestId: "host-5",
+          idempotencyKey: "host-model-select-custom",
+          provider: "custom",
+          model: "other-fixture",
+          baseUrl: "https://models.example.test/v2",
+        }),
+      }),
+    );
+    expect(selected.status).toBe(200);
+    expect(selected.body).toMatchObject({
+      configured: true,
+      provider: "custom",
+      model: "other-fixture",
+    });
+    expect(JSON.stringify(selected.body)).not.toContain(secret);
     const attached = await json(
       await fetch(`${runtime.url}/v1/sessions/s-host`, {
         method: "PUT",

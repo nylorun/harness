@@ -115,7 +115,7 @@ function Workspace() {
           <SidebarTrigger />
           <strong>
             {location.pathname === "/settings"
-              ? "Model provider"
+              ? "Model Settings"
               : (agent?.name ?? "Nylorun Studio")}
           </strong>
           <Badge variant="outline">Local beta</Badge>
