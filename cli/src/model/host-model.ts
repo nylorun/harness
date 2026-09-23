@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Credential } from "@earendil-works/pi-ai";
 import { configureProvider, type PromptedModel } from "./configure.js";
 
-/** Wire shape from Runtime `/v1/host/model` (mirrors core HostModelView). */
+/** Wire shape of GET/PUT `/v1/host/model` — local copy so CLI stays off `@nylorun/core`. */
 type HostModelView =
   | { readonly configured: false }
   | {
