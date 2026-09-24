@@ -14,23 +14,31 @@ import {
   TENANT_HEADER,
 } from "@nylorun/core/compatibility";
 import {
-  AdminHostStatusSchema,
+  AdminStatusSchema,
   CreateTenantRequestSchema,
 } from "@nylorun/core/contracts";
 import { hostPaths } from "../tenant/paths.js";
+import {
+  TenantBusyError,
+  TenantConflictError,
+} from "../tenant/quarantine.js";
 import type { Logger, TenantModule } from "../tenant/types.js";
 import type { HostConfigFile, HostCredentialsFile } from "./config.js";
 import {
   EXIT_NON_LOOPBACK,
   EXIT_PORT_IN_USE,
   HostListenError,
+  isAllowedRequestHost,
+  isJsonContentType,
   isLoopbackHost,
   readBearer,
   readJsonBody,
   redactRoutePath,
+  requestHasBody,
   sendJson,
   sendOpaqueNotFound,
   sendProtocolRejected,
+  sendRejected,
 } from "./http.js";
 import { RUNTIME_VERSION } from "../version.js";
 
@@ -102,8 +110,30 @@ export function createHost(options: CreateHostOptions): HostServer {
   const paths = hostPaths(hostRoot);
   let server: Server | undefined;
   let url = "";
+  let listenPort = config.port;
   let closing = false;
   let closePromise: Promise<void> | undefined;
+
+  const adminStatusBody = async () => {
+    const tenants = await module.list();
+    const aggregate = module.summarize();
+    return AdminStatusSchema.parse({
+      service: "nylorun-runtime",
+      version: RUNTIME_VERSION,
+      protocol: {
+        min: HOST_PROTOCOL.min,
+        max: HOST_PROTOCOL.max,
+        features: [...HOST_PROTOCOL.features],
+      },
+      tenants,
+      aggregate,
+      host: {
+        hostId: config.hostId,
+        url,
+        pid,
+      },
+    });
+  };
 
   const requireAdmin = (
     request: IncomingMessage,
@@ -149,12 +179,18 @@ export function createHost(options: CreateHostOptions): HostServer {
           );
         } catch (error) {
           const code = (error as { code?: string }).code;
-          if (code === "conflict" || code === "tenant_conflict") {
-            return sendJson(response, 409, {
-              status: "rejected",
-              code: "conflict",
-              message: error instanceof Error ? error.message : "Conflict",
-            });
+          if (
+            error instanceof TenantConflictError ||
+            (error as { name?: string }).name === "TenantConflictError" ||
+            code === "conflict" ||
+            code === "tenant_conflict"
+          ) {
+            return sendRejected(
+              response,
+              409,
+              "tenant_conflict",
+              error instanceof Error ? error.message : "Tenant conflict",
+            );
           }
           throw error;
         }
@@ -191,53 +227,43 @@ export function createHost(options: CreateHostOptions): HostServer {
             return;
           } catch (error) {
             const code = (error as { code?: string }).code;
-            if (code === "active_work" || code === "conflict") {
-              return sendJson(response, 409, {
-                status: "rejected",
-                code: "active_work",
-                message:
-                  error instanceof Error ? error.message : "Active work",
-              });
+            if (
+              error instanceof TenantBusyError ||
+              (error as { name?: string }).name === "TenantBusyError" ||
+              code === "active_work" ||
+              code === "conflict"
+            ) {
+              return sendRejected(
+                response,
+                409,
+                "active_work",
+                error instanceof Error ? error.message : "Active work",
+              );
             }
             throw error;
           }
         }
       }
     }
-    if (segments[2] === "host") {
-      if (segments.length === 3 && method === "GET") {
-        const tenants = await module.list();
-        const aggregate = module.summarize();
-        const body = AdminHostStatusSchema.parse({
-          hostId: config.hostId,
-          url,
-          pid,
-          version: RUNTIME_VERSION,
-          protocol: {
-            min: HOST_PROTOCOL.min,
-            max: HOST_PROTOCOL.max,
-            features: [...HOST_PROTOCOL.features],
-          },
-          tenants,
-          aggregate,
-        });
-        return sendJson(response, 200, body);
-      }
-      if (
-        segments.length === 4 &&
-        segments[3] === "shutdown" &&
-        method === "POST"
-      ) {
-        sendJson(response, 200, { status: "shutting_down" });
-        void close();
-        return;
-      }
+    // D12: /v1/admin/status and /v1/admin/host share one handler.
+    if (
+      (segments[2] === "host" || segments[2] === "status") &&
+      segments.length === 3 &&
+      method === "GET"
+    ) {
+      return sendJson(response, 200, await adminStatusBody());
     }
-    return sendJson(response, 404, {
-      status: "rejected",
-      code: "not_found",
-      message: "Route not found",
-    });
+    if (
+      segments[2] === "host" &&
+      segments.length === 4 &&
+      segments[3] === "shutdown" &&
+      method === "POST"
+    ) {
+      sendJson(response, 200, { status: "shutting_down" });
+      void close();
+      return;
+    }
+    return sendRejected(response, 404, "not_found", "Route not found");
   };
 
   const handle = async (
@@ -250,6 +276,50 @@ export function createHost(options: CreateHostOptions): HostServer {
     try {
       const urlObj = new URL(request.url ?? "/", "http://runtime.local");
       const pathname = urlObj.pathname;
+
+      // D§11: Host, Origin, then Content-Type — before any other processing.
+      const hostHeader = headerValue(request.headers, "host");
+      if (
+        !isAllowedRequestHost(hostHeader, {
+          port: listenPort,
+          host: config.host,
+          allowNonLoopback: config.allowNonLoopback,
+        })
+      ) {
+        sendRejected(
+          response,
+          421,
+          "host_rejected",
+          "Host header is not an allowed loopback or configured address",
+        );
+        statusCode = 421;
+        return;
+      }
+
+      if (headerValue(request.headers, "origin") !== undefined) {
+        sendRejected(
+          response,
+          403,
+          "origin_rejected",
+          "Browser Origin headers are not accepted",
+        );
+        statusCode = 403;
+        return;
+      }
+
+      if (
+        requestHasBody(request) &&
+        !isJsonContentType(headerValue(request.headers, "content-type"))
+      ) {
+        sendRejected(
+          response,
+          415,
+          "unsupported_media_type",
+          "Request bodies must use application/json",
+        );
+        statusCode = 415;
+        return;
+      }
 
       if (pathname === "/health") {
         sendJson(response, 200, {
@@ -428,9 +498,9 @@ export function createHost(options: CreateHostOptions): HostServer {
       server!.listen(config.port, config.host, resolve);
     });
     const address = server.address();
-    const port =
+    listenPort =
       typeof address === "object" && address ? address.port : config.port;
-    url = `http://${config.host}:${port}`;
+    url = `http://${config.host}:${listenPort}`;
     await module.start();
     logger.info("host_listening", {
       hostId: config.hostId,

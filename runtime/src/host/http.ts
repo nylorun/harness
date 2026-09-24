@@ -1,6 +1,7 @@
-import type { ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   HOST_PROTOCOL,
+  type ErrorCode,
   type ProtocolRange,
 } from "@nylorun/core/compatibility";
 
@@ -30,11 +31,29 @@ export function sendJson(
   body: unknown,
 ): void {
   const payload = JSON.stringify(body);
+  // No Access-Control-* headers (D§11).
   response.writeHead(status, {
     "content-type": "application/json",
     "content-length": Buffer.byteLength(payload),
   });
   response.end(payload);
+}
+
+export function sendRejected(
+  response: ServerResponse,
+  status: number,
+  code: ErrorCode,
+  message: string,
+  details?: unknown,
+): void {
+  const body: {
+    status: "rejected";
+    code: ErrorCode;
+    message: string;
+    details?: unknown;
+  } = { status: "rejected", code, message };
+  if (details !== undefined) body.details = details;
+  sendJson(response, status, body);
 }
 
 export function sendOpaqueNotFound(response: ServerResponse): void {
@@ -54,6 +73,55 @@ export function sendProtocolRejected(
       features: [...protocol.features],
     },
   });
+}
+
+/**
+ * D§11 Host allowlist: loopback forms with the listening port, plus the
+ * configured host when `allowNonLoopback` is set.
+ */
+export function isAllowedRequestHost(
+  hostHeader: string | undefined,
+  options: {
+    port: number;
+    host: string;
+    allowNonLoopback?: boolean;
+  },
+): boolean {
+  if (hostHeader === undefined) return false;
+  const normalized = hostHeader.trim().toLowerCase();
+  const port = String(options.port);
+  const allowed = new Set([
+    `127.0.0.1:${port}`,
+    `localhost:${port}`,
+    `[::1]:${port}`,
+  ]);
+  if (options.allowNonLoopback) {
+    const configured = options.host.trim().toLowerCase();
+    if (configured.includes(":") && !configured.startsWith("[")) {
+      allowed.add(`[${configured}]:${port}`);
+    } else {
+      allowed.add(`${configured}:${port}`);
+    }
+  }
+  return allowed.has(normalized);
+}
+
+export function isJsonContentType(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const media = value.split(";")[0]!.trim().toLowerCase();
+  return media === "application/json";
+}
+
+/** True when the request carries a body (Content-Length > 0 or chunked). */
+export function requestHasBody(request: IncomingMessage): boolean {
+  const te = request.headers["transfer-encoding"];
+  const transfer = Array.isArray(te) ? te.join(",") : te;
+  if (transfer && transfer.toLowerCase() !== "identity") return true;
+  const cl = request.headers["content-length"];
+  const raw = Array.isArray(cl) ? cl[0] : cl;
+  if (raw === undefined) return false;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0;
 }
 
 /** Redact path parameters after `/v1/sessions/` for Host logs. */
