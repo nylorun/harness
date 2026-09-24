@@ -34,18 +34,25 @@ import {
   mergeStudioEvents,
   type StudioEvent,
 } from "@/event-presentation";
+import {
+  loadBrowserStudioConfig,
+  shortTenantId,
+  type StudioTenantInfo,
+} from "@/config";
 import type { AgentManifest, Connection } from "@/studio-types";
 
 export type { AgentManifest, Connection, SessionSummary } from "@/studio-types";
 
 const base = () => location.origin + "/_studio/runtime";
 // SDK requests travel through a trusted local proxy; this public marker is not a Runtime credential.
-const client = () =>
-  createClient({
+function studioClient(tenantId: string) {
+  return createClient({
     url: base(),
     key: "studio-proxy",
+    tenant: tenantId,
     fetch: (url, init) => fetch(url, init),
   });
+}
 const pretty = (value: unknown) =>
   typeof value === "string" ? value : JSON.stringify(value, null, 2);
 
@@ -67,17 +74,38 @@ function Workspace() {
   );
   const agentId = match?.[1] ? decodeURIComponent(match[1]) : undefined;
   const sessionId = match?.[2] ? decodeURIComponent(match[2]) : undefined;
+  const [tenant, setTenant] = useState<StudioTenantInfo | undefined>();
   const [connection, setConnection] = useState<Connection>({
     status: "Connecting",
     agents: [],
     sessionsByAgent: {},
   });
   const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const config = await loadBrowserStudioConfig();
+        if (cancelled) return;
+        if (!config.tenant)
+          throw new Error("Studio config is missing tenant { id, name }.");
+        setTenant(config.tenant);
+      } catch (cause) {
+        if (!cancelled)
+          setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const refresh = useCallback(async () => {
+    if (!tenant) return;
     try {
+      const client = studioClient(tenant.id);
       const [definitions, sessions] = await Promise.all([
-        client().listAgents(),
-        client().listSessions(),
+        client.listAgents(),
+        client.listSessions(),
       ]);
       const grouped: Connection["sessionsByAgent"] = {};
       for (const s of sessions.sessions)
@@ -102,7 +130,7 @@ function Workspace() {
       setError(String(e));
       setConnection((c) => ({ ...c, status: "Offline" }));
     }
-  }, []);
+  }, [tenant]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -111,6 +139,7 @@ function Workspace() {
     <SidebarProvider className="h-svh overflow-hidden">
       <AppSidebar
         connection={connection}
+        tenant={tenant}
         activeAgentId={agentId}
         activeSessionId={sessionId}
         settingsActive={location.pathname === "/settings"}
@@ -126,7 +155,13 @@ function Workspace() {
                 ? "Vault"
                 : (agent?.name ?? "Nylorun Studio")}
           </strong>
-          <Badge variant="outline">Local beta</Badge>
+          {tenant ? (
+            <Badge variant="outline" title={tenant.id}>
+              {tenant.name} · {shortTenantId(tenant.id)}
+            </Badge>
+          ) : (
+            <Badge variant="outline">Local beta</Badge>
+          )}
           <Button
             className="ml-auto"
             variant="outline"
@@ -143,12 +178,19 @@ function Workspace() {
         {location.pathname === "/settings" ? (
           <ModelSettings />
         ) : location.pathname === "/vault" ? (
-          <VaultModule />
+          tenant ? (
+            <VaultModule tenantId={tenant.id} />
+          ) : (
+            <p role="alert" className="p-4 text-red-600">
+              Studio is missing a Tenant id.
+            </p>
+          )
         ) : agent && sessionId ? (
           <SessionWorkspace
             key={sessionId}
             agent={agent}
             sessionId={sessionId}
+            tenantId={tenant?.id}
             refresh={refresh}
           />
         ) : (
@@ -189,10 +231,12 @@ function Workspace() {
 function SessionWorkspace({
   agent,
   sessionId,
+  tenantId,
   refresh,
 }: {
   agent: AgentManifest;
   sessionId: string;
+  tenantId?: string;
   refresh: () => Promise<void>;
 }) {
   const [events, setEvents] = useState<readonly StudioEvent[]>([]);
@@ -203,11 +247,14 @@ function SessionWorkspace({
   const [activeTab, setActiveTab] = useState<"events" | "manifest">("events");
   const [selectedEvent, setSelectedEvent] = useState<StudioEvent | undefined>();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const session = client().session(sessionId);
 
   useEffect(() => {
+    if (!tenantId) {
+      setError("Studio is missing a Tenant id.");
+      return;
+    }
     const abort = new AbortController();
-    const sdk = client();
+    const sdk = studioClient(tenantId);
     const current = sdk.session(sessionId);
     void (async () => {
       await sdk.createSession({
@@ -242,7 +289,7 @@ function SessionWorkspace({
       if (!abort.signal.aborted) setError(String(e));
     });
     return () => abort.abort();
-  }, [sessionId, agent.id, refresh]);
+  }, [sessionId, agent.id, refresh, tenantId]);
 
   useEffect(() => {
     setSelectedEvent(undefined);
@@ -255,10 +302,11 @@ function SessionWorkspace({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!content.trim() || busy) return;
+    if (!tenantId || !content.trim() || busy) return;
     setSending(true);
     setStatus("running");
     setError("");
+    const session = studioClient(tenantId).session(sessionId);
     try {
       await session.input(content, { idempotencyKey: crypto.randomUUID() });
       setContent("");
@@ -272,6 +320,14 @@ function SessionWorkspace({
     } finally {
       setSending(false);
     }
+  }
+
+  if (!tenantId) {
+    return (
+      <p role="alert" className="p-4 text-red-600">
+        Studio is missing a Tenant id.
+      </p>
+    );
   }
 
   const openEvent = (event: StudioEvent): void => {
@@ -307,7 +363,8 @@ function SessionWorkspace({
                 variant="outline"
                 size="sm"
                 onClick={() =>
-                  void session
+                  void studioClient(tenantId)
+                    .session(sessionId)
                     .cancel({ idempotencyKey: crypto.randomUUID() })
                     .catch((e) => setError(String(e)))
                 }

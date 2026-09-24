@@ -1,4 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  PROTOCOL_HEADER,
+  PROTOCOL_VERSION,
+  TENANT_HEADER,
+} from "@nylorun/agents";
 
 const LOCAL_OWNER = "local-developer";
 
@@ -24,11 +29,18 @@ function isVaultWrite(method: string, path: string): boolean {
   );
 }
 
+export type StudioProxyOptions = {
+  origin: string;
+  runtimeUrl: string;
+  serverKey: string;
+  tenantId: string;
+};
+
 /** Local tooling proxy: credentials stay in this process, not the browser. */
 export async function proxyRuntime(
   request: IncomingMessage,
   response: ServerResponse,
-  options: { origin: string; runtimeUrl: string; serverKey: string },
+  options: StudioProxyOptions,
 ): Promise<void> {
   const incoming = new URL(request.url!, options.origin);
   const path = incoming.pathname.slice("/_studio/runtime".length);
@@ -37,27 +49,31 @@ export async function proxyRuntime(
     response.writeHead(status, { "content-type": "application/json" });
     response.end(JSON.stringify({ message }));
   };
+  const health = method === "GET" && path === "/health";
   const read =
     method === "GET" &&
     (/^\/v1\/(agents|sessions)$/.test(path) ||
       /^\/v1\/sessions\/[^/]+(?:\/(items|events))?$/.test(path) ||
-      path === "/v1/host/model" ||
-      path === "/v1/host/models" ||
-      path === "/v1/host/providers" ||
+      path === "/v1/tenant/model" ||
+      path === "/v1/tenant/models" ||
+      path === "/v1/tenant/providers" ||
       isVaultRead(method, path));
   const write =
     (method === "PUT" && /^\/v1\/sessions\/[^/]+$/.test(path)) ||
     (method === "POST" && /^\/v1\/sessions\/[^/]+\/commands$/.test(path));
-  const hostWrite =
+  const tenantWrite =
     method === "PUT" &&
-    (path === "/v1/host/model" || path === "/v1/host/model/selection");
+    (path === "/v1/tenant/model" || path === "/v1/tenant/model/selection");
   const vaultWrite = isVaultWrite(method, path);
-  if (!read && !write && !hostWrite && !vaultWrite)
+  if (!health && !read && !write && !tenantWrite && !vaultWrite)
     return fail(404, "Unsupported Studio operation");
-  if ((write || hostWrite || vaultWrite) && request.headers.origin !== options.origin)
+  if (
+    (write || tenantWrite || vaultWrite) &&
+    request.headers.origin !== options.origin
+  )
     return fail(403, "Studio mutations require a same-origin request");
   let body: string | undefined;
-  if (write || hostWrite || (vaultWrite && method === "POST")) {
+  if (write || tenantWrite || (vaultWrite && method === "POST")) {
     if (!request.headers["content-type"]?.startsWith("application/json"))
       return fail(415, "JSON required");
     let text = "";
@@ -76,10 +92,10 @@ export async function proxyRuntime(
       return fail(400, "JSON object required");
     if (vaultWrite && path === "/v1/vaults" && method === "POST")
       value.ownerUserId = LOCAL_OWNER;
-    else if (!hostWrite && !vaultWrite && method === "PUT")
+    else if (!tenantWrite && !vaultWrite && method === "PUT")
       value.ownerUserId = LOCAL_OWNER;
     else if (
-      !hostWrite &&
+      !tenantWrite &&
       !vaultWrite &&
       !["message", "cancel"].includes(value.type)
     )
@@ -101,6 +117,8 @@ export async function proxyRuntime(
       signal: controller.signal,
       headers: {
         authorization: `Bearer ${options.serverKey}`,
+        [TENANT_HEADER]: options.tenantId,
+        [PROTOCOL_HEADER]: String(PROTOCOL_VERSION),
         ...(body ? { "content-type": "application/json" } : {}),
         ...(request.headers["last-event-id"]
           ? { "last-event-id": String(request.headers["last-event-id"]) }

@@ -344,6 +344,6 @@ export function createClient(destination: Destination = {}) {
   return new AgentsClient(destination);
 }
 
-export { RuntimeError } from "./http.js";
-export type { Destination } from "./http.js";
+export { RuntimeError, IncompatibleRuntimeError } from "./http.js";
+export type { Destination, IncompatibleReason } from "./http.js";
 export type { LiveEvent } from "@nylorun/core/contracts";
