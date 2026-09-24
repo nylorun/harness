@@ -92,9 +92,8 @@ try {
     const manifest = JSON.parse(files["package.json"]);
     for (const name of ["agents"])
       manifest.dependencies[`@nylorun/${name}`] = `file:${tarballs[name]}`;
-    // Keep Runtime and Core reachable for the CLI until Wave 2 rewires serve/dev.
-    for (const name of ["core", "harness", "runtime"])
-      manifest.dependencies[`@nylorun/${name}`] = `file:${tarballs[name]}`;
+    // Core is a transitive of agents; pin the workspace tarball for offline install.
+    manifest.dependencies["@nylorun/core"] = `file:${tarballs.core}`;
     manifest.devDependencies ??= {};
     manifest.devDependencies["@nylorun/cli"] = `file:${tarballs.cli}`;
     if (studio)
