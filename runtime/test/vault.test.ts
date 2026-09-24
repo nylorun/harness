@@ -2,18 +2,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TenantRuntime } from "../src/tenant/runtime.js";
 import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
 import { Agent } from "@nylorun/core/define";
-import { startRuntime, type CoreRuntime } from "../src/core/runtime.js";
+import { startTestTenant } from "./support/tenant.js";
 
 const KEK = Buffer.alloc(32, 9).toString("base64");
 const ADA_TOKEN = "ada-vault-plaintext-token-7f3c9a2e";
 const BAO_TOKEN = "bao-vault-plaintext-token-91ab44c0";
 const URL = "https://mcp.example.com/github";
+const APP = "server-token-value-aaaaaaaa";
 
 const server = {
-  authorization: "Bearer server-token-value",
+  authorization: `Bearer ${APP}`,
   "content-type": "application/json",
 };
 const executor = {
@@ -21,13 +23,17 @@ const executor = {
   "content-type": "application/json",
 };
 
-async function boot(
-  directory: string,
-  options: { vaultKek?: string | null; vaultFetch?: typeof fetch } = {},
-) {
-  return startRuntime({
-    sqlitePath: join(directory, "runtime.sqlite"),
-    serverToken: "server-token-value",
+type BootOpts = {
+  vaultKek?: string | null;
+  vaultFetch?: typeof fetch;
+  hostRoot?: string;
+  tenantId?: string;
+  retainRoot?: boolean;
+};
+
+async function boot(options: BootOpts = {}) {
+  const runtime = await startTestTenant({
+    applicationKey: APP,
     executors: [
       {
         token: "executor-token-value",
@@ -36,9 +42,21 @@ async function boot(
       },
     ],
     vaultKek: options.vaultKek === undefined ? KEK : options.vaultKek,
-    vaultFetch: options.vaultFetch,
-    port: 0,
+    ...(options.vaultFetch === undefined ? {} : { vaultFetch: options.vaultFetch }),
+    ...(options.hostRoot ? { hostRoot: options.hostRoot } : {}),
+    ...(options.tenantId ? { tenantId: options.tenantId } : {}),
+    ...(options.retainRoot ? { retainRoot: true } : {}),
   });
+  const handle = runtime.handle as TenantRuntime;
+  return {
+    url: runtime.url,
+    close: () => runtime.close(),
+    applicationKey: runtime.applicationKey,
+    tenantId: runtime.tenantId,
+    root: runtime.root,
+    dbPath: join(runtime.root, "tenants", runtime.tenantId, "tenant.sqlite"),
+    authorize: handle.authorize.bind(handle),
+  };
 }
 
 async function json(response: Response) {
@@ -46,8 +64,7 @@ async function json(response: Response) {
 }
 
 it("stores bearer credentials without returning or persisting the plaintext", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "vault-bearer-"));
-  const runtime = await boot(directory);
+  const runtime = await boot();
   try {
     const created = await json(
       await fetch(`${runtime.url}/v1/vaults`, {
@@ -131,13 +148,13 @@ it("stores bearer credentials without returning or persisting the plaintext", as
     expect(rejected.status).toBe(403);
   } finally {
     await runtime.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(runtime.root, { recursive: true, force: true });
   }
 });
 
 it("keeps ciphertext unreadable without the key-encryption key", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "vault-kek-"));
-  const runtime = await boot(directory);
+  const runtime = await boot({ retainRoot: true });
+  const { root, tenantId, dbPath } = runtime;
   let vaultId = "";
   let credentialId = "";
   try {
@@ -172,24 +189,22 @@ it("keeps ciphertext unreadable without the key-encryption key", async () => {
   } finally {
     await runtime.close();
   }
-  const files = ["runtime.sqlite", "runtime.sqlite-wal", "runtime.sqlite-shm"];
-  for (const name of files) {
-    const path = join(directory, name);
-    if (existsSync(path))
-      expect(readFileSync(path).includes(Buffer.from(ADA_TOKEN))).toBe(false);
+  for (const name of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (existsSync(name))
+      expect(readFileSync(name).includes(Buffer.from(ADA_TOKEN))).toBe(false);
   }
   await expect(
-    boot(directory, { vaultKek: null }),
-  ).rejects.toThrow(/key-encryption key/);
-  const db = new DatabaseSync(join(directory, "runtime.sqlite"));
+    boot({ hostRoot: root, tenantId, vaultKek: null }),
+  ).rejects.toThrow(/key-encryption key|kek-missing/i);
+  const db = new DatabaseSync(dbPath);
   db.prepare(`UPDATE vault_credentials SET binding_json=? WHERE id=?`).run(
     JSON.stringify({ url: "https://mcp.example.com/other" }),
     credentialId,
   );
   db.close();
-  const again = await boot(directory);
+  const again = await boot({ hostRoot: root, tenantId });
   try {
-    const agent = Agent({ id: "bot", name: "Bot" }).build();
+const agent = Agent({ id: "bot", name: "Bot" }).build();
     expect(
       (
         await fetch(`${again.url}/v1/agents/bot`, {
@@ -224,13 +239,12 @@ it("keeps ciphertext unreadable without the key-encryption key", async () => {
     expect(JSON.stringify(refused)).not.toContain(ADA_TOKEN);
   } finally {
     await again.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });
 
 it("attaches only the session user's vaults and selects among matching urls", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "vault-select-"));
-  const runtime = await boot(directory);
+  const runtime = await boot();
   try {
     const agent = Agent({ id: "bot", name: "Bot" }).build();
     expect(
@@ -347,14 +361,13 @@ it("attaches only the session user's vaults and selects among matching urls", as
     });
   } finally {
     await runtime.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(runtime.root, { recursive: true, force: true });
   }
 });
 
 it("refreshes an oauth grant only at its token endpoint and does not return the new token", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "vault-oauth-"));
   const calls: { url: string; body: string }[] = [];
-  const runtime = await boot(directory, {
+  const runtime = await boot({
     vaultFetch: (async (url, init) => {
       calls.push({ url: String(url), body: String(init?.body ?? "") });
       return new Response(
@@ -451,13 +464,12 @@ it("refreshes an oauth grant only at its token endpoint and does not return the 
     expect(JSON.stringify(read.body)).not.toContain("oauth-refresh-token-33cc");
   } finally {
     await runtime.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(runtime.root, { recursive: true, force: true });
   }
 });
 
 it("keeps the host model credential out of user vaults and responses", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "vault-host-model-"));
-  const runtime = await boot(directory);
+  const runtime = await boot({ retainRoot: true });
   const secret = "host-model-plaintext-key-77ab";
   try {
     const agent = Agent({ id: "bot", name: "Bot" }).build();
@@ -475,12 +487,12 @@ it("keeps the host model credential out of user vaults and responses", async () 
       ).ok,
     ).toBe(true);
     expect(
-      (await json(await fetch(`${runtime.url}/v1/host/model`, { headers: server })))
+      (await json(await fetch(`${runtime.url}/v1/tenant/model`, { headers: server })))
         .body,
     ).toEqual({ configured: false });
     expect(
       (
-        await fetch(`${runtime.url}/v1/host/model`, { headers: executor })
+        await fetch(`${runtime.url}/v1/tenant/model`, { headers: executor })
       ).status,
     ).toBe(403);
     const body = {
@@ -492,7 +504,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
       auth: { type: "api_key", key: secret },
     };
     const saved = await json(
-      await fetch(`${runtime.url}/v1/host/model`, {
+      await fetch(`${runtime.url}/v1/tenant/model`, {
         method: "PUT",
         headers: server,
         body: JSON.stringify(body),
@@ -508,7 +520,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
     });
     expect(JSON.stringify(saved.body)).not.toContain(secret);
     const replay = await json(
-      await fetch(`${runtime.url}/v1/host/model`, {
+      await fetch(`${runtime.url}/v1/tenant/model`, {
         method: "PUT",
         headers: server,
         body: JSON.stringify({ ...body, requestId: "host-2" }),
@@ -516,7 +528,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
     );
     expect(replay.body).toEqual(saved.body);
     const conflict = await json(
-      await fetch(`${runtime.url}/v1/host/model`, {
+      await fetch(`${runtime.url}/v1/tenant/model`, {
         method: "PUT",
         headers: server,
         body: JSON.stringify({ ...body, model: "other" }),
@@ -524,7 +536,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
     );
     expect(conflict.status).toBe(409);
     const catalog = await json(
-      await fetch(`${runtime.url}/v1/host/models`, { headers: server }),
+      await fetch(`${runtime.url}/v1/tenant/models`, { headers: server }),
     );
     expect(JSON.stringify(catalog.body)).not.toContain(secret);
     expect(
@@ -537,7 +549,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
       ).body,
     ).toEqual({ vaults: [] });
     const listed = await json(
-      await fetch(`${runtime.url}/v1/host/providers`, { headers: server }),
+      await fetch(`${runtime.url}/v1/tenant/providers`, { headers: server }),
     );
     expect(listed.status).toBe(200);
     expect(listed.body).toMatchObject({
@@ -553,7 +565,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
     });
     expect(JSON.stringify(listed.body)).not.toContain(secret);
     const second = await json(
-      await fetch(`${runtime.url}/v1/host/model`, {
+      await fetch(`${runtime.url}/v1/tenant/model`, {
         method: "PUT",
         headers: server,
         body: JSON.stringify({
@@ -573,7 +585,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
       model: "other-fixture",
     });
     const afterSecond = await json(
-      await fetch(`${runtime.url}/v1/host/providers`, { headers: server }),
+      await fetch(`${runtime.url}/v1/tenant/providers`, { headers: server }),
     );
     expect(afterSecond.body).toMatchObject({
       providers: [
@@ -585,7 +597,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
       ],
     });
     const openai = await json(
-      await fetch(`${runtime.url}/v1/host/model`, {
+      await fetch(`${runtime.url}/v1/tenant/model`, {
         method: "PUT",
         headers: server,
         body: JSON.stringify({
@@ -607,7 +619,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
       provider: "openai",
     });
     const both = await json(
-      await fetch(`${runtime.url}/v1/host/providers`, { headers: server }),
+      await fetch(`${runtime.url}/v1/tenant/providers`, { headers: server }),
     );
     expect(
       (both.body as { providers: { id: string; active: boolean }[] }).providers
@@ -620,7 +632,7 @@ it("keeps the host model credential out of user vaults and responses", async () 
       )?.active,
     ).toBe(true);
     const selected = await json(
-      await fetch(`${runtime.url}/v1/host/model/selection`, {
+      await fetch(`${runtime.url}/v1/tenant/model/selection`, {
         method: "PUT",
         headers: server,
         body: JSON.stringify({
@@ -654,13 +666,13 @@ it("keeps the host model credential out of user vaults and responses", async () 
     expect(attached.status).toBe(400);
   } finally {
     await runtime.close();
-    const db = new DatabaseSync(join(directory, "runtime.sqlite"));
+    const db = new DatabaseSync(runtime.dbPath);
     const stored = JSON.stringify(
       db.prepare("SELECT binding_json, ciphertext FROM vault_credentials").all(),
     );
     db.close();
     expect(stored).not.toContain(secret);
-    await rm(directory, { recursive: true, force: true });
+    await rm(runtime.root, { recursive: true, force: true });
   }
 });
 
@@ -679,7 +691,7 @@ it("adds vault scope to a database created before host credentials", async () =>
   );
   created.close();
   const { Store } = await import("../src/core/store.js");
-  const store = new Store(path);
+  const store = new Store(path, "tn_00000000000000000000000000");
   const columns = store.db.prepare("PRAGMA table_info(vaults)").all() as {
     name: string;
   }[];
@@ -689,7 +701,7 @@ it("adds vault scope to a database created before host credentials", async () =>
 });
 
 async function createBearer(
-  runtime: CoreRuntime & { url: string },
+  runtime: { url: string; close(): Promise<void> },
   ownerUserId: string,
   key: string,
   token: string,

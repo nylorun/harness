@@ -9,12 +9,16 @@ import {
   SANDBOX_INSTRUCTIONS,
   createSandboxTools,
 } from "@nylorun/core/define";
-import { startRuntime, type RuntimeOptions } from "../src/core/runtime.js";
+import { startTestTenant } from "./support/tenant.js";
+
+const APP = "server-token-value-aaaaaaaa";
+import type { TenantConfig } from "../src/tenant/types.js";
 import type { ModelProvider } from "../src/core/provider.js";
 import type { SandboxBackend } from "../src/sandbox/types.js";
+import { virtualBackend } from "../src/adapters/sandbox/virtual.js";
 
 const serverHeaders = {
-  authorization: "Bearer server-token-value",
+  authorization: `Bearer ${APP}`,
   "content-type": "application/json",
 };
 const executorHeaders = { authorization: "Bearer executor-token-value" };
@@ -30,18 +34,24 @@ const agent = (sandbox: Record<string, unknown> = {}) =>
     .build();
 
 async function boot(
-  directory: string,
-  model: ModelProvider,
-  sandbox: RuntimeOptions["sandbox"] = { backend: "virtual" }
+  options: {
+    modelProvider: ModelProvider;
+    sandbox?: TenantConfig["sandbox"];
+    hostRoot?: string;
+    tenantId?: string;
+    retainRoot?: boolean;
+  },
 ) {
-  return startRuntime({
-    sqlitePath: join(directory, "runtime.sqlite"),
-    serverToken: "server-token-value",
+  return startTestTenant({
+    mode: "test",
+    applicationKey: APP,
     executors: [{ token: "executor-token-value", agentId: "bot", implementationVersion: "dev" }],
     vaultKek: null,
-    model,
-    sandbox,
-    port: 0,
+    modelProvider: options.modelProvider,
+    sandbox: options.sandbox ?? { backend: "virtual" },
+    ...(options.hostRoot ? { hostRoot: options.hostRoot } : {}),
+    ...(options.tenantId ? { tenantId: options.tenantId } : {}),
+    ...(options.retainRoot ? { retainRoot: true } : {}),
   });
 }
 
@@ -107,20 +117,19 @@ function script(calls: readonly { name: string; args: Record<string, unknown> }[
 }
 
 it("runs built-in sandbox tools in the Runtime without an executor action", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "sandbox-runtime-"));
   const results: unknown[] = [];
-  const runtime = await boot(
-    directory,
-    script(
+  const runtime = await boot({
+    retainRoot: true,
+    modelProvider: script(
       [
         { name: "write", args: { path: "data.csv", content: "region,sales\nnorth,3\nsouth,4\n" } },
         { name: "bash", args: { command: "awk -F, 'NR>1{s+=$2} END{print s}' data.csv" } },
       ],
       results
-    )
-  );
+    ),
+  });
   try {
-    const host = await (await fetch(`${runtime.url}/v1/host/sandbox`, { headers: serverHeaders })).json();
+    const host = await (await fetch(`${runtime.url}/v1/tenant/sandbox`, { headers: serverHeaders })).json();
     expect(host).toMatchObject({ backend: "virtual", isolation: "process", defaultImage: "python:3.13-slim" });
     await register(runtime, agent().manifest);
     await openSession(runtime, "s1");
@@ -143,7 +152,11 @@ it("runs built-in sandbox tools in the Runtime without an executor action", asyn
     await runtime.close();
   }
   // Files persist across a Runtime restart; the sandbox reattaches.
-  const again = await boot(directory, script([{ name: "read", args: { path: "data.csv" } }], results));
+  const again = await boot({
+    hostRoot: runtime.root,
+    tenantId: runtime.tenantId,
+    modelProvider: script([{ name: "read", args: { path: "data.csv" } }], results),
+  });
   try {
     await say(again, "s1", "read it back");
     const session = await until(again, "s1", ["completed", "failed", "uncertain"]);
@@ -156,16 +169,18 @@ it("runs built-in sandbox tools in the Runtime without an executor action", asyn
     });
   } finally {
     await again.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(runtime.root, { recursive: true, force: true });
   }
 });
 
 it("returns an unavailable backend as a failed tool result the model can read", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "sandbox-unavailable-"));
   const results: unknown[] = [];
-  const runtime = await boot(directory, script([{ name: "bash", args: { command: "ls" } }], results), {
-    backend: "microsandbox",
-    backends: [fakeBackend({ available: false })],
+  const runtime = await boot({
+    modelProvider: script([{ name: "bash", args: { command: "ls" } }], results),
+    sandbox: {
+      backend: "microsandbox",
+      backends: [fakeBackend({ available: false })],
+    },
   });
   try {
     await register(runtime, agent().manifest);
@@ -177,16 +192,15 @@ it("returns an unavailable backend as a failed tool result the model can read", 
     expect(JSON.stringify(results.at(-1))).toContain("doctor sandbox");
   } finally {
     await runtime.close();
-    await rm(directory, { recursive: true, force: true });
   }
 });
 
 it("treats a backend failure during a write tool as uncertain and never re-runs it", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "sandbox-uncertain-"));
   const backend = fakeBackend({ available: true, execThrows: true });
-  const runtime = await boot(directory, script([{ name: "bash", args: { command: "rm -rf build" } }]), {
-    backend: "virtual",
-    backends: [backend],
+  const runtime = await boot({
+    retainRoot: true,
+    modelProvider: script([{ name: "bash", args: { command: "rm -rf build" } }]),
+    sandbox: { backend: "virtual", backends: [backend] },
   });
   try {
     await register(runtime, agent().manifest);
@@ -198,34 +212,39 @@ it("treats a backend failure during a write tool as uncertain and never re-runs 
   } finally {
     await runtime.close();
   }
-  const db = new DatabaseSync(join(directory, "runtime.sqlite"));
+  const dbPath = join(runtime.root, "tenants", runtime.tenantId, "tenant.sqlite");
+  const db = new DatabaseSync(dbPath);
   const row = db.prepare("SELECT body FROM sessions WHERE id=?").get("s1") as { body: string };
   const stored = JSON.parse(row.body);
   stored.status = "runnable";
   db.prepare("UPDATE sessions SET body=? WHERE id=?").run(JSON.stringify(stored), "s1");
   db.close();
-  const again = await boot(directory, async () => {
-    throw new Error("model must not run again");
-  }, { backend: "virtual", backends: [backend] });
+  const again = await boot({
+    hostRoot: runtime.root,
+    tenantId: runtime.tenantId,
+    modelProvider: async () => {
+      throw new Error("model must not run again");
+    },
+    sandbox: { backend: "virtual", backends: [backend] },
+  });
   try {
     await until(again, "s1", ["uncertain", "failed", "completed"]);
     expect(backend.execs).toBe(1);
   } finally {
     await again.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(runtime.root, { recursive: true, force: true });
   }
 });
 
 it("deletes sandboxes of an ephemeral Runtime on close", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandbox-ephemeral-"));
-  const runtime = await startRuntime({
-    sqlitePath: ":memory:",
-    serverToken: "server-token-value",
+  const runtime = await startTestTenant({
+    mode: "ephemeral",
+    applicationKey: APP,
     executors: [{ token: "executor-token-value", agentId: "bot", implementationVersion: "dev" }],
     vaultKek: null,
-    model: script([{ name: "write", args: { path: "a.txt", content: "a" } }]),
-    sandbox: { backend: "virtual", root },
-    port: 0,
+    modelProvider: script([{ name: "write", args: { path: "a.txt", content: "a" } }]),
+    sandbox: { backend: "virtual", backends: [virtualBackend({ root })] },
   });
   await register(runtime, agent().manifest);
   await openSession(runtime, "s1");
@@ -282,11 +301,10 @@ function fakeBackend(options: { available: boolean; execThrows?: boolean }): San
 it.skipIf(process.env.NYLORUN_TEST_MICROSANDBOX !== "1")(
   "runs a turn on a microsandbox VM, stops it when idle and reattaches with files intact",
   async () => {
-    const directory = await mkdtemp(join(tmpdir(), "sandbox-microvm-"));
     const results: unknown[] = [];
-    const runtime = await boot(
-      directory,
-      script(
+    const runtime = await boot({
+      retainRoot: true,
+      modelProvider: script(
         [
           { name: "write", args: { path: "sales.csv", content: "region,sales\nnorth,3\nsouth,4\n" } },
           {
@@ -296,8 +314,8 @@ it.skipIf(process.env.NYLORUN_TEST_MICROSANDBOX !== "1")(
         ],
         results
       ),
-      { backend: "microsandbox" }
-    );
+      sandbox: { backend: "microsandbox" },
+    });
     try {
       await register(runtime, agent({ idle: "1s", network: { preset: "none" } }).manifest);
       await openSession(runtime, "s1");
@@ -320,8 +338,11 @@ it.skipIf(process.env.NYLORUN_TEST_MICROSANDBOX !== "1")(
     } finally {
       await runtime.close();
     }
-    const again = await boot(directory, script([{ name: "read", args: { path: "sales.csv" } }], results), {
-      backend: "microsandbox",
+    const again = await boot({
+      hostRoot: runtime.root,
+      tenantId: runtime.tenantId,
+      modelProvider: script([{ name: "read", args: { path: "sales.csv" } }], results),
+      sandbox: { backend: "microsandbox" },
     });
     try {
       await say(again, "s1", "read");
@@ -331,15 +352,17 @@ it.skipIf(process.env.NYLORUN_TEST_MICROSANDBOX !== "1")(
       await again.close();
       const { microsandboxBackend } = await import("../src/adapters/sandbox/microsandbox.js");
       const backend = microsandboxBackend();
-      for (const key of await backend.list("nylorun-")) {
+      for (const key of await backend.list(`nylorun-${runtime.tenantId}-`)) {
         if (!key.includes("conformance")) {
-          const db = new DatabaseSync(join(directory, "runtime.sqlite"));
+          const db = new DatabaseSync(
+            join(runtime.root, "tenants", runtime.tenantId, "tenant.sqlite"),
+          );
           const owned = db.prepare("SELECT 1 FROM sandboxes WHERE id=?").get(key);
           db.close();
           if (owned) await backend.remove(key);
         }
       }
-      await rm(directory, { recursive: true, force: true });
+      await rm(runtime.root, { recursive: true, force: true });
     }
   },
   300_000

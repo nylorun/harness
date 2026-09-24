@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ExecutorScope } from "@nylorun/core/contracts";
 
 const equals = (a: string, b: string) => {
@@ -17,28 +17,43 @@ export const hashToken = (token: string): string =>
 
 export interface ExecutorRecord extends ExecutorScope {
   readonly tokenHash: string;
-  /** False for scopes supplied through NYLORUN_EXECUTORS_JSON, which are never written to SQLite. */
+  /** Always true under Runtime Tenants; startup env executors are removed (D8). */
   readonly persisted: boolean;
   readonly updatedAt: string;
+  /** Application principal that last registered this executor, when known. */
+  readonly principalId?: string;
 }
 
+/**
+ * Rejects tokens that are weak, empty of agent identity, or whose hash equals any
+ * application principal hash (A5). Replaces the old `serverToken` equality check.
+ */
 export function assertExecutorCredential(
   executor: {
     agentId: string;
     implementationVersion: string;
     token: string;
   },
-  serverToken: string
+  applicationHashes: readonly string[],
 ): void {
+  const tokenHash = hashToken(executor.token);
+  const matchesApplication = applicationHashes.some((hash) =>
+    equals(hash, tokenHash),
+  );
   if (
     executor.token.length < 16 ||
-    equals(executor.token, serverToken) ||
+    matchesApplication ||
     !executor.agentId ||
     !executor.implementationVersion
   )
     throw new Error(
-      "Executor tokens require independent credentials and an agent id"
+      "Executor tokens require independent credentials and an agent id",
     );
+}
+
+/** Mint a 32-byte hex application/executor key for tests and CLI bootstrap. */
+export function mintBearerToken(): string {
+  return randomBytes(32).toString("hex");
 }
 
 export class ExecutorRegistry {
@@ -59,6 +74,7 @@ export class ExecutorRegistry {
   upsert(record: ExecutorRecord): {
     rotated: boolean;
     previousHash?: string;
+    previousPrincipalId?: string;
   } {
     const previous = this.byAgent.get(record.agentId);
     const collision = this.byHash.get(record.tokenHash);
@@ -67,7 +83,13 @@ export class ExecutorRegistry {
     this.write(record);
     if (!previous || previous.tokenHash === record.tokenHash)
       return { rotated: false };
-    return { rotated: true, previousHash: previous.tokenHash };
+    return {
+      rotated: true,
+      previousHash: previous.tokenHash,
+      ...(previous.principalId === undefined
+        ? {}
+        : { previousPrincipalId: previous.principalId }),
+    };
   }
   remove(agentId: string): ExecutorRecord | undefined {
     const record = this.byAgent.get(agentId);

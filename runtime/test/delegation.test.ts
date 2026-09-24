@@ -12,11 +12,13 @@ import {
   tool,
 } from "@nylorun/core/define";
 import type { HostEffect } from "@nylorun/harness/run";
-import { startRuntime } from "../src/core/runtime.js";
+import { startTestTenant } from "./support/tenant.js";
+
+const APP = "server-token-value-aaaaaaaa";
 import type { ModelProvider } from "../src/core/provider.js";
 
 const serverHeaders = {
-  authorization: "Bearer server-token-value",
+  authorization: `Bearer ${APP}`,
   "content-type": "application/json",
 };
 const executorHeaders = {
@@ -82,10 +84,9 @@ function script(plays: {
   return provider;
 }
 
-async function boot(directory: string, model: ModelProvider) {
-  return startRuntime({
-    sqlitePath: join(directory, "runtime.sqlite"),
-    serverToken: "server-token-value",
+async function boot(_directory: string, modelProvider: ModelProvider) {
+  return startTestTenant({
+    applicationKey: APP,
     executors: [
       {
         token: "executor-token-value",
@@ -94,9 +95,8 @@ async function boot(directory: string, model: ModelProvider) {
       },
     ],
     vaultKek: null,
-    model,
+    modelProvider,
     sandbox: { backend: "virtual" },
-    port: 0,
   });
 }
 
@@ -400,7 +400,7 @@ it("fences a delegated agent's work when the session is cancelled", async () => 
 it("surfaces a child's empty answer as a failed tool result and filters history by path", async () => {
   const directory = await mkdtemp(join(tmpdir(), "delegation-fail-"));
   const seen: { agent: string; prompt: Prompt }[] = [];
-  const model: ModelProvider = async (effect) => {
+  const modelProvider: ModelProvider = async (effect) => {
     const prompt = (effect.input as { prompt?: Prompt }).prompt ?? [];
     seen.push({ agent: effect.agent?.id ?? "root", prompt });
     const step = prompt.filter((item) => item.kind === "tool-result").length;
@@ -441,7 +441,7 @@ it("surfaces a child's empty answer as a failed tool result and filters history 
       };
     return { output: [{ type: "text", text: "done" }] };
   };
-  const runtime = await boot(directory, model);
+  const runtime = await boot(directory, modelProvider);
   try {
     const researcher = Agent({
       id: "researcher",
