@@ -122,7 +122,7 @@ test("proxy allows /health for SDK compatibility checks", async () => {
           status: "ok",
           service: "nylorun-runtime",
           version: "0.9.0-beta",
-          protocol: { min: 2, max: 2, features: ["runtime-tenants"] },
+          protocol: { min: 2, max: 2, features: ["runtime-tenants", "admin-status"] },
           coreVersion: "0.4.0-beta",
           hostId: "host_1",
           pid: 1,

@@ -1,31 +1,82 @@
-import { release, tmpdir } from "node:os";
-import { join } from "node:path";
-import {
-  probeSandboxBackends,
-  type SandboxSelectionReport,
-} from "@nylorun/runtime/node";
+import { release } from "node:os";
 import {
   PROTOCOL_HEADER,
   PROTOCOL_VERSION,
   TENANT_HEADER,
+  createClient,
+  resolveConnection,
   type AgentManifest,
 } from "@nylorun/agents";
+import { CliError } from "./errors.js";
 
 const LABEL: Record<string, string> = {
   microsandbox: "microsandbox VM",
   virtual: "virtual shell",
 };
 
-/** `nylorun doctor sandbox`: what this machine offers and what a Runtime here would pick. */
-export async function doctorSandbox(options: { json: boolean }): Promise<void> {
-  const report = await probeSandboxBackends({
-    root: join(tmpdir(), "nylorun-doctor-sandbox"),
+export type SandboxReport = {
+  preference: string;
+  backend: string | null;
+  isolation?: string;
+  reason?: string;
+  probes: {
+    name: string;
+    isolation: string;
+    available: boolean;
+    reason?: string;
+    version?: string;
+  }[];
+  defaultImage?: string;
+};
+
+function platformLine(): string {
+  const os =
+    process.platform === "darwin"
+      ? "macOS"
+      : process.platform === "win32"
+        ? "Windows"
+        : process.platform;
+  return `${os} (kernel ${release()}) · ${process.arch}`;
+}
+
+async function fetchSandboxReport(options?: {
+  url?: string;
+  key?: string;
+  tenant?: string;
+}): Promise<SandboxReport> {
+  const connection = await resolveConnection(options);
+  const client = createClient({
+    url: connection.url,
+    key: connection.key,
+    tenant: connection.tenant,
   });
+  return client.transport.json<SandboxReport>(
+    "/v1/tenant/sandbox",
+    "GET",
+    undefined,
+  );
+}
+
+/** `nylorun doctor sandbox`: Tenant sandbox report via the Tenant API (F2-4). */
+export async function doctorSandbox(options: { json: boolean }): Promise<void> {
+  let report: SandboxReport;
+  try {
+    report = await fetchSandboxReport();
+  } catch (error) {
+    throw new CliError(
+      error instanceof Error
+        ? error.message
+        : `Could not read Tenant sandbox status: ${String(error)}`,
+      1,
+    );
+  }
   if (options.json) {
-    console.log(JSON.stringify({ platform: platform(), ...report }, null, 2));
+    console.log(
+      JSON.stringify({ platform: platformLine(), ...report }, null, 2),
+    );
     return;
   }
-  const rows: [string, string][] = [["platform", platform()]];
+  const rows: [string, string][] = [["platform", platformLine()]];
   for (const probe of report.probes)
     rows.push([
       probe.name,
@@ -64,7 +115,7 @@ export async function sandboxBanner(
     .flatMap((manifest) => manifest.capabilities)
     .find((item) => item.sandbox);
   if (!capability) return undefined;
-  let report: (SandboxSelectionReport & { defaultImage?: string }) | undefined;
+  let report: SandboxReport | undefined;
   try {
     const response = await fetch(`${runtimeUrl}/v1/tenant/sandbox`, {
       headers: {
@@ -74,7 +125,7 @@ export async function sandboxBanner(
       },
       signal: AbortSignal.timeout(10_000),
     });
-    if (response.ok) report = await response.json();
+    if (response.ok) report = (await response.json()) as SandboxReport;
   } catch {
     /* ignore */
   }
@@ -89,14 +140,4 @@ export async function sandboxBanner(
   return fellBack
     ? `sandbox: ${LABEL[report.backend] ?? report.backend} (${report.reason}) · ${doctor}`
     : `sandbox: ${LABEL[report.backend] ?? report.backend}${report.backend === "microsandbox" && image ? ` · image ${image}` : ""} · network: ${network}`;
-}
-
-function platform(): string {
-  const os =
-    process.platform === "darwin"
-      ? "macOS"
-      : process.platform === "win32"
-        ? "Windows"
-        : process.platform;
-  return `${os} (kernel ${release()}) · ${process.arch}`;
 }

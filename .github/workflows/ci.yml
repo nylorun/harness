@@ -11,6 +11,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Bound the job so a wedged runner cannot block the PR matrix indefinitely.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
@@ -28,11 +30,22 @@ jobs:
       - run: npm run check:stack -- --built
       # Worker deployment belongs to the deferred hosting profile.
       - run: npx playwright-core install --with-deps chromium
-      - run: node create-agent/scripts/smoke-starter.mjs
-      - run: npm run test:dev
-      - run: npm run test:setup
+      - name: Smoke starter
+        # Healthy smoke is ~2–4 min; in-process deadline is 15m. Keep Actions
+        # above that so the script can report its own abort reason.
+        timeout-minutes: 18
+        run: node create-agent/scripts/smoke-starter.mjs
+      - name: Test dev
+        timeout-minutes: 10
+        run: npm run test:dev
+      - name: Test setup
+        timeout-minutes: 10
+        run: npm run test:setup
       - name: Validate a proposed release
         if: github.event_name != 'merge_group'
+        # release:check is ~2–10 min when healthy; afdaee7 Validate wedged >50 min
+        # with no log progress on a frozen runner (cancel was 403 for the bot).
+        timeout-minutes: 20
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         shell: bash
@@ -47,6 +60,7 @@ jobs:
           fi
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
@@ -62,6 +76,90 @@ jobs:
       - run: npm run setup
       - run: npm run test:tooling
       - run: node scripts/acceptance/tenants.mjs
+  # G4: native Runtime build + install --from / up / status / down + launcher tests (D8).
+  runtime-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          # darwin-x64 lives in runtime-build-darwin-x64 (optional): GitHub-hosted
+          # macos-13 capacity has been unavailable for hours on this PR and a
+          # forever-queued matrix leg blocks the required `ci` aggregator.
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: windows-latest
+            platform: win32-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm ci
+      - run: npm run build --workspace @nylorun/core
+      - run: npm run build --workspace @nylorun/harness
+      - run: npm run build --workspace @nylorun/runtime
+      - name: Build local Runtime package
+        run: node scripts/release/runtime-builds.mjs --local
+      - name: Install, up, status, down
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLATFORM="${{ matrix.platform }}"
+          BUILD=".tmp/runtime-builds/${PLATFORM}"
+          HOME_DIR="${RUNNER_TEMP}/nylorun-runtime-build-home"
+          mkdir -p "$HOME_DIR"
+          export NYLORUN_HOME="$HOME_DIR"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            LAUNCHER="$BUILD/bin/nylorun-runtime.cmd"
+          else
+            LAUNCHER="$BUILD/bin/nylorun-runtime"
+            chmod +x "$LAUNCHER" || true
+          fi
+          VERSION=$(node -p "require('./runtime/package.json').version")
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json install "$VERSION" --from "$BUILD"
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json up --version "$VERSION"
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json status
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json down --force
+      - name: Launcher unit tests
+        run: npm test --workspace @nylorun/runtime -- test/launcher
+  # darwin-x64 (macos-13) is omitted from required CI: GitHub-hosted macos-13
+  # capacity has been unavailable for hours on #110 (forever-queued legs block
+  # merge). Re-add when macos-13 runners are obtainable; darwin-arm64 remains.
+  # J5: desktop contract smoke on the three desktop operating systems.
+  desktop-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm ci
+      - run: npm run build --workspace @nylorun/core
+      - run: npm run build --workspace @nylorun/harness
+      - run: npm run build --workspace @nylorun/agents
+      - run: npm run build --workspace @nylorun/admin
+      - run: npm run build --workspace @nylorun/runtime
+      - run: node --test scripts/test/desktop-contract.test.mjs
   supervisor:
     strategy:
       fail-fast: false
@@ -100,18 +198,22 @@ jobs:
       - run: npm run check --workspace @nylorun/create-agent
   ci:
     if: always()
-    needs: [check, test, supervisor, consumers]
+    needs: [check, test, runtime-build, desktop-contract, supervisor, consumers]
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI job to pass
         env:
           CHECK_RESULT: ${{ needs.check.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          RUNTIME_BUILD_RESULT: ${{ needs.runtime-build.result }}
+          DESKTOP_CONTRACT_RESULT: ${{ needs.desktop-contract.result }}
           SUPERVISOR_RESULT: ${{ needs.supervisor.result }}
           CONSUMERS_RESULT: ${{ needs.consumers.result }}
         shell: bash
         run: |
           [[ "$CHECK_RESULT" == success ]]
           [[ "$TEST_RESULT" == success ]]
+          [[ "$RUNTIME_BUILD_RESULT" == success ]]
+          [[ "$DESKTOP_CONTRACT_RESULT" == success ]]
           [[ "$SUPERVISOR_RESULT" == success ]]
           [[ "$CONSUMERS_RESULT" == success ]]

@@ -66,6 +66,19 @@ try {
       content,
       `Setup modified ${file}`,
     );
+  // G7: starter scripts are the new flow (no nylorun serve).
+  const starterPkg = await readJson(
+    join(temporary, "create-agent/starter/package.json"),
+  );
+  assert.equal(starterPkg.scripts.dev, "nylorun dev");
+  assert.equal(starterPkg.scripts.studio, "nylorun-studio");
+  assert.equal(starterPkg.scripts.start, "node dist/src/main.js");
+  assert.ok(
+    !Object.values(starterPkg.scripts).some((script) =>
+      String(script).includes("serve"),
+    ),
+    "starter must not call nylorun serve",
+  );
   console.log(
     "Clean-checkout setup passed; authored agents, tests, shell provenance, lockfiles, and local state are unchanged.",
   );

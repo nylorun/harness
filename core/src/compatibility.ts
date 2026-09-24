@@ -1,7 +1,7 @@
 export { hashManifest } from "./utils/hash.js";
 
 export const PROTOCOL_VERSION = 2;
-export const PROTOCOL_FEATURES = ["runtime-tenants"] as const;
+export const PROTOCOL_FEATURES = ["runtime-tenants", "admin-status"] as const;
 export type ProtocolFeature = (typeof PROTOCOL_FEATURES)[number];
 export interface ProtocolRange {
   min: number;
@@ -14,16 +14,47 @@ export const HOST_PROTOCOL: ProtocolRange = {
   features: PROTOCOL_FEATURES,
 };
 export const DEFINITION_SCHEMA_VERSION = 2;
+export const LAUNCHER_PROTOCOL = 1;
 
 export const TENANT_HEADER = "Nylorun-Tenant";
 export const PROTOCOL_HEADER = "Nylorun-Protocol";
 
+export const ERROR_CODES = [
+  "not_found",
+  "protocol_unsupported",
+  "host_rejected",
+  "origin_rejected",
+  "unsupported_media_type",
+  "tenant_conflict",
+  "active_work",
+  "connection_missing",
+  "incompatible_host",
+  "version_required",
+  "platform_unsupported",
+  "install_failed",
+  "integrity_mismatch",
+  "lock_timeout",
+  "foreign_port",
+  "host_unresponsive",
+  "host_start_failed",
+  "host_schema_newer",
+  "host_format_newer",
+  "downgrade_refused",
+  "upgrade_failed",
+] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
 /** Crockford Base32 alphabet (lowercase); excludes i, l, o, u. */
 const CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz";
 export const TENANT_ID_PATTERN = /^tn_[0-9a-hjkmnp-tv-z]{26}$/;
+export const PRINCIPAL_ID_PATTERN = /^pr_[0-9a-hjkmnp-tv-z]{26}$/;
 
 export function isTenantId(value: unknown): value is string {
   return typeof value === "string" && TENANT_ID_PATTERN.test(value);
+}
+
+export function isPrincipalId(value: unknown): value is string {
+  return typeof value === "string" && PRINCIPAL_ID_PATTERN.test(value);
 }
 
 function encodeTime(ms: number): string {
@@ -60,12 +91,7 @@ function encodeRandom(): string {
 let lastTime = -1;
 let lastRandom = "";
 
-/**
- * Lowercase Crockford ULID with `tn_` prefix; 48-bit time + 80-bit CSPRNG.
- * Same-millisecond calls stay lexicographically monotonic by bumping the random
- * component when the clock does not advance.
- */
-export function newTenantId(now?: number): string {
+function newPrefixedId(prefix: "tn_" | "pr_", now?: number): string {
   const ms = now ?? Date.now();
   const time = encodeTime(ms);
   let random = encodeRandom();
@@ -74,7 +100,91 @@ export function newTenantId(now?: number): string {
   }
   lastTime = ms;
   lastRandom = random;
-  return `tn_${time}${random}`;
+  return `${prefix}${time}${random}`;
+}
+
+/**
+ * Lowercase Crockford ULID with `tn_` prefix; 48-bit time + 80-bit CSPRNG.
+ * Same-millisecond calls stay lexicographically monotonic by bumping the random
+ * component when the clock does not advance.
+ */
+export function newTenantId(now?: number): string {
+  return newPrefixedId("tn_", now);
+}
+
+/** Principal id: `pr_` + lowercase Crockford ULID (same generator as tenants). */
+export function newPrincipalId(now?: number): string {
+  return newPrefixedId("pr_", now);
+}
+
+type SemVerParts = {
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease: readonly string[];
+};
+
+function parseSemVer(version: string): SemVerParts | null {
+  const match =
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+      version,
+    );
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4] ? match[4].split(".") : [],
+  };
+}
+
+function compareIdentifiers(a: string, b: string): -1 | 0 | 1 {
+  const aNum = /^\d+$/.test(a);
+  const bNum = /^\d+$/.test(b);
+  if (aNum && bNum) {
+    const aValue = BigInt(a);
+    const bValue = BigInt(b);
+    if (aValue < bValue) return -1;
+    if (aValue > bValue) return 1;
+    return 0;
+  }
+  if (aNum) return -1;
+  if (bNum) return 1;
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+/**
+ * SemVer 2.0 precedence, including prereleases. Build metadata is ignored.
+ * Returns -1 when a < b, 0 when equal, 1 when a > b.
+ */
+export function compareVersions(a: string, b: string): -1 | 0 | 1 {
+  const left = parseSemVer(a);
+  const right = parseSemVer(b);
+  if (!left || !right) {
+    if (a === b) return 0;
+    return a < b ? -1 : 1;
+  }
+  if (left.major !== right.major)
+    return left.major < right.major ? -1 : 1;
+  if (left.minor !== right.minor)
+    return left.minor < right.minor ? -1 : 1;
+  if (left.patch !== right.patch)
+    return left.patch < right.patch ? -1 : 1;
+  if (left.prerelease.length === 0 && right.prerelease.length === 0) return 0;
+  if (left.prerelease.length === 0) return 1;
+  if (right.prerelease.length === 0) return -1;
+  const limit = Math.max(left.prerelease.length, right.prerelease.length);
+  for (let i = 0; i < limit; i++) {
+    const aId = left.prerelease[i];
+    const bId = right.prerelease[i];
+    if (aId === undefined) return -1;
+    if (bId === undefined) return 1;
+    const order = compareIdentifiers(aId, bId);
+    if (order !== 0) return order;
+  }
+  return 0;
 }
 
 function incrementCrockford(value: string): string {

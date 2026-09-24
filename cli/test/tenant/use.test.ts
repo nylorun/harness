@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { newTenantId } from "@nylorun/agents";
 import { matchTenant } from "../../src/tenant/commands.js";
-import type { AdminTenant } from "../../src/host/admin-client.js";
+import type { AdminTenant } from "@nylorun/admin";
 
 function tenant(
   name: string | null,
@@ -23,7 +23,7 @@ function tenant(
   };
 }
 
-it("F7: matches exact unique name or id", () => {
+it("matches exact unique name or id", () => {
   const a = tenant("alpha");
   const b = tenant("beta");
   const tenants = [a, b];
@@ -32,7 +32,7 @@ it("F7: matches exact unique name or id", () => {
   expect(() => matchTenant(tenants, "missing")).toThrow("No Tenant named");
 });
 
-it("F7: rejects ambiguous names", () => {
+it("rejects ambiguous names", () => {
   const id1 = newTenantId();
   const id2 = newTenantId();
   const tenants = [tenant("dup", id1), tenant("dup", id2)];

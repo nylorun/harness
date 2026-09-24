@@ -1,3 +1,9 @@
+/**
+ * Packed create-agent starter smoke (G7 / I2):
+ * - Pack workspace tarballs including @nylorun/admin for CLI installs
+ * - `nylorun dev` and separate `nylorun-studio` (no `nylorun serve`)
+ * - `npm start` = `node dist/src/main.js` with NYLORUN_* from Project link
+ */
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import {
@@ -15,10 +21,28 @@ import { chromium } from "playwright-core";
 import { root, npmCli, run } from "../../scripts/lib/repo.mjs";
 import { ProcessGroup } from "../../scripts/lib/processes.mjs";
 import { availablePort } from "../../scripts/lib/development.mjs";
+import {
+  localRuntimeBuild,
+  materializeNodeBinary,
+} from "../../scripts/lib/local-build.mjs";
+import { startLocalRegistry } from "../../scripts/lib/local-registry.mjs";
+
+// Hard wall-clock bound so a wedged CI runner/step cannot sit forever when
+// Actions log upload already stalled (BlobNotFound while status=in_progress).
+// Healthy smoke is ~2–4 min; allow headroom for slow runtime tarball extracts.
+const SMOKE_DEADLINE_MS = Number(process.env.NYLORUN_SMOKE_DEADLINE_MS ?? 15 * 60_000);
+const smokeDeadline = setTimeout(() => {
+  console.error(
+    `smoke-starter exceeded ${SMOKE_DEADLINE_MS}ms wall clock; aborting.`,
+  );
+  process.exit(2);
+}, SMOKE_DEADLINE_MS);
+smokeDeadline.unref?.();
 
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-release-"));
 const group = new ProcessGroup();
 let browser;
+let registry;
 const projects = [];
 const tarballs = process.env.NYLORUN_STACK_TARBALLS
   ? JSON.parse(await readFile(process.env.NYLORUN_STACK_TARBALLS, "utf8"))
@@ -27,6 +51,7 @@ const names = [
   "core",
   "harness",
   "agents",
+  "admin",
   "runtime",
   "studio",
   "cli",
@@ -35,10 +60,17 @@ const names = [
 
 const readyLine = (l) =>
   l.includes("Ready") || l.includes("Ctrl-C stops this Project only");
-const studioLine = (l) => /^\s*Studio\s+http/.test(l);
+const studioOnLine = (l) => /^Studio on http/.test(l);
 const hostLine = (l) => /^\s*Host\s+http/.test(l);
 
 try {
+  const built = await localRuntimeBuild({
+    out: join(root, ".tmp/runtime-builds"),
+    repo: root,
+  });
+  await materializeNodeBinary(built.dir);
+  registry = await startLocalRegistry({ builds: [built] });
+
   const artifacts = join(temporary, "artifacts");
   await mkdir(artifacts);
   for (const name of names) {
@@ -90,10 +122,21 @@ try {
       await writeFile(join(project, path), content);
     }
     const manifest = JSON.parse(files["package.json"]);
-    for (const name of ["core", "harness", "agents", "runtime", "cli"])
+    assert.equal(manifest.scripts.dev, "nylorun dev");
+    assert.equal(manifest.scripts.start, "node dist/src/main.js");
+    assert.ok(!JSON.stringify(manifest.scripts).includes("serve"));
+    for (const name of ["agents"])
       manifest.dependencies[`@nylorun/${name}`] = `file:${tarballs[name]}`;
-    if (studio)
+    // Core is a transitive of agents; pin the workspace tarball for offline install.
+    manifest.dependencies["@nylorun/core"] = `file:${tarballs.core}`;
+    manifest.devDependencies ??= {};
+    manifest.devDependencies["@nylorun/cli"] = `file:${tarballs.cli}`;
+    // CLI depends on @nylorun/admin; pack the workspace tarball for offline install.
+    manifest.devDependencies["@nylorun/admin"] = `file:${tarballs.admin}`;
+    if (studio) {
+      assert.equal(manifest.scripts.studio, "nylorun-studio");
       manifest.devDependencies["@nylorun/studio"] = `file:${tarballs.studio}`;
+    }
     await writeFile(
       join(project, "package.json"),
       JSON.stringify(manifest, null, 2),
@@ -109,12 +152,15 @@ try {
 
   const project = projects[0];
   const home = await mkdtemp(join(tmpdir(), "nylorun-release-home-"));
+  const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-release-host-"));
   // Fixture models are only allowed on ephemeral Hosts; release smoke uses
   // `--ephemeral` so NYLORUN_DEV_MODEL=fixture can drive Studio and SDK turns.
   const env = {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
+    NYLORUN_HOME: hostRoot,
+    NYLORUN_REGISTRY: registry.url,
     NYLORUN_DEV_MODEL: "fixture",
   };
   const readAuth = async (cwd) => {
@@ -127,18 +173,27 @@ try {
     return { credentials, link };
   };
 
+  const studioBin = join(project, "node_modules/@nylorun/studio/dist/cli.js");
+  const cliBin = join(project, "node_modules/@nylorun/cli/dist/cli.js");
+
   const dev = group.start(
     "generated-dev",
     process.execPath,
-    [npmCli(), "run", "dev", "--", "--no-open", "--ephemeral"],
+    [cliBin, "dev", "--ephemeral"],
     { cwd: project, env },
   );
   const hostBanner = await dev.line(hostLine, 90_000);
   const url = hostBanner.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
-  const line = await dev.line(studioLine, 60_000);
-  const studioUrl = line.trim().replace(/^Studio\s+/, "");
   await dev.line(readyLine, 60_000);
-  const { credentials, link } = await readAuth(project);
+  const studio = group.start(
+    "generated-studio",
+    process.execPath,
+    [studioBin, "--no-open"],
+    { cwd: project, env },
+  );
+  const studioBanner = await studio.line(studioOnLine, 90_000);
+  const studioUrl = studioBanner.replace(/^Studio on\s+/, "").trim();
+  const { credentials } = await readAuth(project);
   assert.equal(
     (await stat(join(project, ".nylorun/credentials.json"))).mode & 0o777,
     0o600,
@@ -188,8 +243,14 @@ try {
       `tool completion missing.\n${text.slice(0, 2000)}\n${error instanceof Error ? error.message : error}`,
     );
   }
-  await page.getByText("Assistant", { exact: true }).first().waitFor();
-  assert.match(await page.locator("main").innerText(), /shipped|Order lookup complete/i);
+  await page
+    .getByText("Assistant", { exact: true })
+    .first()
+    .waitFor({ timeout: 20000 });
+  assert.match(
+    await page.locator("main").innerText(),
+    /shipped|Order lookup complete/i,
+  );
   await page
     .getByRole("textbox", { name: "Message" })
     .fill("What did I ask earlier?");
@@ -219,24 +280,19 @@ try {
       "Updated order assistant",
     ),
   );
-  // tsx watch restarts the Project under a new ephemeral Host; wait for the link to move.
-  let afterEdit;
+  // tsx watch restarts the Project entry on the same ephemeral Host; wait for
+  // the renamed agent to re-register (link URL stays put).
+  let afterEdit = await readAuth(project);
+  let updated = false;
   for (let attempt = 0; attempt < 200; attempt++) {
     try {
       afterEdit = await readAuth(project);
-      if (afterEdit.link.hostUrl !== beforeEditUrl) break;
-    } catch {
-      /* link may be briefly missing during restart */
-    }
-    afterEdit = undefined;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert.ok(afterEdit, "source edit did not recreate the Project link");
-  const editUrl = afterEdit.link.hostUrl;
-  let updated = false;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try {
-      const response = await fetch(`${editUrl}/v1/agents`, {
+      assert.equal(
+        afterEdit.link.hostUrl,
+        beforeEditUrl,
+        "source edit must keep the same ephemeral Host URL",
+      );
+      const response = await fetch(`${beforeEditUrl}/v1/agents`, {
         headers: {
           authorization: `Bearer ${afterEdit.credentials.applicationKey}`,
           "Nylorun-Tenant": afterEdit.link.tenantId,
@@ -253,35 +309,60 @@ try {
         break;
       }
     } catch {
-      /* retry */
+      /* link/agents may be briefly unavailable during restart */
     }
     await new Promise((r) => setTimeout(r, 100));
   }
   assert.ok(updated, "source edit restarted registry");
+  const editUrl = afterEdit.link.hostUrl;
+  await studio.stop();
   await dev.stop();
   await assert.rejects(fetch(`${editUrl}/health`));
   await stat(join(project, ".nylorun/credentials.json"));
   await stat(join(project, ".nylorun/link.json"));
 
   await run(process.execPath, [npmCli(), "run", "build"], { cwd: project });
+  // Compiled start: runtime up + nylorun dev attach → npm start with link env.
+  await rm(join(project, ".nylorun"), { recursive: true, force: true }).catch(
+    () => {},
+  );
+  const up = group.start(
+    "runtime-up",
+    process.execPath,
+    [cliBin, "runtime", "up"],
+    { cwd: project, env },
+  );
+  assert.equal(await up.exit, 0, "runtime up must succeed");
+  const attach = group.start(
+    "dev-attach",
+    process.execPath,
+    [cliBin, "dev"],
+    { cwd: project, env },
+  );
+  await attach.line(readyLine, 120_000);
+  const linked = await readAuth(project);
+  await attach.stop();
+  const startEnv = {
+    ...env,
+    NYLORUN_RUNTIME_URL: linked.link.hostUrl,
+    NYLORUN_TENANT: linked.link.tenantId,
+    NYLORUN_SERVER_KEY: linked.credentials.applicationKey,
+  };
   const started = group.start(
     "compiled-start",
     process.execPath,
-    [npmCli(), "start", "--", "--ephemeral"],
-    { cwd: project, env },
+    [npmCli(), "start"],
+    { cwd: project, env: startEnv },
   );
-  const serveHost = await started.line(hostLine, 90_000);
-  const serveUrl = serveHost.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
-  await started.line(readyLine, 60_000);
-  const served = await readAuth(project);
+  await new Promise((r) => setTimeout(r, 2000));
   const sdk = await import(
     pathToFileURL(join(project, "node_modules/@nylorun/agents/dist/index.js"))
       .href
   );
   const client = sdk.createClient({
-    url: serveUrl,
-    key: served.credentials.applicationKey,
-    tenant: served.link.tenantId,
+    url: linked.link.hostUrl,
+    key: linked.credentials.applicationKey,
+    tenant: linked.link.tenantId,
   });
   const session = await client.createSession({
     agentId: "assistant",
@@ -308,48 +389,113 @@ try {
   }
   assert.ok(complete, "compiled start executes a turn");
   void sessionId;
+  void url;
   await started.stop();
+  await run(
+    process.execPath,
+    [cliBin, "runtime", "down", "--force"],
+    { cwd: project, env },
+  ).catch(() => {});
 
+  const headlessCli = join(
+    projects[1],
+    "node_modules/@nylorun/cli/dist/cli.js",
+  );
   const headless = group.start(
     "headless-dev",
     process.execPath,
-    [npmCli(), "run", "dev", "--", "--no-open", "--ephemeral"],
+    [headlessCli, "dev", "--ephemeral"],
     { cwd: projects[1], env },
   );
   await headless.line(readyLine, 90_000);
   await headless.stop();
 
+  // Fresh Project link for the unconfigured-model case — do not reuse the
+  // headless Host URL (detached Host may still be draining; fetch would hang).
+  await rm(join(projects[1], ".nylorun"), { recursive: true, force: true }).catch(
+    () => {},
+  );
   const missingPort = await availablePort();
+  const missingHome = await mkdtemp(join(tmpdir(), "nylorun-release-missing-"));
+  const missingEnv = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    NYLORUN_HOME: missingHome,
+    NYLORUN_REGISTRY: registry.url,
+    PORT: String(missingPort),
+  };
+  // No fixture and no MODEL_* — vault model stays unconfigured.
+  delete missingEnv.NYLORUN_DEV_MODEL;
   const missing = group.start(
     "missing-config",
     process.execPath,
-    [npmCli(), "start", "--", "--ephemeral"],
+    [headlessCli, "dev", "--ephemeral"],
     {
       cwd: projects[1],
-      env: {
-        ...process.env,
-        HOME: home,
-        USERPROFILE: home,
-        PORT: String(missingPort),
-        NYLORUN_DEV_MODEL: "",
-      },
+      env: missingEnv,
     },
   );
-  await missing.line(
-    (l) =>
-      l.includes("not configured") ||
-      l.includes("Model") ||
-      l.includes("provider") ||
-      l.includes("configure"),
-    60_000,
+  // Require Host banner before Ready so we do not match a spurious "Ready"
+  // during install and then hit a half-booted (or stale) link.
+  const missingHostBanner = await missing.line(hostLine, 120_000);
+  await missing.line(readyLine, 60_000);
+  const missingAuth = await readAuth(projects[1]);
+  assert.match(
+    missingAuth.link.hostUrl,
+    /^https?:\/\//,
+    "missing-config must write a Host link",
   );
-  assert.notEqual(await missing.exit, 0);
+  const bannerUrl = missingHostBanner.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
+  assert.equal(
+    missingAuth.link.hostUrl.replace(/\/$/, ""),
+    bannerUrl.replace(/\/$/, ""),
+    "Project link must match the Host banner for this missing-config run",
+  );
+  console.log(`missing-config: GET ${missingAuth.link.hostUrl}/v1/tenant/model`);
+  await missing.ready(`${missingAuth.link.hostUrl}/health`, 30_000);
+  // Belt-and-suspenders: some undici local hangs have ignored AbortSignal.
+  const modelStatus = await Promise.race([
+    fetch(`${missingAuth.link.hostUrl}/v1/tenant/model`, {
+      headers: {
+        authorization: `Bearer ${missingAuth.credentials.applicationKey}`,
+        "Nylorun-Tenant": missingAuth.link.tenantId,
+        "Nylorun-Protocol": "2",
+      },
+      signal: AbortSignal.timeout(15_000),
+    }),
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("missing-config model fetch wall timeout (15s)")),
+        15_000,
+      ),
+    ),
+  ]);
+  // Read the body once — assert message args are eager, so do not call
+  // .text() inside the assertion message and then .json() afterward.
+  const modelText = await modelStatus.text();
+  assert.equal(
+    modelStatus.status,
+    200,
+    `model status ${modelStatus.status}: ${modelText.slice(0, 500)}`,
+  );
+  const modelBody = JSON.parse(modelText);
+  assert.equal(
+    modelBody.configured,
+    false,
+    "expected unconfigured model without fixture/provider env",
+  );
+  console.log("missing-config: model configured=false ok");
+  await missing.stop();
+  await rm(missingHome, { recursive: true, force: true }).catch(() => {});
 
   console.log(
-    "PASS: packed creator, both starters (ephemeral Host + fixture), browser tool/results, source restart, compiled tool execution, shutdown, credentials, and missing-configuration error.",
+    "PASS: packed creator, both starters (ephemeral Host + fixture), browser tool/results, source restart, compiled npm start, shutdown, credentials, and missing-configuration error.",
   );
 } finally {
+  clearTimeout(smokeDeadline);
   await browser?.close();
   await group.close();
+  await registry?.close?.();
   await rm(temporary, { recursive: true, force: true });
 }

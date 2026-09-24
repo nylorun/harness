@@ -12,6 +12,7 @@ const versions = {
   cli: "0.1.0-beta.1",
   harness: "0.10.0-beta.1",
   agents: "0.1.0-beta.1",
+  admin: "0.1.0-beta.1",
   runtime: "0.1.0-beta.1",
   studio: "0.3.0-beta.1",
   "create-agent": "0.1.0-beta.1",
@@ -21,6 +22,7 @@ const pins = {
   cli: versions.cli,
   harness: versions.harness,
   agents: versions.agents,
+  admin: versions.admin,
   runtime: versions.runtime,
   studio: versions.studio,
 };
@@ -49,7 +51,7 @@ test("the migration computes the approved package targets and exact pins", () =>
     studio: "0.4.0-beta",
     "create-agent": "0.2.0-beta",
   });
-  for (const name of ["core", "harness", "agents", "runtime", "studio", "cli"])
+  for (const name of ["core", "harness", "agents", "admin", "runtime", "studio", "cli"])
     assert.equal(plan.compatibility[name], plan.packages[name] ?? versions[name]);
   for (const release of releases)
     assert.equal(release.newVersion, plan.packages[release.name.slice(9)]);
@@ -81,6 +83,7 @@ test("pre-1.0 latest promotion keeps *-beta versions for dist-tag moves", () => 
     cli: "0.1.0-beta",
     harness: "0.10.0-beta",
     agents: "0.1.0-beta",
+    admin: "0.1.0-beta",
     runtime: "0.1.0-beta",
     studio: "0.3.0-beta",
     "create-agent": "0.1.0-beta",
@@ -92,6 +95,7 @@ test("pre-1.0 latest promotion keeps *-beta versions for dist-tag moves", () => 
       cli: current.cli,
       harness: current.harness,
       agents: current.agents,
+      admin: current.admin,
       runtime: current.runtime,
       studio: current.studio,
     },
@@ -122,6 +126,7 @@ test("post-1.0 latest promotion strips -beta from the promoted package", () => {
     cli: "1.0.0",
     harness: "1.0.0",
     agents: "1.0.0",
+    admin: "1.0.0",
     runtime: "1.1.0-beta",
     studio: "1.0.0",
     "create-agent": "1.0.0",
@@ -129,7 +134,7 @@ test("post-1.0 latest promotion strips -beta from the promoted package", () => {
   assert.deepEqual(
     planVersions(
       before,
-      { core: "1.0.0", cli: "1.0.0", harness: "1.0.0", agents: "1.0.0", runtime: "1.1.0-beta", studio: "1.0.0" },
+      { core: "1.0.0", cli: "1.0.0", harness: "1.0.0", agents: "1.0.0", admin: "1.0.0", runtime: "1.1.0-beta", studio: "1.0.0" },
       [],
       "latest"
     ).plan.packages,
@@ -283,6 +288,7 @@ test("D1: protocol change after 1.0 requires major bumps", () => {
     cli: "1.0.0",
     harness: "1.0.0",
     agents: "1.0.0",
+    admin: "1.0.0",
     runtime: "1.0.0",
     studio: "1.0.0",
     "create-agent": "1.0.0",
@@ -292,6 +298,7 @@ test("D1: protocol change after 1.0 requires major bumps", () => {
     cli: "1.0.0",
     harness: "1.0.0",
     agents: "1.0.0",
+    admin: "1.0.0",
     runtime: "1.0.0",
     studio: "1.0.0",
   };

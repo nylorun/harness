@@ -8,6 +8,8 @@ import {
 } from "../lib/repo.mjs";
 import { validatePlan, verifyReleaseCommit, releaseNotes } from "./model.mjs";
 import { packRelease, readArtifacts } from "./artifacts.mjs";
+import { assertRuntimePins } from "./pins.mjs";
+import { checkRuntimeBuilds } from "./runtime-build-validate.mjs";
 
 try {
   const args = process.argv.slice(2);
@@ -15,12 +17,17 @@ try {
   if (args.length > 1 || (args.length && !built))
     throw new Error("Usage: npm run release:check [-- --built]");
   await verifyToolchain();
+  await assertRuntimePins(root);
   if (process.env.RELEASE_SHA)
     await verifyReleaseCommit(root, process.env.RELEASE_SHA);
   const plan = await readJson(join(root, ".release/plan.json"));
   await validatePlan(plan, root);
   for (const [name, version] of Object.entries(plan.packages))
     await releaseNotes(root, name, version);
+  // G6: local build manifest/size + npm view dry-run for five platforms.
+  await checkRuntimeBuilds({
+    log: (line) => console.log(line),
+  });
   if (!built) await node("scripts/validate.mjs", ["check"]);
   const directory = join(root, ".tmp/release-artifacts");
   await packRelease(directory, plan);

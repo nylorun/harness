@@ -1,33 +1,23 @@
 #!/usr/bin/env node
-import "./host/baseline.js";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { createRequire } from "node:module";
-import {
-  ConfigurationCancelled,
-  configureProvider,
-} from "./model/configure.js";
+import "./runtime/baseline.js";
+import { ConfigurationCancelled, configureProvider, fetchModelCatalog } from "./model/configure.js";
 import { putHostModel } from "./model/host-model.js";
 import { develop, developmentPreflight } from "./dev.js";
 import { CliError } from "./errors.js";
-import { runtimeCommand, runtimeUsage } from "./host/commands.js";
-import { statusCommand } from "./host/lifecycle.js";
-import { hostPaths, resolveHostRoot } from "./host/root.js";
+import { runtimeCommand, runtimeUsage } from "./runtime/commands.js";
 import { findProjectRoot, requireProjectRoot } from "./project/root.js";
 import { printLinkedEnvExports } from "./project/attach.js";
 import { readLink as readProjectLink } from "./project/link.js";
 import { readCredentials as readProjectCredentials } from "./project/credentials.js";
 import { tenantCommand } from "./tenant/commands.js";
 
-const usage = `nylorun <runtime|up|down|logs|dev|serve|configure|studio|doctor|tenant>
+const usage = `nylorun <runtime|up|down|logs|dev|configure|doctor|tenant>
 
 ${runtimeUsage}
 
-  dev [--no-studio] [--no-open] [--no-autostart] [--ephemeral]
-  serve [entry] [--no-autostart] [--ephemeral]
+  dev [entry] [--ephemeral]
   configure
-  studio [--runtime-url <http(s)-url>] [--port <n>] [--no-open]
-  doctor sandbox [--json]  show which sandbox backend this machine offers
+  doctor sandbox [--json]  show which sandbox backend this Tenant's Host offers
   tenant current|list [--json]|use <name-or-id>|status [--json]|reset|delete`;
 
 interface Flags {
@@ -76,14 +66,6 @@ function parseFlags(
 
 const usageError = (message: string) => new CliError(message, 2);
 
-function parsePort(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65535)
-    throw usageError("--port must be an integer between 1 and 65535.");
-  return port;
-}
-
 async function resolveLinkedAuth(projectRoot: string): Promise<{
   url: string;
   key: string;
@@ -112,31 +94,6 @@ async function resolveLinkedAuth(projectRoot: string): Promise<{
   );
 }
 
-async function startStudio(
-  agentServerUrl: string,
-  serverKey: string,
-  tenant: { id: string; name: string },
-  open: boolean,
-  port?: number,
-) {
-  let entry: string;
-  try {
-    entry = createRequire(join(process.cwd(), "package.json")).resolve(
-      "@nylorun/studio",
-    );
-  } catch {
-    throw new Error("Install @nylorun/studio to use the Studio dashboard.");
-  }
-  const studio = await import(pathToFileURL(entry).href);
-  return studio.startStudio({
-    runtimeUrl: agentServerUrl,
-    serverKey,
-    tenant,
-    open,
-    ...(port === undefined ? {} : { port }),
-  });
-}
-
 async function main() {
   const [rawCommand, ...rawArgs] = process.argv.slice(2);
   if (!rawCommand || rawCommand === "--help" || rawCommand === "-h")
@@ -153,74 +110,13 @@ async function main() {
   if (command === "tenant") return await tenantCommand(args);
 
   if (command === "runtime") {
-    if (args[0] === "status" && args.includes("--env")) {
-      await statusCommand({
-        env: true,
-        envHook: async () => {
-          const root = findProjectRoot() ?? process.cwd();
-          await printLinkedEnvExports(root);
-        },
-      });
-      return;
-    }
-    if (rawCommand === "logs") {
-      const root = findProjectRoot();
-      if (root) {
-        const link = await readProjectLink(root);
-        if (link) {
-          const paths = hostPaths(resolveHostRoot());
-          const tenantLog = join(
-            paths.tenants,
-            link.tenantId,
-            "logs",
-            "tenant.log",
-          );
-          const flags = args.slice(1);
-          const follow = flags.includes("-f") || flags.includes("--follow");
-          const { readFile, stat } = await import("node:fs/promises");
-          const { existsSync, openSync, readSync, closeSync, fstatSync } =
-            await import("node:fs");
-          if (!existsSync(tenantLog)) {
-            throw new CliError(
-              `No Tenant log at ${tenantLog}. Start the Project with nylorun dev first.`,
-              3,
-            );
-          }
-          const nIndex = flags.indexOf("-n");
-          const lines = nIndex >= 0 ? Number(flags[nIndex + 1] ?? 200) : 200;
-          if (!Number.isInteger(lines) || lines < 1)
-            throw usageError("-n must be a positive integer.");
-          const text = await readFile(tenantLog, "utf8");
-          for (const line of text.trimEnd().split("\n").slice(-lines)) {
-            process.stdout.write(`${line}\n`);
-          }
-          if (!follow) return;
-          let size = (await stat(tenantLog)).size;
-          await new Promise<void>((resolvePromise) => {
-            process.once("SIGINT", () => resolvePromise());
-            process.once("SIGTERM", () => resolvePromise());
-            const poll = setInterval(() => {
-              try {
-                const fd = openSync(tenantLog, "r");
-                const next = fstatSync(fd).size;
-                if (next > size) {
-                  const buffer = Buffer.alloc(next - size);
-                  readSync(fd, buffer, 0, buffer.length, size);
-                  size = next;
-                  process.stdout.write(buffer);
-                }
-                closeSync(fd);
-              } catch {
-                /* log rotated or removed */
-              }
-            }, 500);
-            poll.unref();
-          });
-          return;
-        }
-      }
-    }
-    return await runtimeCommand(args);
+    // F2-7: envHook prints the linked Project's three variables.
+    return await runtimeCommand(args, {
+      envHook: async () => {
+        const root = findProjectRoot() ?? process.cwd();
+        await printLinkedEnvExports(root);
+      },
+    });
   }
 
   if (command === "doctor") {
@@ -234,37 +130,27 @@ async function main() {
 
   if (command === "dev") {
     const flags = parseFlags(args, {
-      booleans: ["--no-studio", "--no-open", "--no-autostart", "--ephemeral"],
-    });
-    if (flags.rest.length) throw usageError(usage);
-    requireProjectRoot();
-    developmentPreflight(
-      [...flags.booleans].filter((flag) => flag !== "--ephemeral"),
-    );
-    // Surface Host/autostart exit codes from this process before spawning tsx.
-    if (!flags.booleans.has("--ephemeral")) {
-      const { ensureHost } = await import("./host/lifecycle.js");
-      await ensureHost({
-        autostart: !flags.booleans.has("--no-autostart"),
-      });
-    }
-    process.exitCode = await develop([...flags.booleans]);
-    return;
-  }
-
-  if (command === "serve") {
-    const flags = parseFlags(args, {
-      booleans: ["--no-autostart", "--ephemeral"],
+      booleans: ["--ephemeral"],
     });
     if (flags.rest.length > 1) throw usageError(usage);
     requireProjectRoot();
-    await (
-      await import("./launcher.js")
-    ).serve(flags.rest[0], {
-      autostart: !flags.booleans.has("--no-autostart"),
-      ephemeral: flags.booleans.has("--ephemeral"),
+    developmentPreflight([
+      ...flags.rest,
+      ...[...flags.booleans],
+    ]);
+    process.exitCode = await develop({
+      ...(flags.rest[0] ? { entry: flags.rest[0] } : {}),
+      flags: [...flags.booleans],
     });
     return;
+  }
+
+  if (command === "serve" || command === "studio") {
+    throw usageError(
+      command === "serve"
+        ? "nylorun serve was removed. Use nylorun dev [entry] in development, or node dist/src/main.js with NYLORUN_RUNTIME_URL, NYLORUN_TENANT and NYLORUN_SERVER_KEY."
+        : "nylorun studio was removed. Run nylorun-studio (npm run studio) instead.",
+    );
   }
 
   if (command === "configure") {
@@ -283,38 +169,20 @@ async function main() {
         `No Runtime Host is listening at ${auth.url}. Start one with "nylorun runtime up".`,
         6,
       );
-    const prompted = await configureProvider({ signal: controller.signal });
+    const catalog = await fetchModelCatalog({
+      url: auth.url,
+      key: auth.key,
+      tenantId: auth.tenantId,
+    });
+    const prompted = await configureProvider({
+      signal: controller.signal,
+      catalog,
+    });
     await putHostModel(auth.url, auth.key, prompted, auth.tenantId);
     return;
   }
 
-  if (command !== "studio") throw usageError(usage);
-  const flags = parseFlags(args, {
-    booleans: ["--no-open"],
-    values: ["--runtime-url", "--studio-port", "--port"],
-  });
-  if (flags.rest.length) throw usageError(usage);
-  const projectRoot = findProjectRoot() ?? process.cwd();
-  const auth = await resolveLinkedAuth(projectRoot);
-  const runtimeUrl = flags.values.get("--runtime-url") ?? auth.url;
-  const studioPort = flags.values.has("--studio-port")
-    ? parsePort(flags.values.get("--studio-port"))
-    : flags.values.has("--port")
-      ? parsePort(flags.values.get("--port"))
-      : undefined;
-  const dashboard = await startStudio(
-    runtimeUrl,
-    auth.key,
-    { id: auth.tenantId, name: auth.tenantName },
-    !flags.booleans.has("--no-open"),
-    studioPort,
-  );
-  console.log(`Studio on ${dashboard.address}`);
-  await new Promise<void>((resolve, reject) => {
-    const close = () => void dashboard.close().then(resolve, reject);
-    process.once("SIGINT", close);
-    process.once("SIGTERM", close);
-  });
+  throw usageError(usage);
 }
 
 async function finish(code: number): Promise<never> {

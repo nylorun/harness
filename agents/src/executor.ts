@@ -5,7 +5,13 @@ import {
   type Action,
 } from "@nylorun/core/contracts";
 import type { BuiltAgent } from "@nylorun/core/define";
-import { assertNoMiddlewareClosures, type AgentSource } from "./client.js";
+import {
+  AgentsClient,
+  assertNoMiddlewareClosures,
+  type AgentSource,
+} from "./client.js";
+import { resolveConnection } from "./connection.js";
+import { deriveExecutorToken } from "./derived-credentials.js";
 import {
   Transport,
   RuntimeError,
@@ -17,8 +23,11 @@ import {
 } from "./http.js";
 import { readSSE } from "./sse.js";
 import { executeAction } from "./execute-action.js";
+
 export interface ConnectOptions {
   agents: readonly AgentSource[];
+  /** Application-mode client; when set, connectAgents uses application mode (D§7.2). */
+  application?: AgentsClient;
   runtime?: Destination;
   implementationVersion?: string;
   onError?: (error: unknown) => void;
@@ -29,12 +38,16 @@ export interface AgentConnection {
   /** Abort subscriptions and leases. Running user code receives an AbortSignal. */
   close(): Promise<void>;
 }
-export function connectAgents(options: ConnectOptions): AgentConnection {
-  const transport = new Transport(options.runtime, "executor");
-  const version =
+
+function implementationVersionOf(options: ConnectOptions): string {
+  return (
     options.implementationVersion ??
     env("NYLORUN_IMPLEMENTATION_VERSION") ??
-    "dev";
+    "dev"
+  );
+}
+
+function buildAgents(options: ConnectOptions): Map<string, BuiltAgent> {
   const agents = new Map<string, BuiltAgent>();
   for (const source of options.agents) {
     const built = source.build?.() ?? (source as BuiltAgent);
@@ -44,8 +57,17 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
       throw new Error(`Duplicate connected agent ${built.id}`);
     agents.set(built.id, built);
   }
-  if (!agents.size)
-    throw new Error("connectAgents requires at least one agent");
+  if (!agents.size) throw new Error("connectAgents requires at least one agent");
+  return agents;
+}
+
+function connectExecutorMode(
+  options: ConnectOptions,
+  runtime: Destination,
+  agents: Map<string, BuiltAgent>,
+): AgentConnection {
+  const transport = new Transport(runtime, "executor");
+  const version = implementationVersionOf(options);
   const controller = new AbortController();
   const signal = controller.signal;
   const active = new Map<string, AbortController>();
@@ -75,7 +97,7 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
           "/v1/actions",
           "GET",
           undefined,
-          signal
+          signal,
         );
         for (const item of response.actions) {
           // Skip actions this SDK cannot run (e.g. from an older Runtime) instead of stalling discovery.
@@ -112,7 +134,7 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
   const processAction = async (
     action: Action,
     agent: BuiltAgent,
-    work: AbortController
+    work: AbortController,
   ) => {
     const stop = () => work.abort(signal.reason);
     signal.addEventListener("abort", stop, { once: true });
@@ -128,8 +150,8 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
             requestId: id(),
             implementationVersion: version,
           },
-          work.signal
-        )
+          work.signal,
+        ),
       );
       if (claim.action.actionId !== action.actionId)
         throw new Error("Claim definition mismatch");
@@ -147,7 +169,7 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
             };
             const timer = setTimeout(
               finish,
-              Math.max(50, Math.floor(remaining / 3))
+              Math.max(50, Math.floor(remaining / 3)),
             );
             wakeRenewal = finish;
             work.signal.addEventListener("abort", finish, { once: true });
@@ -161,7 +183,7 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
               claimId: claim.claimId,
               generation: claim.generation,
             },
-            work.signal
+            work.signal,
           );
           expires = Date.parse(renewed.leaseExpiresAt);
         }
@@ -189,7 +211,7 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
             `/v1/sessions/${segment(action.sessionId)}/commands`,
             "POST",
             command,
-            work.signal
+            work.signal,
           );
           break;
         } catch (error) {
@@ -266,3 +288,129 @@ export function connectAgents(options: ConnectOptions): AgentConnection {
     },
   };
 }
+
+function connectApplicationMode(
+  options: ConnectOptions,
+  application: AgentsClient,
+  agents: Map<string, BuiltAgent>,
+): AgentConnection {
+  const version = implementationVersionOf(options);
+  const children: AgentConnection[] = [];
+  let resolveReady!: () => void;
+  let rejectReady!: (reason: unknown) => void;
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  void ready.catch(() => {});
+
+  const boot = (async () => {
+    for (const agent of agents.values()) {
+      await application.saveAgent(agent, { implementationVersion: version });
+    }
+    const registrations = [...agents.values()].map((agent) => ({
+      agentId: agent.id,
+      token: deriveExecutorToken(
+        application.transport.key,
+        application.transport.tenant,
+        agent.id,
+      ),
+      implementationVersion: version,
+    }));
+    await application.transport.json("/v1/executors", "PUT", {
+      executors: registrations,
+    });
+    for (const agent of agents.values()) {
+      const token = deriveExecutorToken(
+        application.transport.key,
+        application.transport.tenant,
+        agent.id,
+      );
+      const child = connectExecutorMode(
+        {
+          agents: [agent],
+          implementationVersion: version,
+          onError: options.onError,
+        },
+        {
+          url: application.transport.url,
+          tenant: application.transport.tenant,
+          key: token,
+          fetch: application.transport.fetcher,
+        },
+        new Map([[agent.id, agent]]),
+      );
+      children.push(child);
+    }
+    await Promise.all(children.map((child) => child.ready));
+    resolveReady();
+  })().catch((error) => {
+    rejectReady(error);
+  });
+
+  return {
+    ready,
+    async close() {
+      await boot.catch(() => {});
+      await Promise.allSettled(children.map((child) => child.close()));
+    },
+  };
+}
+
+export function connectAgents(options: ConnectOptions): AgentConnection {
+  const agents = buildAgents(options);
+
+  // D§7.2 mode table: runtime → executor; application → application;
+  // neither → resolveConnection() role.
+  if (options.runtime) {
+    return connectExecutorMode(options, options.runtime, agents);
+  }
+  if (options.application) {
+    return connectApplicationMode(options, options.application, agents);
+  }
+
+  let resolveReady!: () => void;
+  let rejectReady!: (reason: unknown) => void;
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  void ready.catch(() => {});
+  let handle: AgentConnection | undefined;
+
+  const boot = (async () => {
+    const connection = await resolveConnection();
+    if (connection.role === "executor") {
+      handle = connectExecutorMode(
+        options,
+        {
+          url: connection.url,
+          tenant: connection.tenant,
+          key: connection.key,
+        },
+        agents,
+      );
+    } else {
+      const application = new AgentsClient({
+        url: connection.url,
+        tenant: connection.tenant,
+        key: connection.key,
+      });
+      handle = connectApplicationMode(options, application, agents);
+    }
+    await handle.ready;
+    resolveReady();
+  })().catch((error) => {
+    rejectReady(error);
+  });
+
+  return {
+    ready,
+    async close() {
+      await boot.catch(() => {});
+      await handle?.close();
+    },
+  };
+}
+
+export { deriveExecutorToken };

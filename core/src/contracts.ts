@@ -12,7 +12,9 @@ import { hookListIssue } from "./definition/hooks.js";
 import { DELEGATE_INPUT_SCHEMA } from "./definition/delegate.js";
 import { canonical } from "./utils/canonical.js";
 export type { AgentManifest } from "./types/manifest.js";
-export { PROTOCOL_VERSION } from "./compatibility.js";
+export { PROTOCOL_VERSION, ERROR_CODES } from "./compatibility.js";
+export type { ErrorCode } from "./compatibility.js";
+import { ERROR_CODES } from "./compatibility.js";
 export const RequestIdSchema = z.string().min(1);
 export const IdempotencyKeySchema = z.string().min(1).max(256);
 const jsonObject = z.record(z.string(), z.unknown());
@@ -512,8 +514,9 @@ export const AcceptedResponseSchema = z.object({
 export type AcceptedResponse = z.infer<typeof AcceptedResponseSchema>;
 export const RejectedResponseSchema = z.object({
   status: z.literal("rejected"),
-  code: z.string(),
+  code: z.enum(ERROR_CODES),
   message: z.string(),
+  details: z.unknown().optional(),
   activeTurnId: z.string().optional(),
   requestId: z.string().optional(),
 });
@@ -749,6 +752,63 @@ export const AdminHostStatusSchema = z
   })
   .strict();
 export type AdminHostStatus = z.infer<typeof AdminHostStatusSchema>;
+
+/** Shared Admin API status (D§4.1). OSS fills `host`; Cloud omits it. */
+export const AdminStatusSchema = z
+  .object({
+    service: z.string().min(1),
+    version: z.string().min(1),
+    protocol: ProtocolRangeSchema,
+    tenants: z.array(AdminTenantSchema),
+    aggregate: HostAggregateSchema,
+    host: z
+      .object({
+        hostId: z.string().min(1),
+        url: z.string().min(1),
+        pid: z.number().int(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type AdminStatus = z.infer<typeof AdminStatusSchema>;
+
+export const ProjectLinkFileSchema = z
+  .object({
+    format: z.union([z.literal(0), z.literal(1)]).default(0),
+    hostUrl: z.string().min(1),
+    hostId: z.string().min(1),
+    tenantId: z.string().min(1),
+  })
+  .passthrough();
+export type ProjectLinkFile = z.infer<typeof ProjectLinkFileSchema>;
+
+export const ProjectCredentialsFileSchema = z
+  .object({
+    format: z.union([z.literal(0), z.literal(1)]).default(0),
+    applicationKey: z.string().regex(/^[0-9a-f]{64}$/),
+    principalId: z.string().min(1),
+  })
+  .passthrough();
+export type ProjectCredentialsFile = z.infer<
+  typeof ProjectCredentialsFileSchema
+>;
+
+export const RuntimeBuildManifestSchema = z
+  .object({
+    format: z.literal(1),
+    runtimeVersion: z.string().min(1),
+    platform: z.enum(["darwin", "linux", "win32"]),
+    arch: z.enum(["arm64", "x64"]),
+    node: z.object({ version: z.string().min(1) }).strict(),
+    entry: z.string().min(1),
+    launcher: z.string().min(1),
+    launcherProtocol: z.literal(1),
+    protocol: ProtocolRangeSchema,
+    tenantSchema: z.object({ max: z.number().int() }).strict(),
+  })
+  .strict();
+export type RuntimeBuildManifest = z.infer<typeof RuntimeBuildManifestSchema>;
 
 export const HostModelViewSchema = z.union([
   z.object({ configured: z.literal(false) }).strict(),

@@ -2,9 +2,9 @@
 
 The independent OSS **Runtime Host** consumes `@nylorun/harness/run` and
 `@nylorun/core/contracts`. Cloud installs published `@nylorun/harness` from npm
-and does not import this Runtime package. Client authoring, sessions and
-connected executors belong to `@nylorun/agents`. Vocabulary:
-[src/CONTEXT.md](./src/CONTEXT.md).
+and does not import this package. Client authoring and sessions belong to
+`@nylorun/agents`; Tenant lifecycle management belongs to `@nylorun/admin`.
+Vocabulary: [src/CONTEXT.md](./src/CONTEXT.md).
 
 Requires Node 24+. Build from the repository root:
 
@@ -15,11 +15,22 @@ npm run build --workspace @nylorun/harness
 npm run build --workspace @nylorun/runtime
 ```
 
-Prefer starting the Host through the CLI (`nylorun runtime up`), which installs
-a pinned `@nylorun/runtime` under the Host root and spawns
-`@nylorun/runtime/server` with a baseline environment. For tests and ephemeral
-embeds, use `startEphemeralRuntime()` from `@nylorun/runtime/core`. See
-[MIGRATION.md](../MIGRATION.md#runtime-tenants-breaking-beta).
+## Runtime builds and the launcher
+
+Each release also publishes per-platform **Runtime builds**
+(`@nylorun/runtime-<platform>-<arch>`) that contain:
+
+- checksum-verified Node (`nylorun.node` pin),
+- this package installed with production dependencies,
+- the **launcher** (`nylorun-runtime`) — source in `src/launcher/`, not listed
+  in `exports`.
+
+Clients (CLI, desktop apps) run the launcher of the newest installed build as a
+process. Prefer `nylorun runtime up` or the desktop bootstrap flow; do not add
+this package as an application dependency. For tests and ephemeral embeds, use
+`startEphemeralRuntime()` from `@nylorun/runtime/core`. See
+[MIGRATION.md](../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta) and
+[building a desktop client](../docs/building-a-desktop-client.md).
 
 Default address: loopback port `8787` (persisted in `host.json`). The Host root
 is `NYLORUN_HOME` or `~/.nylorun`. Tenants live under `tenants/<tenantId>/`.
@@ -28,28 +39,31 @@ is `NYLORUN_HOME` or `~/.nylorun`. Tenants live under `tenants/<tenantId>/`.
 
 ```text
 <host root>/
-  host.json                 # hostId, bind address, port
+  host.json                 # format 1: hostId, bind, port, runtimeVersion, …
   host-state.json           # pid, url — removed on shutdown
   host-credentials.json     # adminKey (0600)
   runtime.log
-  runtime/<version>/        # verified install of this package
+  runtime/<version>/        # Runtime build (manifest, node, launcher, lib)
   tenants/<tenantId>/       # envelope, SQLite, KEK, logs, sandboxes, …
   trash/                    # deleted Tenants
 ```
 
 ## HTTP surface
 
-| Route                    | Auth                    | Notes                                                                                     |
-| ------------------------ | ----------------------- | ----------------------------------------------------------------------------------------- |
-| `GET /health`            | none                    | `service: "nylorun-runtime"`, `hostId`, protocol `{min,max,features}`, `coreVersion`, pid |
-| `GET /ready`             | none                    | Listener up and Tenant discovery finished                                                 |
-| `/v1/admin/*`            | admin key               | Create/list/status/delete Tenants; Host status; shutdown                                  |
-| `/v1/*` Tenant routes    | application or executor | Require `Nylorun-Tenant` + `Nylorun-Protocol`                                             |
-| `GET /v1/tenant`         | application             | Tenant status (secrets redacted)                                                          |
-| `/v1/tenant/model*` etc. | application             | Tenant model, selection, providers, models, sandbox                                       |
+| Route | Auth | Notes |
+| --- | --- | --- |
+| `GET /health` | none | `service: "nylorun-runtime"`, `hostId`, protocol `{min,max,features}` (includes `admin-status`), pid |
+| `GET /ready` | none | Listener up and Tenant discovery finished |
+| `GET /v1/admin/status` | admin key | `AdminStatusSchema`; alias `GET /v1/admin/host` |
+| `/v1/admin/tenants*` | admin key | Create / list / get / delete Tenants |
+| `POST /v1/admin/host/shutdown` | admin key | Launcher-private; not in `@nylorun/admin` |
+| `/v1/*` Tenant routes | application or executor | Require `Nylorun-Tenant` + `Nylorun-Protocol` |
 
-Missing or unsupported protocol → `426` before authentication. Unknown,
-quarantined or rejected Tenant credentials → opaque `404` with identical body.
+Every route checks `Host` first (`421 host_rejected`), rejects any `Origin`
+(`403 origin_rejected`, no CORS headers), and rejects non-JSON bodies with
+`415 unsupported_media_type`. Missing or unsupported protocol → `426` before
+authentication. Unknown, quarantined or rejected Tenant credentials → opaque
+`404` with identical body.
 
 ## Embedding and tests
 
@@ -57,9 +71,10 @@ Tests and ephemeral embeds use `startEphemeralRuntime()` from
 `@nylorun/runtime/core`: private Host on port 0, temporary Host root, one Tenant,
 returns `{ url, tenantId, applicationKey, adminKey, close() }`.
 
-Register executors with `PUT /v1/executors` using the application principal.
-Model gateway and sandbox backend are Tenant configuration (vault / seed), not
-Host process env.
+Register executors with `PUT /v1/executors` using the application principal
+(application-mode `connectAgents` does this with derived tokens). Model gateway
+and sandbox backend are Tenant configuration (vault / seed), not Host process
+env.
 
 ## Session behaviour
 
@@ -76,14 +91,12 @@ together. Vault ciphertext needs that Tenant's own KEK.
 
 Agents that declare `.use(sandbox())` get Runtime-executed sandbox tools. The
 Tenant owns each sandbox; backend names are prefixed `nylorun-<tenant-id>-`.
-See [the sandbox design](../docs/design/sandboxes.md).
 
 ## Local Project workflow
 
-Install `@nylorun/cli`. `nylorun runtime up` starts the Host; `nylorun dev`
-creates or uses a Project link, seeds Tenant config, registers executors and
-opens Studio. Project credentials live in `.nylorun/credentials.json` (0600)
-with `link.json` — not beside an exclusive SQLite file for the whole Host.
+Install `@nylorun/cli` as a devDependency. `nylorun runtime up` starts the Host
+via the launcher; `nylorun dev` creates or uses a Project link and runs
+`src/main.ts` under `tsx watch`. Studio is `nylorun-studio` / `npm run studio`.
 
 ```sh
 eval "$(npx nylorun runtime status --env)"
@@ -92,17 +105,15 @@ eval "$(npx nylorun runtime status --env)"
 
 ## Troubleshooting
 
-| Symptom                        | What to do                                                                                                                                                          |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tenant `locked`                | Another process holds `.runtime-lock`. `nylorun tenant status` prints `repair` with `lockPid` / `lockPath` — stop that pid or remove a stale lock                   |
-| `kek-missing`                  | Restore the Tenant KEK beside the database; do not invent a new key if ciphertext exists                                                                            |
-| `corrupt`                      | Repair or restore the Tenant directory from backup (`nylorun tenant status` repair string)                                                                          |
-| `schema-too-new`               | Upgrade the Host: `nylorun runtime restart` from a newer CLI                                                                                                        |
-| `migration-failed`             | Restore the path under `.migration/…` named in `repair`, then `nylorun tenant status`                                                                               |
-| `envelope-invalid`             | Fix or replace `tenant.json` so its id matches the directory name                                                                                                   |
-| `open-timeout` / `open-failed` | Inspect locks, SQLite and Tenant logs; repair before the Host retries open                                                                                          |
-| `426 protocol_unsupported`     | Client protocol or features are outside the Host range. Upgrade the Host (`nylorun runtime restart`) or install a matching older `@nylorun/cli` / `@nylorun/agents` |
-| Port in use                    | Explicit `--port` fails closed (exit 4). First automatic Host setup may pick a free loopback port, persist it in `host.json`, and print the chosen URL              |
-| Logs                           | `nylorun runtime logs [--follow]` multiplexes `runtime.log` and each `tenants/*/logs/tenant.log`                                                                    |
+| Symptom | What to do |
+| --- | --- |
+| Tenant `locked` | Another process holds `.runtime-lock`. `nylorun tenant status` prints `repair` |
+| `kek-missing` | Restore the Tenant KEK beside the database |
+| `corrupt` / `migration-failed` / `envelope-invalid` | Follow `nylorun tenant status` repair string |
+| `schema-too-new` / `host_schema_newer` | Upgrade the Host build (`nylorun runtime restart`) |
+| `426 protocol_unsupported` | Upgrade clients or Host to a compatible set |
+| `421 host_rejected` / `403 origin_rejected` | Call from main process / Node; loopback Host only |
+| Port in use | Explicit `--port` fails closed. First setup may pick a free loopback port |
+| Logs | `nylorun runtime logs [--follow]` |
 
 Definitions have no `agent.run()`; applications use `@nylorun/agents`.

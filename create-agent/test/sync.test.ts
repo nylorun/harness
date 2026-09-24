@@ -10,7 +10,15 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, it } from "vitest";
 import { synchronize } from "../src/sync.js";
-const compatibility = { core: "5", cli: "6", harness: "1", agents: "4", runtime: "2", studio: "3" };
+const compatibility = {
+  core: "5",
+  cli: "6",
+  harness: "1",
+  agents: "4",
+  admin: "7",
+  runtime: "2",
+  studio: "3",
+};
 const options = { creatorVersion: "1" };
 const roots: string[] = [];
 async function root() {

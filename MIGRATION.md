@@ -1,3 +1,163 @@
+# Runtime Clients and Admin API (breaking beta)
+
+Vocabulary: [runtime/src/CONTEXT.md](./runtime/src/CONTEXT.md). Companion docs:
+[package architecture](docs/design/package-architecture.md),
+[responsibility boundaries](docs/responsibility-boundaries.md),
+[building a desktop client](docs/building-a-desktop-client.md).
+
+Every process that talks to a Runtime is a **client**. Two client packages
+cover the two surfaces: `@nylorun/agents` (Tenant API) and `@nylorun/admin`
+(Admin API). A local OSS Runtime is installed and started by the **launcher**
+(`nylorun-runtime`) inside a per-platform **Runtime build**. The CLI and
+desktop apps run that launcher as a process; nothing imports
+`@nylorun/runtime`.
+
+### Upgrade a generated application (steps 1–4)
+
+#### 1. Add `src/main.ts`; `serve` → `dev` / `start`
+
+Replace `nylorun serve` with one development entry (`nylorun dev`) and one
+production entry (`node dist/src/main.js`).
+
+Before (Tenants-era starter):
+
+```json
+{
+  "scripts": {
+    "dev": "nylorun dev",
+    "start": "nylorun serve"
+  },
+  "dependencies": {
+    "@nylorun/agents": "…",
+    "@nylorun/cli": "…"
+  }
+}
+```
+
+After:
+
+```ts
+// src/main.ts
+import { connectAgents } from "@nylorun/agents";
+import { agents } from "../agents/index.js";
+
+await connectAgents({ agents }).ready;
+```
+
+```json
+{
+  "scripts": {
+    "dev": "nylorun dev",
+    "build": "…unchanged…",
+    "start": "node dist/src/main.js",
+    "check": "tsc --noEmit"
+  }
+}
+```
+
+`connectAgents` in application mode saves definitions, registers executor
+credentials **derived** from the application key, and connects. The same entry
+runs under `nylorun dev` (with `tsx watch`) and in production (`npm start`).
+Stored executor tokens in `.nylorun/credentials.json` are ignored and dropped
+on the next write.
+
+#### 2. Studio is a separate package binary
+
+Move `@nylorun/cli` and `@nylorun/studio` to `devDependencies`. Point `studio`
+at Studio's own binary (`nylorun-studio`), not `nylorun studio`.
+
+Before:
+
+```json
+{
+  "dependencies": {
+    "@nylorun/agents": "…",
+    "@nylorun/cli": "…"
+  },
+  "devDependencies": {
+    "@nylorun/studio": "…"
+  },
+  "scripts": {
+    "studio": "nylorun studio"
+  }
+}
+```
+
+After:
+
+```json
+{
+  "dependencies": {
+    "@nylorun/agents": "…",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@nylorun/cli": "…",
+    "@nylorun/studio": "…",
+    "tsx": "…",
+    "typescript": "…"
+  },
+  "scripts": {
+    "studio": "nylorun-studio"
+  }
+}
+```
+
+Production `npm ls --omit=dev` must list only `@nylorun/agents` and
+`@nylorun/core` from Nylorun. Studio never depends on the CLI (or the reverse).
+
+#### 3. Deployments use three environment variables
+
+Do not ship executor tokens. Set the Tenant API trio; `createClient()` /
+`connectAgents({ agents })` resolve from options, then these variables, then
+the Project link.
+
+Before (executor tokens or Project-only credentials in production):
+
+```sh
+# ❌ do not ship derived or stored executor tokens
+export NYLORUN_EXECUTOR_KEY=…
+# or rely on a checked-in .nylorun/credentials.json executors map
+```
+
+After:
+
+```sh
+export NYLORUN_RUNTIME_URL=https://runtime.example
+export NYLORUN_TENANT=tn_…
+export NYLORUN_SERVER_KEY=…   # application key only
+node dist/src/main.js
+```
+
+#### 4. Removed commands; Admin package; launcher
+
+| Removed | Replacement |
+| --- | --- |
+| `nylorun serve` | `nylorun dev` (watch) / `node dist/src/main.js` (`npm start`) against a running Host |
+| `nylorun studio` | `nylorun-studio` (Studio's own binary) |
+| `--no-studio` on `dev` | Omit the `studio` script / `@nylorun/studio` if unused |
+| CLI depending on `@nylorun/runtime` | CLI runs the **launcher** inside a Runtime build |
+| In-process CLI Host install/lifecycle | `nylorun runtime …` → `nylorun-runtime` (bootstrap when no build is installed) |
+| Ad-hoc Host admin HTTP from the CLI | `@nylorun/admin` (`createAdmin`, `createTenant`, `status`, …) |
+
+Managing clients (CLI, desktop Runtime panel, CI) add `@nylorun/admin` for the
+Admin API. Developer applications do **not** depend on it — only
+`@nylorun/agents`. Local Host start/stop/upgrade goes through the launcher,
+never through an import of `@nylorun/runtime`.
+
+### Existing Host roots
+
+- A Host started by the Tenants-era CLI is reused while it runs.
+- Its next restart moves it onto a Runtime build.
+- `host.json` gains `format` and `runtimeVersion` on the first launcher write.
+- Project link and credentials accept format `0` (missing `format`) and write
+  format `1`.
+
+Upgrade `@nylorun/core`, `@nylorun/agents`, `@nylorun/admin`, `@nylorun/cli`,
+`@nylorun/studio` and Runtime builds (`@nylorun/runtime-<platform>-<arch>`)
+together (breaking beta set). Protocol feature `admin-status` is additive on
+protocol `2`.
+
 # Scoped hooks and manifest schema 4
 
 `beforeModelCall` and `afterModelCall` are replaced by two verbs with an explicit scope.
@@ -94,7 +254,13 @@ Never delete names that start with `nylorun-tn_`.
 
 # Package architecture beta migration
 
-The [design document](docs/design/package-architecture.md) defines the new structure.
+> **Superseded for dependency rules and application production trees:** the
+> [Runtime Clients section](#runtime-clients-and-admin-api-breaking-beta) and
+> [package architecture](docs/design/package-architecture.md) require
+> production apps to depend on `@nylorun/agents` only (CLI/Studio are
+> `devDependencies`). Keep this section for the earlier define/contracts move.
+
+The [design document](docs/design/package-architecture.md) defines the structure.
 Cloud upgrades published packages from npm independently. Upgrade the tested
 package combination in `create-agent/compatibility.json`.
 
@@ -104,17 +270,18 @@ package combination in `create-agent/compatibility.json`.
 | `@nylorun/harness/contracts`                         | `@nylorun/core/contracts`                                                        |
 | Harness hash/protocol metadata                       | `@nylorun/core/compatibility`                                                    |
 | Harness checkpoint compatibility                     | `@nylorun/harness/compatibility`                                                 |
-| Runtime-owned `nylorun`                              | Install `@nylorun/cli`; commands are unchanged                                   |
+| Runtime-owned `nylorun`                              | Install `@nylorun/cli` as a **devDependency**; see Runtime Clients steps 1–4     |
 
 SDK root imports remain supported. Studio imports `agents/client`. Runtime has no
 SDK dependency. SDK has no engine dependency. Bindings use `getBinding()` rather
 than shared module object identity; only manifests serialize. The package split
 does not change wire formats, canonical manifest hashes, or stored checkpoints.
 
-Generated applications use agents and CLI in production dependencies; Studio is
-optional development tooling. Custom runtime host code keeps a direct runtime
-and core dependency. Do not copy private compiled definition objects: use
-`bindingFromAgent()` from `harness/run` for explicit execution.
+Generated applications keep `@nylorun/agents` (and transitive `@nylorun/core`)
+in production dependencies; CLI and Studio are development tooling. Custom
+runtime host code keeps a direct runtime and core dependency. Do not copy
+private compiled definition objects: use `bindingFromAgent()` from `harness/run`
+for explicit execution.
 
 No npm release or deployment is performed by this migration.
 
@@ -122,14 +289,20 @@ No npm release or deployment is performed by this migration.
 
 # Local Runtime beta migration
 
+> **Superseded for application scripts and Studio:** the [Runtime Clients
+> section](#runtime-clients-and-admin-api-breaking-beta) replaces `nylorun
+> serve` / `nylorun studio` with `npm start` (`node dist/src/main.js`) and
+> `nylorun-studio`. Keep the rest of this section only for historical
+> session-first / Tenants-era upgrades that already applied it.
+
 Upgrade the harness, SDK, Runtime, Studio, and creator as the tested compatible set in `create-agent/compatibility.json`. This migration changes public entry points and the session protocol.
 
 1. Import `Agent` and `tool` from `@nylorun/agents`. Export `agents` from `agents/index.ts`. Keep model selection in Runtime configuration.
 2. Remove the starter's Hono application and old `Runtime` / `serveAgents` / `openSession` imports. Definitions no longer expose `agent.run()`.
-3. `nylorun start` is removed. Use `nylorun serve [entry]` to run the compiled build (same `dist/agents/index.js` default) and change `scripts.start` to `nylorun serve`. The Runtime Host is now its own persistent process: `nylorun runtime up` starts it, `nylorun runtime down` stops it, `nylorun runtime status` reports it, and `dev`/`serve` start it for you and leave it running. Runtime defaults to loopback port 8787; the Host root is `NYLORUN_HOME` / `~/.nylorun` and the Project keeps only a link under `.nylorun/`.
+3. `nylorun start` was removed in favor of `nylorun serve [entry]` for the compiled build. **That `serve` command is itself removed** in Runtime Clients — use `node dist/src/main.js` / `nylorun dev` (see steps 1–4 above). The Runtime Host remains its own persistent process: `nylorun runtime up` / `down` / `status`, with Host root `NYLORUN_HOME` / `~/.nylorun` and a Project link under `.nylorun/`.
 4. Update custom applications to SDK `createClient` and session commands with stable idempotency keys. Trusted servers supply `ownerUserId`; input text uses `content`. Pass `tenant` (see Runtime Tenants section above).
-5. Custom connected executors use `connectAgents({ agents, runtime: { url, key, tenant } })`. Supply executor credentials, separate from application credentials. The local CLI provisions these automatically.
-6. Studio now uses canonical history and authenticated SSE through its local proxy. Attach with `nylorun studio`, which resolves the Project link; `--runtime-url` still overrides the Host URL. Remove AG-UI and legacy manifest endpoint configuration.
+5. Custom connected executors use `connectAgents({ agents, runtime: { url, key, tenant } })`. Prefer application-mode `connectAgents({ agents })` with derived tokens (Runtime Clients). The local CLI no longer writes executor tokens into Project credentials.
+6. Studio uses canonical history and authenticated SSE through its local proxy. Attach with `nylorun-studio` (not `nylorun studio`); it resolves the Project link. Remove AG-UI and legacy manifest endpoint configuration.
 
 Keep credentials in gitignored `.nylorun/`; provider configuration uses `.env` only as a one-time seed into the Tenant vault. Keep backups of old SessionRecord/event files. They are not automatically converted to new SQLite checkpoints. Session export/import and migration tooling are deferred. Start new sessions after changing definitions or implementations. Because the Host now outlives `dev`, a source change re-registers agents and reconnects executors rather than restarting the Host.
 

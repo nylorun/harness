@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn, fork } from "node:child_process";
 import {
+  access,
+  chmod,
   cp,
   mkdir,
   mkdtemp,
@@ -18,7 +20,7 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir, homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { root, npm, run, readJson } from "../lib/repo.mjs";
 import { availablePort } from "../lib/development.mjs";
@@ -141,10 +143,14 @@ async function writeHostFiles(hostRoot, { port = 0 } = {}) {
     join(hostRoot, "host.json"),
     JSON.stringify({ hostId, host: "127.0.0.1", port }, null, 2),
   );
+  const credentialsPath = join(hostRoot, "host-credentials.json");
   await writeFile(
-    join(hostRoot, "host-credentials.json"),
+    credentialsPath,
     JSON.stringify({ adminKey }, null, 2),
+    { mode: 0o600 },
   );
+  // umask can clear writeFile mode bits; enforce Admin API 0600 check.
+  await chmod(credentialsPath, 0o600);
   return { hostId, adminKey };
 }
 
@@ -370,6 +376,7 @@ try {
     "core",
     "harness",
     "agents",
+    "admin",
     "runtime",
     "cli",
   ]);
@@ -736,7 +743,7 @@ try {
 
     // Compatible CLI: different package version, same protocol.
     const okCli = join(temporary, "cli-ok");
-    await installConsumer(okCli, packed, ["core", "agents", "runtime", "cli"]);
+    await installConsumer(okCli, packed, ["core", "agents", "admin", "runtime", "cli"]);
     const okPkg = join(okCli, "node_modules/@nylorun/cli/package.json");
     const okManifest = await readJson(okPkg);
     okManifest.version = "9.9.9-acceptance";
@@ -759,7 +766,7 @@ try {
 
     // Outside-range CLI: patch PROTOCOL_VERSION and refuse before mutation.
     const badCli = join(temporary, "cli-bad");
-    await installConsumer(badCli, packed, ["core", "agents", "runtime", "cli"]);
+    await installConsumer(badCli, packed, ["core", "agents", "admin", "runtime", "cli"]);
     const badCore = join(
       badCli,
       "node_modules/@nylorun/core/dist/compatibility.js",
@@ -818,100 +825,117 @@ try {
     );
   }
 
-  // ── H7: concurrent runtime up / offline start / failed install ──
+  // ── H7: concurrent launcher install --from; offline Host; failed version ──
   {
+    const { localRuntimeBuild, materializeNodeBinary } = await import(
+      "../lib/local-build.mjs"
+    );
     const hostRoot = join(temporary, "host-h7");
     await writeHostFiles(hostRoot, { port: await availablePort() });
-    const consumer = join(temporary, "cli-h7");
-    await installConsumer(consumer, packed, [
-      "core",
-      "agents",
-      "runtime",
-      "cli",
-      "harness",
-    ]);
-    const installUrl = pathToFileURL(
-      join(consumer, "node_modules/@nylorun/cli/dist/host/install.js"),
-    ).href;
-    const rootUrl = pathToFileURL(
-      join(consumer, "node_modules/@nylorun/cli/dist/host/root.js"),
-    ).href;
-    const { ensureInstalled, verifyInstalled } = await import(installUrl);
-    const { hostPaths, ensureHostLayout } = await import(rootUrl);
-    const paths = hostPaths(hostRoot);
-    await ensureHostLayout(paths);
-
-    let installs = 0;
-    const installer = async ({ stagingDir, version }) => {
-      installs += 1;
-      await new Promise((r) => setTimeout(r, 80));
-      await mkdir(stagingDir, { recursive: true });
-      await writeFile(
-        join(stagingDir, "package.json"),
-        JSON.stringify({ private: true }),
-      );
-      await npm(
-        [
-          "install",
-          "--omit=dev",
-          "--ignore-scripts",
-          "--no-audit",
-          "--no-fund",
-          packed.core,
-          packed.harness,
-          packed.runtime,
-        ],
-        { cwd: stagingDir, capture: true },
-      );
-      const pkgPath = join(
-        stagingDir,
-        "node_modules/@nylorun/runtime/package.json",
-      );
-      const pkg = await readJson(pkgPath);
-      pkg.version = version;
-      await writeFile(pkgPath, JSON.stringify(pkg, null, 2));
-    };
-
-    const version = runtimeVersion;
-    const [a, b] = await Promise.all([
-      ensureInstalled(paths, { version, installer, pollMs: 20 }),
-      ensureInstalled(paths, { version, installer, pollMs: 20 }),
-    ]);
-    assert.equal(installs, 1);
-    assert.equal(a.versionDir, b.versionDir);
-    verifyInstalled(a.versionDir, version);
-
-    // Verified install starts with npm_config_offline=true.
-    const child = spawnHost(a.entry, hostRoot, {
-      npm_config_offline: "true",
+    assertNotRealHome(hostRoot);
+    const built = await localRuntimeBuild({
+      out: join(root, ".tmp/runtime-builds"),
+      repo: root,
     });
-    live.push(() => stopChild(child));
-    const ready = await awaitHostReady(child);
-    await waitReady(ready.url);
-    assert.equal(
-      (await fetch(`${ready.url}/health`)).status,
-      200,
+    await materializeNodeBinary(built.dir);
+    const launcher =
+      process.platform === "win32"
+        ? join(built.dir, "bin", "nylorun-runtime.cmd")
+        : join(built.dir, "bin", "nylorun-runtime");
+    const runLauncher = async (args) => {
+      // Prefer build node + launcher entry on Windows so .cmd spawn does not
+      // hit EINVAL / shell-mangled NDJSON (same approach as desktop contract).
+      let command = launcher;
+      let argv = ["--home", hostRoot, "--json", ...args];
+      if (process.platform === "win32") {
+        const buildRoot = resolve(dirname(launcher), "..");
+        const nodeExe = join(buildRoot, "node", "bin", "node.exe");
+        const entry = join(
+          buildRoot,
+          "lib",
+          "node_modules",
+          "@nylorun",
+          "runtime",
+          "dist",
+          "launcher",
+          "main.js",
+        );
+        try {
+          await access(nodeExe);
+          await access(entry);
+          command = nodeExe;
+          argv = [entry, ...argv];
+        } catch {
+          command = process.env.ComSpec ?? "cmd.exe";
+          argv = [
+            "/d",
+            "/s",
+            "/c",
+            `"${launcher}" --home "${hostRoot}" --json ${args.map((a) => `"${a}"`).join(" ")}`,
+          ];
+        }
+      }
+      return new Promise((resolvePromise, reject) => {
+        const child = spawn(command, argv, {
+          env: { ...process.env, NYLORUN_HOME: hostRoot },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.on("data", (c) => {
+          stdout += c.toString("utf8");
+        });
+        child.stderr?.on("data", (c) => {
+          stderr += c.toString("utf8");
+        });
+        child.once("error", reject);
+        child.once("exit", (code) =>
+          resolvePromise({ code: code ?? 1, stdout, stderr }),
+        );
+      });
+    };
+    const [a, b] = await Promise.all([
+      runLauncher(["install", runtimeVersion, "--from", built.dir]),
+      runLauncher(["install", runtimeVersion, "--from", built.dir]),
+    ]);
+    assert.equal(a.code, 0, a.stderr || a.stdout);
+    assert.equal(b.code, 0, b.stderr || b.stdout);
+    const installed = await readdir(join(hostRoot, "runtime"));
+    assert.ok(
+      installed.includes(runtimeVersion),
+      `expected ${runtimeVersion} under runtime/, got ${installed.join(",")}`,
     );
 
-    // Unavailable version leaves the running Host and verified install untouched.
-    await assert.rejects(
-      () =>
-        ensureInstalled(paths, {
-          version: "0.0.0-does-not-exist",
-          installer: async () => {
-            throw new Error("registry unavailable");
-          },
-        }),
-      /registry unavailable|failed|CliError|install/,
-    );
-    assert.ok(
-      (await readdir(join(hostRoot, "runtime"))).includes(version),
-    );
-    assert.equal((await fetch(`${ready.url}/ready`)).status, 200);
-    await stopChild(child);
+    const up = await runLauncher(["up", "--version", runtimeVersion]);
+    assert.equal(up.code, 0, up.stderr || up.stdout);
+    const upEvent = up.stdout
+      .split(/\r?\n/)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return undefined;
+        }
+      })
+      .find((event) => event?.type === "result");
+    assert.ok(upEvent?.url, up.stdout);
+    await waitReady(upEvent.url);
+    assert.equal((await fetch(`${upEvent.url}/health`)).status, 200);
+
+    const failed = await runLauncher([
+      "install",
+      "0.0.0-does-not-exist",
+      "--from",
+      join(temporary, "missing-build"),
+    ]);
+    assert.notEqual(failed.code, 0);
+    assert.ok((await readdir(join(hostRoot, "runtime"))).includes(runtimeVersion));
+    assert.equal((await fetch(`${upEvent.url}/ready`)).status, 200);
+    await runLauncher(["down", "--force"]);
     pass(
       "H7",
-      "concurrent install once; verified install starts offline; failed version leaves Host untouched",
+      "concurrent install --from; Host starts; failed version leaves Host untouched",
     );
   }
 
@@ -923,6 +947,7 @@ try {
     await installConsumer(project, packed, [
       "core",
       "agents",
+      "admin",
       "runtime",
       "cli",
       "harness",
@@ -1051,28 +1076,103 @@ try {
 
   // ── H2: concurrent Projects through one port; stop one leaves Host + other ──
   {
+    const { localRuntimeBuild, materializeNodeBinary } = await import(
+      "../lib/local-build.mjs"
+    );
     const hostRoot = join(temporary, "host-h2");
     const home = join(temporary, "home-h2");
     await mkdir(home);
     const port = await availablePort();
     const { hostId, adminKey } = await writeHostFiles(hostRoot, { port });
-    const versionDir = await installRuntimeTree(
-      hostRoot,
-      packed,
+    assertNotRealHome(hostRoot);
+
+    // `nylorun`dev` attach always launcher-ups; install a real Runtime build
+    // under NYLORUN_HOME so attach does not hit the public registry (404).
+    const built = await localRuntimeBuild({
+      out: join(root, ".tmp/runtime-builds"),
+      repo: root,
+    });
+    await materializeNodeBinary(built.dir);
+    const launcherBin =
+      process.platform === "win32"
+        ? join(built.dir, "bin", "nylorun-runtime.cmd")
+        : join(built.dir, "bin", "nylorun-runtime");
+    const runLauncher = async (args) => {
+      let command = launcherBin;
+      let argv = ["--home", hostRoot, "--json", ...args];
+      if (process.platform === "win32") {
+        const buildRoot = resolve(dirname(launcherBin), "..");
+        const nodeExe = join(buildRoot, "node", "bin", "node.exe");
+        const entry = join(
+          buildRoot,
+          "lib",
+          "node_modules",
+          "@nylorun",
+          "runtime",
+          "dist",
+          "launcher",
+          "main.js",
+        );
+        try {
+          await access(nodeExe);
+          await access(entry);
+          command = nodeExe;
+          argv = [entry, ...argv];
+        } catch {
+          command = process.env.ComSpec ?? "cmd.exe";
+          argv = [
+            "/d",
+            "/s",
+            "/c",
+            `"${launcherBin}" --home "${hostRoot}" --json ${args.map((a) => `"${a}"`).join(" ")}`,
+          ];
+        }
+      }
+      return new Promise((resolvePromise, reject) => {
+        const child = spawn(command, argv, {
+          env: { ...process.env, NYLORUN_HOME: hostRoot },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.on("data", (c) => {
+          stdout += c.toString("utf8");
+        });
+        child.stderr?.on("data", (c) => {
+          stderr += c.toString("utf8");
+        });
+        child.once("error", reject);
+        child.once("exit", (code) =>
+          resolvePromise({ code: code ?? 1, stdout, stderr }),
+        );
+      });
+    };
+
+    const installed = await runLauncher([
+      "install",
       runtimeVersion,
-    );
-    const require = createRequire(join(versionDir, "package.json"));
-    const entry = require.resolve("@nylorun/runtime/server");
-    // Start Host first so both Projects attach to the shared Host.
-    const hostChild = spawnHost(entry, hostRoot);
-    live.push(() => stopChild(hostChild));
-    const ready = await awaitHostReady(hostChild);
-    assert.ok(ready.url.includes(String(port)) || port > 0);
+      "--from",
+      built.dir,
+    ]);
+    assert.equal(installed.code, 0, installed.stderr || installed.stdout);
+    const up = await runLauncher([
+      "up",
+      "--version",
+      runtimeVersion,
+      "--port",
+      String(port),
+    ]);
+    assert.equal(up.code, 0, up.stderr || up.stdout);
     await waitReady(`http://127.0.0.1:${port}`);
+    live.push(async () => {
+      await runLauncher(["down", "--force"]);
+    });
 
     const makeProject = async (name) => {
       const project = join(temporary, `project-${name}`);
       await mkdir(join(project, "agents"), { recursive: true });
+      await mkdir(join(project, "src"), { recursive: true });
       await writeFile(
         join(project, "package.json"),
         JSON.stringify({
@@ -1081,10 +1181,10 @@ try {
           private: true,
           dependencies: {
             "@nylorun/agents": `file:${packed.agents}`,
+            "@nylorun/admin": `file:${packed.admin}`,
             "@nylorun/cli": `file:${packed.cli}`,
             "@nylorun/core": `file:${packed.core}`,
             "@nylorun/harness": `file:${packed.harness}`,
-            "@nylorun/runtime": `file:${packed.runtime}`,
             tsx: "^4.20.0",
           },
         }),
@@ -1094,6 +1194,16 @@ try {
         `
 import { Agent } from "@nylorun/agents";
 export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
+`,
+      );
+      await writeFile(
+        join(project, "src/main.ts"),
+        `
+import { connectAgents } from "@nylorun/agents";
+import { agents } from "../agents/index.ts";
+const connection = connectAgents({ agents });
+await connection.ready;
+console.log("Ready 1 connected agent");
 `,
       );
       await npm(["install", "--ignore-scripts", "--no-audit", "--no-fund"], {
@@ -1139,12 +1249,7 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
     const startDev = (project) => {
       const child = spawn(
         process.execPath,
-        [
-          join(project, "node_modules/@nylorun/cli/dist/cli.js"),
-          "dev",
-          "--no-studio",
-          "--no-autostart",
-        ],
+        [join(project, "node_modules/@nylorun/cli/dist/cli.js"), "dev"],
         {
           cwd: project,
           env: {
@@ -1152,7 +1257,6 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
             NYLORUN_HOME: hostRoot,
             HOME: home,
             USERPROFILE: home,
-            PORT: String(port),
             NYLORUN_DEV_MODEL: "fixture",
           },
           stdio: ["ignore", "pipe", "pipe"],
@@ -1162,7 +1266,7 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
     };
 
     const waitReadyLine = (child, timeoutMs = 60_000) =>
-      new Promise((resolve, reject) => {
+      new Promise((resolvePromise, reject) => {
         let buffer = "";
         const timer = setTimeout(
           () =>
@@ -1175,9 +1279,12 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
         );
         const onData = (chunk) => {
           buffer += chunk.toString("utf8");
-          if (/Ready\s+\d+ connected agent/i.test(buffer)) {
+          if (
+            /Ready\s+\d+ connected agent/i.test(buffer) ||
+            /Ctrl-C stops this Project only/i.test(buffer)
+          ) {
             cleanup();
-            resolve(buffer);
+            resolvePromise(buffer);
           }
         };
         const cleanup = () => {
@@ -1239,7 +1346,6 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
       200,
     );
     await stopChild(devB);
-    await stopChild(hostChild);
     pass(
       "H2",
       "concurrent Projects share one Host port; stopping one leaves Host and the other Tenant",

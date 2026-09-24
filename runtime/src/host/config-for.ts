@@ -17,6 +17,8 @@ export function configForFactory(options: {
   /** Allowlisted baseline from `baselineEnvironment` (built in `host/main.ts`). */
   baseline: Readonly<Record<string, string>>;
   mode?: TenantConfig["mode"];
+  /** Override model; default vault. Fixture/scripted require ephemeral/test mode. */
+  model?: TenantConfig["model"];
 }): (id: string) => TenantConfig {
   const { baseline } = options;
   return (id: string): TenantConfig => {
@@ -40,7 +42,7 @@ export function configForFactory(options: {
       mode: options.mode ?? "shared",
       paths: tenant,
       sandbox: { backend: sandboxBackend },
-      model: { kind: "vault" },
+      model: options.model ?? { kind: "vault" },
       childEnv: tenantChildEnvironment(
         baseline,
         options.hostConfig,
