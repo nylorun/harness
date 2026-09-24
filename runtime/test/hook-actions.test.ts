@@ -87,7 +87,9 @@ async function claim(url: string, actionId: string, requestId: string) {
 }
 
 it("sends one hook action per point and re-delivers it when a lease expires", async () => {
-  const runtime = await start(150);
+  // 150ms is enough locally but flakes under CI load (consumers 24.15.0): the
+  // second claim's lease can expire before action_result is posted.
+  const runtime = await start(2_000);
   try {
     await openTurn(runtime.url);
     const [action, ...rest] = await pendingActions(runtime.url);
@@ -117,7 +119,10 @@ it("sends one hook action per point and re-delivers it when a lease expires", as
         outcome: { value: { results: { one: {}, two: {} } } },
       }),
     });
-    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      const body = await result.text();
+      expect.fail(`action_result ${result.status}: ${body.slice(0, 500)}`);
+    }
 
     let types: string[] = [];
     for (let attempt = 0; attempt < 150 && !types.includes("turn.completed"); attempt += 1) {

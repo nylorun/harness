@@ -31,8 +31,9 @@ jobs:
       # Worker deployment belongs to the deferred hosting profile.
       - run: npx playwright-core install --with-deps chromium
       - name: Smoke starter
-        # Healthy smoke is ~2 min; 3459c18 wedged here >20m with BlobNotFound logs.
-        timeout-minutes: 12
+        # Healthy smoke is ~2–4 min; in-process deadline is 15m. Keep Actions
+        # above that so the script can report its own abort reason.
+        timeout-minutes: 18
         run: node create-agent/scripts/smoke-starter.mjs
       - name: Test dev
         timeout-minutes: 10

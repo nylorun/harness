@@ -29,7 +29,8 @@ import { startLocalRegistry } from "../../scripts/lib/local-registry.mjs";
 
 // Hard wall-clock bound so a wedged CI runner/step cannot sit forever when
 // Actions log upload already stalled (BlobNotFound while status=in_progress).
-const SMOKE_DEADLINE_MS = Number(process.env.NYLORUN_SMOKE_DEADLINE_MS ?? 8 * 60_000);
+// Healthy smoke is ~2–4 min; allow headroom for slow runtime tarball extracts.
+const SMOKE_DEADLINE_MS = Number(process.env.NYLORUN_SMOKE_DEADLINE_MS ?? 15 * 60_000);
 const smokeDeadline = setTimeout(() => {
   console.error(
     `smoke-starter exceeded ${SMOKE_DEADLINE_MS}ms wall clock; aborting.`,
@@ -409,28 +410,39 @@ try {
   await headless.line(readyLine, 90_000);
   await headless.stop();
 
+  // Fresh Project link for the unconfigured-model case — do not reuse the
+  // headless Host URL (detached Host may still be draining; fetch would hang).
+  await rm(join(projects[1], ".nylorun"), { recursive: true, force: true }).catch(
+    () => {},
+  );
   const missingPort = await availablePort();
   const missingHome = await mkdtemp(join(tmpdir(), "nylorun-release-missing-"));
+  const missingEnv = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    NYLORUN_HOME: missingHome,
+    NYLORUN_REGISTRY: registry.url,
+    PORT: String(missingPort),
+  };
+  // No fixture and no MODEL_* — vault model stays unconfigured.
+  delete missingEnv.NYLORUN_DEV_MODEL;
   const missing = group.start(
     "missing-config",
     process.execPath,
     [headlessCli, "dev", "--ephemeral"],
     {
       cwd: projects[1],
-      env: {
-        ...process.env,
-        HOME: home,
-        USERPROFILE: home,
-        NYLORUN_HOME: missingHome,
-        NYLORUN_REGISTRY: registry.url,
-        PORT: String(missingPort),
-        // No fixture and no MODEL_* — vault model stays unconfigured.
-        NYLORUN_DEV_MODEL: "",
-      },
+      env: missingEnv,
     },
   );
   await missing.line(readyLine, 90_000);
   const missingAuth = await readAuth(projects[1]);
+  assert.match(
+    missingAuth.link.hostUrl,
+    /^https?:\/\//,
+    "missing-config must write a Host link",
+  );
   const modelStatus = await fetch(
     `${missingAuth.link.hostUrl}/v1/tenant/model`,
     {
@@ -439,9 +451,14 @@ try {
         "Nylorun-Tenant": missingAuth.link.tenantId,
         "Nylorun-Protocol": "2",
       },
+      signal: AbortSignal.timeout(15_000),
     },
   );
-  assert.equal(modelStatus.status, 200);
+  assert.equal(
+    modelStatus.status,
+    200,
+    `model status ${modelStatus.status}: ${(await modelStatus.text()).slice(0, 500)}`,
+  );
   const modelBody = await modelStatus.json();
   assert.equal(
     modelBody.configured,
