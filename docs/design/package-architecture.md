@@ -1,140 +1,158 @@
 # Package architecture
 
-Status: adopted for the clean beta package migration. Cloud migration is a separate operation.
+Status: adopted for Runtime Clients and Admin API (version 1). Builds on the
+clean beta package migration. Cloud migration remains a separate operation.
 
 ## Intent
 
-The SDK and both execution hosts share definitions and contracts without the SDK
-installing the execution engine. OSS and Cloud implement the same host interface;
-local development orchestration belongs to the CLI, not to either host.
+Every process that talks to a Runtime is a **client**. Two client packages
+cover the two surfaces OSS and Cloud share. A local OSS Runtime is installed
+and started by a **launcher** inside a per-platform **Runtime build** — a
+process, not a package dependency.
 
-Previously, harness combined authoring, contracts and execution, while runtime
-combined the OSS host and the local launcher. The SDK therefore depended on
-harness, and runtime depended on the SDK. The target separates these concerns.
+| Package | Owns |
+| --- | --- |
+| `@nylorun/core` | Definitions, manifests, protocol, error codes, Admin / Project-link / build-manifest schemas |
+| `@nylorun/harness` | Loop execution, checkpoints, effects |
+| `@nylorun/agents` | Tenant API client, authoring facade, executor, connection resolution |
+| `@nylorun/admin` | Admin API client, safe Tenant creation, local Host connection |
+| `@nylorun/runtime` | OSS Host + Tenant Runtimes; launcher source (not exported) |
+| `@nylorun/cli` | Dev commands, Project links, bootstrap, running the application under a watcher |
+| `@nylorun/studio` | Dashboard and trusted local proxy (`nylorun-studio`) |
+| `@nylorun/create-agent` | Scaffolding and tested pins |
+| `@nylorun/runtime-<platform>-<arch>` | Per-platform Runtime build (Node + runtime + launcher) |
 
-| Package                 | Owns                                                                                   |
-| ----------------------- | -------------------------------------------------------------------------------------- |
-| `@nylorun/core`         | Definitions, manifests, canonical hashing, protocol schemas and shared interface types |
-| `@nylorun/harness`      | Loop execution, checkpoints, execution planning and effects                            |
-| `@nylorun/agents`       | Authoring facade, HTTP/SSE client and customer tool/hook executor                      |
-| `@nylorun/runtime`      | OSS HTTP host, SQLite, scheduling, credentials and model providers                     |
-| `@nylorun/cli`          | Configuration prompts, project loading, supervision, registration and local startup    |
-| `@nylorun/studio`       | Dashboard and trusted local proxy                                                      |
-| `@nylorun/create-agent` | Scaffolding and compatible dependency selection                                        |
+## Packages, surfaces and hosts
 
-## Package dependencies
-
-Solid arrows mean package dependencies. Studio is optionally loaded by the CLI
-from the developer project. External provider and UI dependencies are omitted.
+Solid arrows are package dependencies. Dotted arrows mean "uses" or "is served
+by". There are no arrows between clients. To use a local OSS Runtime, the CLI
+and desktop apps also run the launcher inside its build. That is a process, not
+a dependency.
 
 ```mermaid
-flowchart TD
-    APP[Developer application] --> SDK[agents]
-    STUDIO[studio] --> SDK
-    CLI[cli] --> SDK
-    CLI --> OSS[runtime]
-    CLI -. optional .-> STUDIO
-    OSS --> ENGINE[harness]
-    CLOUD[Cloud: separate repository] --> ENGINE
-    OSS --> CORE[core]
-    CLOUD --> CORE
-    ENGINE --> CORE
-    SDK --> CORE
+flowchart TB
+  subgraph clients["Clients: every process that talks to a Runtime"]
+    direction LR
+    APP["Developer application<br/>agents, tools, hooks<br/><b>@nylorun/agents only</b>"]
+    STUDIO["@nylorun/studio<br/>dev tool · dashboard<br/>trusted proxy"]
+    CLI["@nylorun/cli<br/>dev tool · dev · tenant<br/>configure · runtime"]
+    DESK["Babai desktop app<br/>own agents + Runtime panel"]
+    EXT["IDE · CI<br/><i>outside this repository</i>"]
+  end
+
+  subgraph packages["Client packages"]
+    direction LR
+    AGENTS["@nylorun/agents<br/>Tenant API client · executor<br/>connection: options, env, Project link"]
+    ADMIN["@nylorun/admin<br/>Admin API client · createTenant<br/>connection: options, env, local Host"]
+  end
+
+  subgraph surfaces["Surfaces · identical on OSS and Cloud"]
+    direction LR
+    TAPI["<b>Tenant API</b><br/>agents · sessions · events · executors<br/>vaults · Tenant settings and status"]
+    AAPI["<b>Admin API</b><br/>/v1/admin/tenants · /v1/admin/status"]
+  end
+
+  subgraph hosts["Hosts"]
+    direction LR
+    RT["OSS Runtime build · local<br/>Runtime Host + Tenant Runtimes<br/>nylorun-runtime launcher · Node"]
+    CLOUD["Cloud host<br/><i>separate repository</i>"]
+  end
+
+  subgraph foundation["Foundation"]
+    direction LR
+    HARNESS["@nylorun/harness<br/>agent loop · checkpoints · effects"]
+    CORE["@nylorun/core<br/>contracts · protocol · error codes<br/>Admin, Project-link and build schemas"]
+  end
+
+  APP --> AGENTS
+  STUDIO --> AGENTS
+  CLI --> AGENTS
+  CLI --> ADMIN
+  DESK --> AGENTS
+  DESK --> ADMIN
+  EXT --> AGENTS
+  EXT --> ADMIN
+
+  AGENTS -.-> TAPI
+  ADMIN -.-> AAPI
+  TAPI -.-> RT
+  TAPI -.-> CLOUD
+  AAPI -.-> RT
+  AAPI -.-> CLOUD
+
+  AGENTS --> CORE
+  ADMIN --> CORE
+  RT --> HARNESS
+  RT --> CORE
+  CLOUD --> HARNESS
+  CLOUD --> CORE
+  HARNESS --> CORE
 ```
 
-Core has no Nylorun package dependencies. The SDK depends on neither host nor
-engine. Neither host depends on the SDK. Engine internals never appear in core's
-emitted declarations. Studio uses `agents/client`, not the executor.
+`@nylorun/create-agent` generates a developer application and talks to no
+Runtime, so it isn't shown.
+
+## Dependency rules
+
+- `core` has no Nylorun dependencies.
+- **Client packages** (`agents`, `admin`) depend on `core` only and not on each
+  other.
+- **Clients** depend only on client packages. No client depends on another
+  client, on `runtime` or on `harness`.
+- **Hosts** depend on `harness` and `core`, never on a client package.
+- **The launcher is part of the Runtime build.** Its source lives in
+  `@nylorun/runtime`, which does not export it. Clients run it as a process.
+- A developer application's production dependency tree contains
+  `@nylorun/agents` and `@nylorun/core` and no other Nylorun package.
 
 ## Process communication
 
 ```mermaid
 flowchart LR
-    APP[Application backend] --> CLIENT[agents/client]
-    UI[Studio browser] --> SC[agents/client]
-    SC --> PROXY[Trusted Studio proxy]
-    CLIENT <-->|HTTP / SSE| HOST[OSS or Cloud host]
-    PROXY <-->|Authenticated HTTP / SSE| HOST
-    EXEC[Customer process: agents/executor] <-->|Actions / results| HOST
-    HOST --> ENGINE[Harness loop]
-    HOST --> STORAGE[Storage and providers]
+  APP[Application] --> AGENTS[agents]
+  UI[Studio browser] --> PROXY[Trusted Studio proxy]
+  PROXY --> AGENTS
+  CLI[cli] --> AGENTS
+  CLI --> ADMIN[admin]
+  CLI -->|"spawn"| LAUNCH[nylorun-runtime]
+  DESK[Desktop main process] --> AGENTS
+  DESK --> ADMIN
+  DESK -->|"spawn"| LAUNCH
+  AGENTS <-->|Tenant API HTTP/SSE| HOST[OSS or Cloud]
+  ADMIN <-->|Admin API HTTP| HOST
+  LAUNCH -->|"start / stop"| HOST
 ```
-
-The runtime advances the loop and issues actions. Customer code executes tools
-and hooks after a scoped claim and returns outcomes. Runtime credentials remain
-in Studio's trusted proxy, not its browser bundle. The CLI starts the local host
-in a child process and connects local customer executors; Cloud deployment does
-not need that launcher.
 
 ## Interfaces and ownership
 
-- Core exposes `/define`, `/contracts`, and `/compatibility`; its root contains
-  shared contracts and types. Definitions keep `Agent`, `tool`, schema validation
-  and authoring semantics. Protocol/definition versions and manifest hashing
-  belong to core.
-- Built agents expose a non-enumerable `getBinding()` returning the manifest,
-  ordered declarations, immutable executable tool snapshots, local implementations and live output schema. `toJSON()`
-  remains manifest-only. Bindings contain local functions and are not a wire
-  format. No shared WeakMap identity is required across installed package copies.
-- Harness compiles bindings into private execution representations. `/run`,
-  `/model/adapters`, and `/compatibility` remain execution entry points. Checkpoint
-  compatibility and engine version remain harness responsibilities.
-- Agents exposes `/define`, `/client`, and `/executor`, plus convenient root
-  exports. The client owns discovery, sessions, commands and event streaming.
-- Runtime exposes `/core`, `/node`, `/configuration`, and `/server`. The server
-  export is an executable process entry point using the existing environment and
-  readiness IPC contract. Reusable provider configuration remains in runtime;
-  interactive prompting and project environment loading belong to CLI.
-- CLI owns the `nylorun` binary with unchanged `configure`, `dev`, `start`, and
-  `studio` commands. Studio remains optional. Generated applications install CLI
-  as a production dependency because their `start` command uses it.
+- **core** — `/define`, `/contracts`, `/compatibility`; Admin, Project-link and
+  build-manifest schemas; closed `ERROR_CODES`; id generators.
+- **agents** — `/define`, `/client`, `/executor`; `resolveConnection`,
+  application and executor modes of `connectAgents`, derived executor tokens.
+- **admin** — `createAdmin`, `createTenant`, Tenant list/get/delete, `status`.
+- **runtime** — `/core`, `/node`, `/server` (Host entry). Launcher compiles to
+  `dist/launcher/main.js` and ships only inside Runtime builds.
+- **cli** — `nylorun` binary: `dev`, `runtime`, `tenant`, `configure`, `doctor`.
+  No `@nylorun/runtime` dependency; no `serve` or `studio` commands.
+- **studio** — `nylorun-studio` binary and `startStudio()`; depends on `agents`
+  only among Nylorun packages.
 
 ## Migration
 
-This is a clean beta migration without deprecated authoring/protocol forwarding
-exports from harness. SDK root authoring imports remain convenient.
-
-| Previous usage                              | Replacement                                                                          |
-| ------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `@nylorun/harness/define`                   | `@nylorun/agents/define` for applications; `@nylorun/core/define` for infrastructure |
-| `@nylorun/harness/contracts`                | `@nylorun/core/contracts`                                                            |
-| Harness manifest hash and protocol metadata | `@nylorun/core/compatibility`                                                        |
-| Harness checkpoint compatibility            | `@nylorun/harness/compatibility`                                                     |
-| Runtime-provided `nylorun` executable       | Install `@nylorun/cli`; commands are unchanged                                       |
-
-Wire protocol, definition schema, canonical hashes and checkpoint representations
-are unchanged. Packages remain independently versioned with exact tested internal
-pins. Updating an SDK implementation requires consumers to receive that version
-and rebuild/redeploy, even when their own code does not change.
-
-## Alternatives
-
-Keeping harness's existing subpaths avoids a package but couples SDK installation
-and version updates to the engine. Separate definitions and protocol packages
-offer independent releases but add compatibility combinations. One shared core
-is the chosen compromise; it must not become a miscellaneous utilities package.
-
-## Verification
-
-Enforce dependencies in manifests, source, emitted declarations and loaded
-modules. Test isolated packed SDK/core without harness and runtime without agents.
-Exercise bindings from separate core copies, unchanged manifest hashes, live
-schema transforms, hooks, middleware ordering, tool outcomes and checkpoint
-continuation. Run fresh starter, headless, Studio, watcher, compiled start,
-failure/shutdown and release-tooling checks with deterministic provider fixtures.
-Studio's browser build must exclude executor, engine, host and Node-only modules.
+See [MIGRATION.md](../../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta)
+for the four application upgrade steps. Wire protocol and Tenant layout from
+Runtime Tenants are unchanged; this release adds client packages, builds and
+the launcher.
 
 ## Cloud boundary
 
 This repository must not know Cloud. After OSS packages publish to npm, Cloud
-upgrades by installing those packages in its own repository. Vendor tarballs,
-digest coordination, and private Cloud acceptance are not OSS release gates.
+upgrades by installing those packages in its own repository. The Admin API and
+Tenant API contracts are identical on both hosts.
 
 ## Source navigation
 
-Authoring and wire schemas live under `core/src`; harness's `definition/` compiles
-local bindings and owns the tool registry. `loop/` owns one run invocation,
-`loop/step/` owns one model call, and `run/` exposes host execution. Harness's
-remaining `types/` describes execution and checkpoint-facing client results.
-Core supplies the shared authoring and adapter interfaces. Consult package export
-maps before adding a public import; compiled engine representations stay private.
+Authoring and wire schemas live under `core/src`. Client packages live under
+`agents/` and `admin/`. Host and launcher source live under `runtime/src`
+(`host/`, `tenant/`, `launcher/`). Consult package export maps before adding a
+public import; the launcher is not exported.
