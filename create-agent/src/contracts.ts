@@ -3,6 +3,7 @@ export type Compatibility = Readonly<{
   cli: string;
   harness: string;
   agents: string;
+  admin: string;
   studio: string;
   runtime: string;
 }>;

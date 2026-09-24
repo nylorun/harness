@@ -6,7 +6,9 @@ import type { Compatibility, CreatorDependencies } from "../src/contracts.js";
 const compatibility: Compatibility = {
   core: "0.1.0-beta.1",
   cli: "0.1.0-beta.1",
-  harness: "1.2.3", agents: "2.3.4",
+  harness: "1.2.3",
+  agents: "2.3.4",
+  admin: "0.1.0-beta",
   studio: "4.5.6",
   runtime: "7.8.9",
 };
@@ -17,9 +19,12 @@ describe("starter template", () => {
     const manifest = JSON.parse(files["package.json"]!);
     expect(manifest.dependencies["@nylorun/agents"]).toBe("2.3.4");
     expect(manifest.dependencies["@nylorun/runtime"]).toBeUndefined();
-    expect(manifest.dependencies["@nylorun/cli"]).toBe(compatibility.cli);
+    expect(manifest.dependencies["@nylorun/cli"]).toBeUndefined();
+    expect(manifest.devDependencies["@nylorun/cli"]).toBe(compatibility.cli);
     expect(manifest.devDependencies["@nylorun/studio"]).toBe("4.5.6");
     expect(manifest.scripts.dev).toBe("nylorun dev");
+    expect(manifest.scripts.studio).toBe("nylorun-studio");
+    expect(manifest.scripts.start).toBe("node dist/src/main.js");
     expect(manifest.scripts["dev:app"]).toBeUndefined();
     expect(files["scripts/dev.mjs"]).toBeUndefined();
     expect(files["tsconfig.build.json"]).toBeUndefined();
@@ -35,9 +40,14 @@ describe("starter template", () => {
       Object.keys(files)
         .filter((path) => path.endsWith(".ts"))
         .sort()
-    ).toEqual(["agents/assistant/agent.ts", "agents/index.ts"]);
+    ).toEqual([
+      "agents/assistant/agent.ts",
+      "agents/index.ts",
+      "src/main.ts",
+    ]);
     expect(files[".env/auth.json"]).toBeUndefined();
     expect(files["src/index.ts"]).toBeUndefined();
+    expect(files["src/main.ts"]).toContain("connectAgents");
     expect(files["agents/assistant/agent.ts"]).toContain("lookup_order");
     expect(files["agents/assistant/agent.ts"]).toContain("@nylorun/agents");
     expect(files["agents/assistant/agent.ts"]).not.toMatch(/\bmodel\s*:/);
@@ -49,15 +59,15 @@ describe("starter template", () => {
     const files = await starterFiles(compatibility, false);
     const manifest = JSON.parse(files["package.json"]!);
     expect(manifest.devDependencies["@nylorun/studio"]).toBeUndefined();
-    expect(manifest.scripts.dev).toBe("nylorun dev --no-studio");
+    expect(manifest.scripts.dev).toBe("nylorun dev");
     expect(manifest.scripts.studio).toBeUndefined();
     expect(manifest.scripts["dev:app"]).toBeUndefined();
     expect(files["scripts/dev.mjs"]).toBeUndefined();
     expect(files["README.md"]).toContain(
       "8787"
     );
-    expect(manifest.scripts.dev).toContain("--no-studio");
-    expect(manifest.scripts.start).toBe("nylorun serve");
+    expect(manifest.scripts.dev).not.toContain("--no-studio");
+    expect(manifest.scripts.start).toBe("node dist/src/main.js");
   });
   it("renders ignore files under their real names so npm cannot drop them", async () => {
     const files = await starterFiles(compatibility, true);

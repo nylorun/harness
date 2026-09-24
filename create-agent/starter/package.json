@@ -8,17 +8,17 @@
   },
   "scripts": {
     "dev": "nylorun dev",
-    "studio": "nylorun studio",
+    "studio": "nylorun-studio",
     "build": "node -e \"import('node:fs/promises').then(async ({rm,cp}) => { await rm('dist', { recursive: true, force: true }); await cp('agents', 'dist/agents', { recursive: true, filter: (source) => !source.endsWith('.ts') }); })\" && tsc -p tsconfig.json",
-    "start": "nylorun serve",
+    "start": "node dist/src/main.js",
     "check": "tsc --noEmit"
   },
   "dependencies": {
     "zod": "^4.6.5",
-    "@nylorun/agents": "{{AGENTS_VERSION}}",
-    "@nylorun/cli": "{{CLI_VERSION}}"
+    "@nylorun/agents": "{{AGENTS_VERSION}}"
   },
   "devDependencies": {
+    "@nylorun/cli": "{{CLI_VERSION}}",
     "@nylorun/studio": "{{STUDIO_VERSION}}",
     "@types/node": "^22.18.0",
     "tsx": "^4.20.6",

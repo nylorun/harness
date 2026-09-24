@@ -30,6 +30,7 @@ try {
     "dist/starter/_gitignore",
     "dist/starter/agents/index.ts",
     "dist/starter/agents/assistant/agent.ts",
+    "dist/starter/src/main.ts",
   ])
     if (!files.includes(required))
       throw new Error(`Missing tarball file: ${required}`);

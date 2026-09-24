@@ -6,10 +6,11 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod-from-json-schema": "^0.5.6",
     "@nylorun/agents": "file:../agents",
-    "@nylorun/core": "file:../core",
-    "@nylorun/cli": "file:../cli"
+    "@nylorun/core": "file:../core"
   },
   "devDependencies": {
+    "@nylorun/cli": "file:../cli",
+    "@nylorun/admin": "file:../admin",
     "@nylorun/studio": "file:../studio",
     "vitest": "^4.1.11"
   },

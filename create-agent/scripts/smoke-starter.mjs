@@ -90,8 +90,13 @@ try {
       await writeFile(join(project, path), content);
     }
     const manifest = JSON.parse(files["package.json"]);
-    for (const name of ["core", "harness", "agents", "runtime", "cli"])
+    for (const name of ["agents"])
       manifest.dependencies[`@nylorun/${name}`] = `file:${tarballs[name]}`;
+    // Keep Runtime and Core reachable for the CLI until Wave 2 rewires serve/dev.
+    for (const name of ["core", "harness", "runtime"])
+      manifest.dependencies[`@nylorun/${name}`] = `file:${tarballs[name]}`;
+    manifest.devDependencies ??= {};
+    manifest.devDependencies["@nylorun/cli"] = `file:${tarballs.cli}`;
     if (studio)
       manifest.devDependencies["@nylorun/studio"] = `file:${tarballs.studio}`;
     await writeFile(
@@ -264,16 +269,31 @@ try {
   await stat(join(project, ".nylorun/link.json"));
 
   await run(process.execPath, [npmCli(), "run", "build"], { cwd: project });
+  // Until the CLI drops `serve`, compile-check uses env from a short-lived
+  // `nylorun serve --ephemeral` so `node dist/src/main.js` can connect.
+  const serve = group.start(
+    "serve-host",
+    process.execPath,
+    [join(project, "node_modules/@nylorun/cli/dist/cli.js"), "serve", "--ephemeral"],
+    { cwd: project, env },
+  );
+  const serveHost = await serve.line(hostLine, 90_000);
+  const serveUrl = serveHost.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
+  await serve.line(readyLine, 60_000);
+  const served = await readAuth(project);
+  const startEnv = {
+    ...env,
+    NYLORUN_RUNTIME_URL: serveUrl,
+    NYLORUN_TENANT: served.link.tenantId,
+    NYLORUN_SERVER_KEY: served.credentials.applicationKey,
+  };
   const started = group.start(
     "compiled-start",
     process.execPath,
-    [npmCli(), "start", "--", "--ephemeral"],
-    { cwd: project, env },
+    [join(project, "dist/src/main.js")],
+    { cwd: project, env: startEnv },
   );
-  const serveHost = await started.line(hostLine, 90_000);
-  const serveUrl = serveHost.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
-  await started.line(readyLine, 60_000);
-  const served = await readAuth(project);
+  await new Promise((r) => setTimeout(r, 2000));
   const sdk = await import(
     pathToFileURL(join(project, "node_modules/@nylorun/agents/dist/index.js"))
       .href
@@ -309,6 +329,7 @@ try {
   assert.ok(complete, "compiled start executes a turn");
   void sessionId;
   await started.stop();
+  await serve.stop();
 
   const headless = group.start(
     "headless-dev",
@@ -323,7 +344,11 @@ try {
   const missing = group.start(
     "missing-config",
     process.execPath,
-    [npmCli(), "start", "--", "--ephemeral"],
+    [
+      join(projects[1], "node_modules/@nylorun/cli/dist/cli.js"),
+      "serve",
+      "--ephemeral",
+    ],
     {
       cwd: projects[1],
       env: {
