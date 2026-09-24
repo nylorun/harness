@@ -21,6 +21,7 @@ try {
   if (command === "test") await tests();
   if (command === "check") {
     await node("scripts/check-boundaries.mjs");
+    await node("scripts/check-ambient.mjs");
     await script("format:check", "harness");
     await script("test:types", "harness");
     await script("test:types", "create-agent");
