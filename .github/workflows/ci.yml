@@ -45,6 +45,23 @@ jobs:
           if [[ -n "$changed" ]]; then
             npm run release:check -- --built
           fi
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm run setup
+      - run: npm run test:tooling
+      - run: node scripts/acceptance/tenants.mjs
   supervisor:
     strategy:
       fail-fast: false
@@ -83,16 +100,18 @@ jobs:
       - run: npm run check --workspace @nylorun/create-agent
   ci:
     if: always()
-    needs: [check, supervisor, consumers]
+    needs: [check, test, supervisor, consumers]
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI job to pass
         env:
           CHECK_RESULT: ${{ needs.check.result }}
+          TEST_RESULT: ${{ needs.test.result }}
           SUPERVISOR_RESULT: ${{ needs.supervisor.result }}
           CONSUMERS_RESULT: ${{ needs.consumers.result }}
         shell: bash
         run: |
           [[ "$CHECK_RESULT" == success ]]
+          [[ "$TEST_RESULT" == success ]]
           [[ "$SUPERVISOR_RESULT" == success ]]
           [[ "$CONSUMERS_RESULT" == success ]]

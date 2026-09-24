@@ -60,6 +60,12 @@ export async function develop(
     log = console.log,
     signal,
     built = false,
+    /** Temporary Host root (`NYLORUN_HOME`); never the real `~/.nylorun`. */
+    hostRoot,
+    /** Override HOME so Host/CLI resolution cannot touch `~/.nylorun`. */
+    home,
+    /** Use a private ephemeral Host removed when the Project runner exits. */
+    ephemeral = false,
   } = {}
 ) {
   let stopping = false;
@@ -100,12 +106,19 @@ export async function develop(
   }
   async function startRuntime() {
     if (stopping) return;
-    runtime = group.start(
-      "runtime",
-      process.execPath,
-      [join(repo, "cli/dist/cli.js"), "dev", "--no-studio"],
-      { cwd: project, env: { ...process.env, PORT: String(options.port) } }
-    );
+    const env = { ...process.env, PORT: String(options.port) };
+    if (hostRoot) env.NYLORUN_HOME = hostRoot;
+    // Keep Host files out of the real developer home during scripted runs.
+    if (home) {
+      env.HOME = home;
+      env.USERPROFILE = home;
+    }
+    const args = [join(repo, "cli/dist/cli.js"), "dev", "--no-studio"];
+    if (ephemeral) args.push("--ephemeral");
+    runtime = group.start("runtime", process.execPath, args, {
+      cwd: project,
+      env,
+    });
     await runtime.ready(`http://127.0.0.1:${options.port}/ready`);
   }
   async function startStudio(open) {
