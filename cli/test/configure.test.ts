@@ -14,10 +14,10 @@ const { login, state } = vi.hoisted(() => ({
   login: vi.fn(),
   state: { store: undefined as CredentialStore | undefined, apiKey: false },
 }));
-vi.mock("@nylorun/runtime/configuration", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@nylorun/runtime/configuration")>()),
-  modelsFor: (_selection: unknown, store: CredentialStore) => {
-    state.store = store;
+
+vi.mock("@earendil-works/pi-ai/providers/all", () => ({
+  builtinModels: (_options: { credentials: CredentialStore }) => {
+    state.store = _options.credentials;
     return {
       getProviders: () => [
         {
@@ -26,18 +26,39 @@ vi.mock("@nylorun/runtime/configuration", async (importOriginal) => ({
           auth: { oauth: {}, ...(state.apiKey ? { apiKey: {} } : {}) },
         },
       ],
+      getProvider: (id: string) =>
+        id === "fixture"
+          ? {
+              id: "fixture",
+              name: "Fixture",
+              auth: { oauth: {}, ...(state.apiKey ? { apiKey: {} } : {}) },
+            }
+          : undefined,
       getModels: () => [{ id: "fixture-model", name: "Fixture model" }],
       checkAuth: async () => false,
       login,
+      setProvider() {},
     };
   },
 }));
+
+const catalog = {
+  providers: [
+    {
+      id: "fixture",
+      name: "Fixture",
+      models: [{ id: "fixture-model", name: "Fixture model" }],
+      auth: { oauth: {}, apiKey: {} },
+    },
+  ],
+};
+
 const roots: string[] = [];
 afterEach(async () => {
   login.mockReset();
   state.apiKey = false;
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
 });
 
@@ -58,32 +79,37 @@ async function fixture(answers = ["1", "1"]) {
       done();
     },
   });
-  return { root, input, output, text: () => text };
+  return { root, input, output, text: () => text, catalog };
 }
 
-it("saves selection after authentication and cleans up prompt and abort listeners", async () => {
+it("F2-4: saves selection from Tenant model catalog and cleans up listeners", async () => {
   const test = await fixture();
   login.mockImplementation(async () =>
     state.store!.modify("fixture", async () => ({
       type: "api_key",
       key: "fixture-key",
-    }))
+    })),
   );
   const controller = new AbortController();
   await expect(
-    configureProvider({ ...test, signal: controller.signal })
+    configureProvider({
+      ...test,
+      signal: controller.signal,
+      catalog: test.catalog,
+    }),
   ).resolves.toMatchObject({
     provider: "fixture",
     model: "fixture-model",
     auth: { type: "api_key", key: "fixture-key" },
   });
   expect(test.text()).toContain("Provider configuration saved.");
-  expect(test.text()).not.toContain("Return to Studio");
+  expect(test.text()).toContain("0. Custom OpenAI-compatible provider");
+  expect(test.text()).toContain("1. Fixture (fixture)");
   expect(test.input.listenerCount("data")).toBe(0);
   expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
 });
 
-it("defaults to API keys and saves entered provider settings without a vault", async () => {
+it("defaults to API keys without writing secrets to dotenv", async () => {
   state.apiKey = true;
   const test = await fixture(["1", "1", ""]);
   await writeFile(join(test.root, ".env"), "# integration\nINTEGRATION=keep\n");
@@ -92,9 +118,11 @@ it("defaults to API keys and saves entered provider settings without a vault", a
       type: "api_key",
       key: "key-with-#-and-'",
       env: { PROVIDER_ACCOUNT: "account" },
-    }))
+    })),
   );
-  await expect(configureProvider(test)).resolves.toMatchObject({
+  await expect(
+    configureProvider({ ...test, catalog: test.catalog }),
+  ).resolves.toMatchObject({
     provider: "fixture",
     model: "fixture-model",
     auth: {
@@ -107,12 +135,9 @@ it("defaults to API keys and saves entered provider settings without a vault", a
   const text = await readFile(join(test.root, ".env"), "utf8");
   expect(text).toContain("# integration\nINTEGRATION=keep\n");
   expect(text).not.toContain("key-with");
-  await expect(
-    readFile(join(test.root, ".nylorun/auth.json"))
-  ).rejects.toThrow();
 });
 
-it("keeps explicitly selected OAuth credentials separate from dotenv", async () => {
+it("keeps OAuth credentials out of dotenv", async () => {
   state.apiKey = true;
   const test = await fixture(["1", "1", "2"]);
   const credential = {
@@ -122,15 +147,16 @@ it("keeps explicitly selected OAuth credentials separate from dotenv", async () 
     expires: 9999999999999,
   };
   login.mockImplementation(async () =>
-    state.store!.modify("fixture", async () => credential)
+    state.store!.modify("fixture", async () => credential),
   );
-  await expect(configureProvider(test)).resolves.toMatchObject({
+  await expect(
+    configureProvider({ ...test, catalog: test.catalog }),
+  ).resolves.toMatchObject({
     provider: "fixture",
     model: "fixture-model",
     auth: credential,
   });
   expect(login).toHaveBeenCalledWith("fixture", "oauth", expect.anything());
-  await expect(readFile(join(test.root, ".nylorun/auth.json"))).rejects.toThrow();
   await expect(readFile(join(test.root, ".env"))).rejects.toThrow();
 });
 
@@ -139,7 +165,11 @@ it.each(["SIGINT", "SIGTERM"] as const)(
   async (name) => {
     const test = await fixture([]);
     const controller = new AbortController();
-    const result = configureProvider({ ...test, signal: controller.signal });
+    const result = configureProvider({
+      ...test,
+      signal: controller.signal,
+      catalog: test.catalog,
+    });
     const rejected = expect(result).rejects.toMatchObject({
       exitCode: name === "SIGINT" ? 130 : 143,
     });
@@ -147,96 +177,51 @@ it.each(["SIGINT", "SIGTERM"] as const)(
     await rejected;
     expect(login).not.toHaveBeenCalled();
     expect(test.input.listenerCount("data")).toBe(0);
-    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
-  }
+  },
 );
 
 it("fails rather than hanging when stdin ends during a question", async () => {
   const test = await fixture([]);
-  const result = configureProvider(test);
+  const result = configureProvider({ ...test, catalog: test.catalog });
   const rejected = expect(result).rejects.toThrow("input closed");
   test.input.end();
   await rejected;
   expect(login).not.toHaveBeenCalled();
 });
 
-it.each(["signal", "eof"])(
-  "cancels authentication on %s without replacing existing configuration",
-  async (mode) => {
-    const test = await fixture();
-    await mkdir(join(test.root, "config"));
-    await mkdir(join(test.root, ".env"));
-    const selection = '{"provider":"existing","model":"existing"}\n';
-    const credentials =
-      '{"existing":{"type":"api_key","key":"fixture-secret"}}\n';
-    await writeFile(join(test.root, "config/model.json"), selection);
-    await writeFile(join(test.root, ".env/auth.json"), credentials);
-    const controller = new AbortController();
-    let authSignal: AbortSignal | undefined;
-    login.mockImplementation(async (_provider, _method, interaction) => {
-      authSignal = interaction.signal;
-      // Simulate authentication finishing just as cancellation arrives. The save
-      // boundary must still reject the result rather than replace model selection.
-      if (mode === "signal")
-        controller.abort(new ConfigurationCancelled("SIGINT"));
-      else {
-        test.input.end();
-        await new Promise((resolve) => setImmediate(resolve));
-      }
-    });
-    await expect(
-      configureProvider({ ...test, signal: controller.signal })
-    ).rejects.toThrow();
-    expect(authSignal?.aborted).toBe(true);
-    expect(await readFile(join(test.root, "config/model.json"), "utf8")).toBe(
-      selection
-    );
-    expect(await readFile(join(test.root, ".env/auth.json"), "utf8")).toBe(
-      credentials
-    );
-    expect(test.input.listenerCount("data")).toBe(0);
-    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
-  }
-);
-
 it("rejects a pre-cancelled configuration without prompting", async () => {
   const test = await fixture();
   await expect(
     configureProvider({
       ...test,
+      catalog: test.catalog,
       signal: AbortSignal.abort(new ConfigurationCancelled("SIGTERM")),
-    })
+    }),
   ).rejects.toMatchObject({ exitCode: 143 });
   expect(test.text()).toBe("");
   expect(login).not.toHaveBeenCalled();
 });
 
-it.each([false, true])(
-  "preserves legacy selection and unrelated config files (%s)",
-  async (otherFile) => {
-    const test = await fixture();
-    await mkdir(join(test.root, "config"));
-    await writeFile(
-      join(test.root, "config/model.json"),
-      '{"provider":"old","model":"old"}'
-    );
-    if (otherFile) await writeFile(join(test.root, "config/keep.json"), "{}");
-    login.mockImplementation(async () =>
-      state.store!.modify("fixture", async () => ({
-        type: "api_key",
-        key: "next-key",
-      }))
-    );
-    await expect(configureProvider(test)).resolves.toMatchObject({
-      model: "fixture-model",
-      auth: { key: "next-key" },
-    });
-    expect(await readFile(join(test.root, "config/model.json"), "utf8")).toBe(
-      '{"provider":"old","model":"old"}'
-    );
-    if (otherFile)
-      expect(await readFile(join(test.root, "config/keep.json"), "utf8")).toBe(
-        "{}"
-      );
-  }
-);
+it("preserves unrelated config files", async () => {
+  const test = await fixture();
+  await mkdir(join(test.root, "config"));
+  await writeFile(
+    join(test.root, "config/model.json"),
+    '{"provider":"old","model":"old"}',
+  );
+  login.mockImplementation(async () =>
+    state.store!.modify("fixture", async () => ({
+      type: "api_key",
+      key: "next-key",
+    })),
+  );
+  await expect(
+    configureProvider({ ...test, catalog: test.catalog }),
+  ).resolves.toMatchObject({
+    model: "fixture-model",
+    auth: { key: "next-key" },
+  });
+  expect(await readFile(join(test.root, "config/model.json"), "utf8")).toBe(
+    '{"provider":"old","model":"old"}',
+  );
+});

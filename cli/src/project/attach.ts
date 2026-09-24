@@ -1,21 +1,17 @@
 import { createInterface } from "node:readline/promises";
+import { createAdmin, type Admin, type AdminTenant } from "@nylorun/admin";
 import {
   PROTOCOL_HEADER,
   PROTOCOL_VERSION,
   TENANT_HEADER,
 } from "@nylorun/agents";
 import { CliError } from "../errors.js";
-import type { AdminTenant } from "../host/admin-client.js";
 import {
-  readHostCredentials,
-  hostPaths,
-  resolveHostRoot,
-} from "../host/root.js";
-import {
-  ensureHost,
-  hostStatus,
-  type HostStatus,
-} from "../host/lifecycle.js";
+  launcher,
+  resolveHome,
+  runtimeVersion,
+  type UpResult,
+} from "../runtime/launcher.js";
 import {
   readCredentials,
   removeCredentials,
@@ -33,15 +29,15 @@ export interface AttachedProject {
   projectRoot: string;
   link: ProjectLink;
   credentials: ProjectCredentials;
-  host: HostStatus;
+  host: UpResult;
   tenantName: string;
   hostStarted: boolean;
+  home: string;
 }
 
 export interface AttachOptions {
   projectRoot: string;
-  autostart?: boolean;
-  ephemeral?: boolean;
+  home?: string;
   /** Interactive stdin; defaults to process.stdin when TTY. */
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
@@ -76,23 +72,6 @@ async function probeTenant(
   }
 }
 
-async function listAdminTenants(
-  hostUrl: string,
-  adminKey: string,
-  fetchImpl: typeof fetch,
-): Promise<AdminTenant[]> {
-  const response = await fetchImpl(`${hostUrl}/v1/admin/tenants`, {
-    headers: {
-      Authorization: `Bearer ${adminKey}`,
-      [PROTOCOL_HEADER]: String(PROTOCOL_VERSION),
-      Accept: "application/json",
-    },
-    signal: AbortSignal.timeout(5_000),
-  });
-  if (!response.ok) return [];
-  return (await response.json()) as AdminTenant[];
-}
-
 async function healthHostId(
   hostUrl: string,
   fetchImpl: typeof fetch,
@@ -110,25 +89,19 @@ async function healthHostId(
 }
 
 /**
- * Ensure a Project link exists and authenticates against the Host (F2, F6).
+ * Ensure the local Runtime is up and a Project link authenticates (D§12 step 2).
  */
 export async function attachProject(
   options: AttachOptions,
 ): Promise<AttachedProject> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const projectRoot = options.projectRoot;
-  const before = await hostStatus();
-  const wasRunning = before.state === "running";
-  const host = await ensureHost({
-    autostart: options.autostart !== false,
-    quiet: wasRunning,
-  });
-  const hostStarted = !wasRunning && host.state === "running";
+  const home = resolveHome(options.home);
+  const host = await launcher(home).up({ version: runtimeVersion() });
   const hostUrl = host.url.replace(/\/$/, "");
   const hostId =
-    host.hostId ??
-    host.config?.hostId ??
-    (await healthHostId(hostUrl, fetchImpl)) ??
+    host.hostId ||
+    (await healthHostId(hostUrl, fetchImpl)) ||
     "";
   if (!hostId) {
     throw new CliError(
@@ -137,25 +110,16 @@ export async function attachProject(
     );
   }
 
-  const paths = hostPaths(resolveHostRoot());
-  const hostCreds = await readHostCredentials(paths);
-  if (!hostCreds) {
-    throw new CliError(
-      `Missing host-credentials.json under ${paths.root}. Run "nylorun runtime up" first.`,
-      1,
-    );
-  }
-
+  const admin = createAdmin({ home });
   let link = await readLink(projectRoot);
   let credentials = await readCredentials(projectRoot);
 
   if (!link || !credentials) {
     const created = await createProjectTenant({
-      hostUrl,
+      admin,
       hostId,
-      adminKey: hostCreds.adminKey,
+      hostUrl,
       projectRoot,
-      fetchImpl,
     });
     return {
       projectRoot,
@@ -163,16 +127,15 @@ export async function attachProject(
       credentials: created.credentials,
       host,
       tenantName: created.envelope.name,
-      hostStarted,
+      hostStarted: host.started,
+      home,
     };
   }
 
-  // Existing link: verify Host identity and Tenant credentials (F6).
   if (link.hostUrl.replace(/\/$/, "") !== hostUrl) {
-    // Same URL preferred; if Host moved, update URL when hostId matches.
     const liveId = await healthHostId(hostUrl, fetchImpl);
     if (liveId && liveId === link.hostId) {
-      link = { ...link, hostUrl };
+      link = { ...link, hostUrl, format: 1 };
       await writeLink(projectRoot, link);
     }
   }
@@ -192,27 +155,20 @@ export async function attachProject(
     fetchImpl,
   );
   if (auth === "ok") {
-    const tenants = await listAdminTenants(
-      hostUrl,
-      hostCreds.adminKey,
-      fetchImpl,
-    );
+    const tenants = await admin.listTenants();
     const match = tenants.find((t) => t.id === link!.tenantId);
     return {
       projectRoot,
-      link: { ...link, hostUrl, hostId: liveId ?? link.hostId },
+      link: { ...link, hostUrl, hostId: liveId ?? link.hostId, format: 1 },
       credentials,
       host,
       tenantName: match?.name ?? match?.envelope?.name ?? link.tenantId,
-      hostStarted,
+      hostStarted: host.started,
+      home,
     };
   }
 
-  const tenants = await listAdminTenants(
-    hostUrl,
-    hostCreds.adminKey,
-    fetchImpl,
-  );
+  const tenants = await admin.listTenants();
   const known = tenants.some((t) => t.id === link!.tenantId);
   if (known) {
     throw new CliError(
@@ -221,7 +177,6 @@ export async function attachProject(
     );
   }
 
-  // Unknown Tenant — interactive recovery (F6); never reuse the id.
   const choice = await chooseUnknownTenantRecovery({
     tenantId: link.tenantId,
     tenants,
@@ -240,11 +195,10 @@ export async function attachProject(
     await removeLink(projectRoot);
     await removeCredentials(projectRoot);
     const created = await createProjectTenant({
-      hostUrl,
+      admin,
       hostId: liveId ?? hostId,
-      adminKey: hostCreds.adminKey,
+      hostUrl,
       projectRoot,
-      fetchImpl,
     });
     return {
       projectRoot,
@@ -252,12 +206,13 @@ export async function attachProject(
       credentials: created.credentials,
       host,
       tenantName: created.envelope.name,
-      hostStarted,
+      hostStarted: host.started,
+      home,
     };
   }
-  // choose another
   const selected = choice.tenant;
   await writeLink(projectRoot, {
+    format: 1,
     hostUrl,
     hostId: liveId ?? hostId,
     tenantId: selected.id,
@@ -277,6 +232,7 @@ export async function attachProject(
   return {
     projectRoot,
     link: {
+      format: 1,
       hostUrl,
       hostId: liveId ?? hostId,
       tenantId: selected.id,
@@ -284,14 +240,12 @@ export async function attachProject(
     credentials,
     host,
     tenantName: selected.name ?? selected.envelope?.name ?? selected.id,
-    hostStarted,
+    hostStarted: host.started,
+    home,
   };
 }
 
-type RecoveryChoice =
-  | "create"
-  | "remove"
-  | { tenant: AdminTenant };
+type RecoveryChoice = "create" | "remove" | { tenant: AdminTenant };
 
 async function chooseUnknownTenantRecovery(options: {
   tenantId: string;
@@ -331,9 +285,7 @@ async function chooseUnknownTenantRecovery(options: {
       }
       for (let i = 0; i < open.length; i += 1) {
         const t = open[i]!;
-        output.write(
-          `  ${i + 1}) ${t.name ?? "(unnamed)"}  ${t.id}\n`,
-        );
+        output.write(`  ${i + 1}) ${t.name ?? "(unnamed)"}  ${t.id}\n`);
       }
       const pick = Number(
         (await rl.question(`Choose Tenant [1-${open.length}]: `)).trim(),
@@ -349,7 +301,7 @@ async function chooseUnknownTenantRecovery(options: {
   }
 }
 
-/** Three `export` lines for `runtime status --env` (F8). */
+/** Three `export` lines for `runtime status --env` (F2-7). */
 export async function printLinkedEnvExports(
   projectRoot = process.cwd(),
 ): Promise<void> {

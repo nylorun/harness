@@ -14,7 +14,7 @@ afterEach(async () => {
   );
 });
 
-it("F8: prints three export lines for a linked Project", async () => {
+it("F2-7: prints three export lines for a linked Project", async () => {
   const root = await mkdtemp(join(tmpdir(), "nylorun-env-export-"));
   roots.push(root);
   await writeFile(join(root, "package.json"), "{}");
@@ -27,7 +27,6 @@ it("F8: prints three export lines for a linked Project", async () => {
   await writeCredentials(root, {
     applicationKey: "ab".repeat(32),
     principalId: "principal_x",
-    executors: {},
   });
   const lines: string[] = [];
   const original = console.log;
