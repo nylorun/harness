@@ -148,7 +148,7 @@ async function writeHostFiles(hostRoot, { port = 0 } = {}) {
   return { hostId, adminKey };
 }
 
-async function installRuntimeTree(hostRoot, packedRuntime, version) {
+async function installRuntimeTree(hostRoot, packed, version) {
   const target = join(hostRoot, "runtime", version);
   const staging = join(
     hostRoot,
@@ -161,9 +161,14 @@ async function installRuntimeTree(hostRoot, packedRuntime, version) {
     JSON.stringify({
       name: `nylorun-runtime-install-${version}`,
       private: true,
-      dependencies: { "@nylorun/runtime": version },
+      dependencies: {
+        "@nylorun/core": version,
+        "@nylorun/harness": version,
+        "@nylorun/runtime": version,
+      },
     }),
   );
+  // Registry 0.9.0-beta lacks Host layout; pin workspace-packed tarballs.
   await npm(
     [
       "install",
@@ -172,7 +177,9 @@ async function installRuntimeTree(hostRoot, packedRuntime, version) {
       "--no-audit",
       "--no-fund",
       "--save-exact",
-      packedRuntime,
+      packed.core,
+      packed.harness,
+      packed.runtime,
     ],
     { cwd: staging, capture: true },
   );
@@ -208,21 +215,33 @@ function spawnHost(entry, hostRoot, env = {}) {
 async function awaitHostReady(child, timeoutMs = 30_000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
-      () => reject(new Error("Host readiness timeout")),
+      () => {
+        cleanup();
+        reject(new Error("Host readiness timeout"));
+      },
       timeoutMs,
     );
-    child.once("message", (message) => {
-      clearTimeout(timer);
+    const onMessage = (message) => {
+      cleanup();
       resolve(message);
-    });
-    child.once("error", (error) => {
-      clearTimeout(timer);
+    };
+    const onError = (error) => {
+      cleanup();
       reject(error);
-    });
-    child.once("exit", (code) => {
-      clearTimeout(timer);
+    };
+    const onExit = (code) => {
+      cleanup();
       reject(new Error(`Host exited ${code}`));
-    });
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off("message", onMessage);
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    child.once("message", onMessage);
+    child.once("error", onError);
+    child.once("exit", onExit);
   });
 }
 
@@ -230,7 +249,14 @@ async function stopChild(child) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   const closed = new Promise((resolve) => child.once("exit", resolve));
   child.kill("SIGTERM");
-  await closed;
+  const result = await Promise.race([
+    closed.then(() => "exited"),
+    new Promise((resolve) => setTimeout(() => resolve("timeout"), 5_000)),
+  ]);
+  if (result === "timeout") {
+    child.kill("SIGKILL");
+    await closed.catch(() => {});
+  }
 }
 
 async function createTenant(url, adminKey, name) {
@@ -265,11 +291,13 @@ async function putAgent(url, tenant, agentId = "shared-agent") {
       manifest: {
         id: agentId,
         name: `${tenant.name}-${agentId}`,
-        version: "1",
+        manifestSchemaVersion: 4,
+        capabilities: [],
       },
     }),
   });
-  assert.ok(response.ok, await response.text());
+  const text = await response.text();
+  assert.ok(response.ok, text);
 }
 
 async function putSession(url, tenant, sessionId, agentId = "shared-agent") {
@@ -282,7 +310,8 @@ async function putSession(url, tenant, sessionId, agentId = "shared-agent") {
       ownerUserId: "acceptance",
     }),
   });
-  assert.ok(response.ok, await response.text());
+  const text = await response.text();
+  assert.ok(response.ok, text);
 }
 
 async function createVault(url, tenant, name) {
@@ -296,16 +325,18 @@ async function createVault(url, tenant, name) {
       ownerUserId: "acceptance",
     }),
   });
-  assert.ok(response.ok, await response.text());
-  return (await response.json()).id;
+  const text = await response.text();
+  assert.ok(response.ok, text);
+  return JSON.parse(text).id;
 }
 
 async function listAgents(url, tenant) {
   const response = await fetch(`${url}/v1/agents`, {
     headers: tenantHeaders(tenant.tenantId, tenant.applicationKey),
   });
-  assert.ok(response.ok, await response.text());
-  return response.json();
+  const text = await response.text();
+  assert.ok(response.ok, text);
+  return JSON.parse(text);
 }
 
 async function seedVirtual(url, tenant) {
@@ -317,7 +348,8 @@ async function seedVirtual(url, tenant) {
       sandbox: { backend: "virtual" },
     }),
   });
-  assert.ok(response.ok, await response.text());
+  const text = await response.text();
+  assert.ok(response.ok, text);
 }
 
 const results = [];
@@ -350,7 +382,7 @@ try {
     const { hostId, adminKey } = await writeHostFiles(hostRoot, { port: 0 });
     const versionDir = await installRuntimeTree(
       hostRoot,
-      packed.runtime,
+      packed,
       runtimeVersion,
     );
     const require = createRequire(join(versionDir, "package.json"));
@@ -442,17 +474,17 @@ try {
         },
       });
 
-    assert.equal((await register(alpha, "token-alpha-1")).status, 200);
-    assert.equal((await register(beta, "token-beta-1")).status, 200);
-    const streamA = await connect(alpha, "token-alpha-1");
-    const streamB = await connect(beta, "token-beta-1");
+    assert.equal((await register(alpha, "token-alpha-1-aaaaaaaa")).status, 200);
+    assert.equal((await register(beta, "token-beta-1-bbbbbbbbb")).status, 200);
+    const streamA = await connect(alpha, "token-alpha-1-aaaaaaaa");
+    const streamB = await connect(beta, "token-beta-1-bbbbbbbbb");
     assert.equal(streamA.status, 200);
     assert.equal(streamB.status, 200);
     const readerA = streamA.body.getReader();
     const readerB = streamB.body.getReader();
     await readerA.read();
     await readerB.read();
-    const rotated = await register(alpha, "token-alpha-2");
+    const rotated = await register(alpha, "token-alpha-2-aaaaaaaa");
     assert.equal(rotated.status, 200);
     assert.equal((await rotated.clone().json()).executors[0].rotated, true);
     let aDone = false;
@@ -465,9 +497,9 @@ try {
       new Promise((resolve) => setTimeout(() => resolve({ open: true }), 200)),
     ]);
     assert.ok(peekB.open || peekB.done === false || peekB.value !== undefined);
-    assert.equal((await connect(alpha, "token-alpha-1")).status, 404);
-    assert.equal((await connect(alpha, "token-alpha-2")).status, 200);
-    assert.equal((await connect(beta, "token-beta-1")).status, 200);
+    assert.equal((await connect(alpha, "token-alpha-1-aaaaaaaa")).status, 404);
+    assert.equal((await connect(alpha, "token-alpha-2-aaaaaaaa")).status, 200);
+    assert.equal((await connect(beta, "token-beta-1-bbbbbbbbb")).status, 200);
     await readerB.cancel().catch(() => {});
     pass("H4", "executor rotation disconnects only the affected Tenant streams");
 
@@ -692,7 +724,7 @@ try {
     const { adminKey } = await writeHostFiles(hostRoot, { port: 0 });
     const versionDir = await installRuntimeTree(
       hostRoot,
-      packed.runtime,
+      packed,
       runtimeVersion,
     );
     const require = createRequire(join(versionDir, "package.json"));
@@ -825,6 +857,8 @@ try {
           "--ignore-scripts",
           "--no-audit",
           "--no-fund",
+          packed.core,
+          packed.harness,
           packed.runtime,
         ],
         { cwd: stagingDir, capture: true },
@@ -895,7 +929,7 @@ try {
     ]);
     const versionDir = await installRuntimeTree(
       hostRoot,
-      packed.runtime,
+      packed,
       runtimeVersion,
     );
     const require = createRequire(join(versionDir, "package.json"));
@@ -920,7 +954,7 @@ try {
     const { hostId, adminKey } = await writeHostFiles(hostRoot, { port: 0 });
     const versionDir = await installRuntimeTree(
       hostRoot,
-      packed.runtime,
+      packed,
       runtimeVersion,
     );
     const require = createRequire(join(versionDir, "package.json"));
@@ -1024,7 +1058,7 @@ try {
     const { hostId, adminKey } = await writeHostFiles(hostRoot, { port });
     const versionDir = await installRuntimeTree(
       hostRoot,
-      packed.runtime,
+      packed,
       runtimeVersion,
     );
     const require = createRequire(join(versionDir, "package.json"));
@@ -1049,12 +1083,14 @@ try {
             "@nylorun/agents": `file:${packed.agents}`,
             "@nylorun/cli": `file:${packed.cli}`,
             "@nylorun/core": `file:${packed.core}`,
+            "@nylorun/harness": `file:${packed.harness}`,
             "@nylorun/runtime": `file:${packed.runtime}`,
+            tsx: "^4.20.0",
           },
         }),
       );
       await writeFile(
-        join(project, "agents/index.js"),
+        join(project, "agents/index.ts"),
         `
 import { Agent } from "@nylorun/agents";
 export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
@@ -1125,16 +1161,21 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
       return child;
     };
 
-    const waitLine = (child, pattern, timeoutMs = 45_000) =>
+    const waitReadyLine = (child, timeoutMs = 60_000) =>
       new Promise((resolve, reject) => {
         let buffer = "";
         const timer = setTimeout(
-          () => reject(new Error(`timeout waiting for ${pattern}: ${buffer}`)),
+          () =>
+            reject(
+              new Error(
+                `timeout waiting for connected agents: ${buffer.slice(-2000)}`,
+              ),
+            ),
           timeoutMs,
         );
         const onData = (chunk) => {
           buffer += chunk.toString("utf8");
-          if (pattern.test(buffer)) {
+          if (/Ready\s+\d+ connected agent/i.test(buffer)) {
             cleanup();
             resolve(buffer);
           }
@@ -1143,27 +1184,22 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
           clearTimeout(timer);
           child.stdout?.off("data", onData);
           child.stderr?.off("data", onData);
+          child.off("exit", onExit);
+        };
+        const onExit = (code) => {
+          cleanup();
+          reject(new Error(`dev exited ${code}: ${buffer.slice(-2000)}`));
         };
         child.stdout?.on("data", onData);
         child.stderr?.on("data", onData);
-        child.once("exit", (code) => {
-          cleanup();
-          reject(new Error(`dev exited ${code}: ${buffer}`));
-        });
+        child.once("exit", onExit);
       });
 
     const devA = startDev(first.project);
     const devB = startDev(second.project);
     live.push(() => stopChild(devA));
     live.push(() => stopChild(devB));
-    await Promise.all([
-      waitLine(devA, /Local project ready|Runtime|ready|agents/i).catch(
-        () => waitReady(`http://127.0.0.1:${port}`),
-      ),
-      waitLine(devB, /Local project ready|Runtime|ready|agents/i).catch(
-        () => waitReady(`http://127.0.0.1:${port}`),
-      ),
-    ]);
+    await Promise.all([waitReadyLine(devA), waitReadyLine(devB)]);
     // Both Tenants reachable on the same port.
     assert.equal(
       (
@@ -1189,8 +1225,7 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
     );
 
     // Stop one Project runner; Host and the other Tenant remain.
-    devA.kill("SIGTERM");
-    await new Promise((resolve) => devA.once("exit", resolve));
+    await stopChild(devA);
     assert.equal((await fetch(`http://127.0.0.1:${port}/ready`)).status, 200);
     assert.equal(
       (
