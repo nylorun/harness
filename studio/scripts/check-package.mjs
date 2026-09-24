@@ -21,16 +21,26 @@ if (
   manifest.dependencies?.["@nylorun/create-harness"] !== undefined
 )
   throw new Error("Studio must not depend on a project creator.");
-if (manifest.bin) throw new Error("Studio must not own an executable.");
+if (
+  !manifest.bin ||
+  Object.keys(manifest.bin).length !== 1 ||
+  manifest.bin["nylorun-studio"] !== "dist/cli.js"
+)
+  throw new Error('Studio bin must be { "nylorun-studio": "dist/cli.js" }.');
 for (const field of [
   "dependencies",
   "devDependencies",
   "peerDependencies",
   "optionalDependencies",
 ])
-  for (const name of ["@nylorun/harness", "@nylorun/runtime"])
+  for (const name of ["@nylorun/harness", "@nylorun/runtime", "@nylorun/admin", "@nylorun/cli"])
     if (manifest[field]?.[name])
       throw new Error(`Studio must not depend on ${name}`);
+const nylorunDeps = Object.keys(manifest.dependencies ?? {}).filter((name) =>
+  name.startsWith("@nylorun/"),
+);
+if (nylorunDeps.length !== 1 || nylorunDeps[0] !== "@nylorun/agents")
+  throw new Error("Studio must depend only on @nylorun/agents among Nylorun packages.");
 const cache = mkdtempSync(join(tmpdir(), "nylo-studio-pack-"));
 const output = execFileSync(
   process.platform === "win32" ? "npm.cmd" : "npm",
@@ -44,6 +54,7 @@ for (const required of [
   "README.md",
   "CHANGELOG.md",
   "LICENSE",
+  "dist/cli.js",
   "dist/host.js",
   "dist/index.js",
   "dist/index.d.ts",
