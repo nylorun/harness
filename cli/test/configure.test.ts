@@ -48,7 +48,7 @@ const catalog = {
       id: "fixture",
       name: "Fixture",
       models: [{ id: "fixture-model", name: "Fixture model" }],
-      auth: { oauth: {}, apiKey: {} },
+      auth: { oauth: {} },
     },
   ],
 };
@@ -112,6 +112,16 @@ it("F2-4: saves selection from Tenant model catalog and cleans up listeners", as
 it("defaults to API keys without writing secrets to dotenv", async () => {
   state.apiKey = true;
   const test = await fixture(["1", "1", ""]);
+  const apiCatalog = {
+    providers: [
+      {
+        id: "fixture",
+        name: "Fixture",
+        models: [{ id: "fixture-model", name: "Fixture model" }],
+        auth: { apiKey: {}, oauth: {} },
+      },
+    ],
+  };
   await writeFile(join(test.root, ".env"), "# integration\nINTEGRATION=keep\n");
   login.mockImplementation(async () =>
     state.store!.modify("fixture", async () => ({
@@ -121,7 +131,7 @@ it("defaults to API keys without writing secrets to dotenv", async () => {
     })),
   );
   await expect(
-    configureProvider({ ...test, catalog: test.catalog }),
+    configureProvider({ ...test, catalog: apiCatalog }),
   ).resolves.toMatchObject({
     provider: "fixture",
     model: "fixture-model",
@@ -140,6 +150,16 @@ it("defaults to API keys without writing secrets to dotenv", async () => {
 it("keeps OAuth credentials out of dotenv", async () => {
   state.apiKey = true;
   const test = await fixture(["1", "1", "2"]);
+  const apiCatalog = {
+    providers: [
+      {
+        id: "fixture",
+        name: "Fixture",
+        models: [{ id: "fixture-model", name: "Fixture model" }],
+        auth: { apiKey: {}, oauth: {} },
+      },
+    ],
+  };
   const credential = {
     type: "oauth" as const,
     access: "oauth-access",
@@ -150,7 +170,7 @@ it("keeps OAuth credentials out of dotenv", async () => {
     state.store!.modify("fixture", async () => credential),
   );
   await expect(
-    configureProvider({ ...test, catalog: test.catalog }),
+    configureProvider({ ...test, catalog: apiCatalog }),
   ).resolves.toMatchObject({
     provider: "fixture",
     model: "fixture-model",

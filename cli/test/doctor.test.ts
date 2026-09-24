@@ -1,5 +1,9 @@
 import { createServer } from "node:http";
 import { afterEach, expect, it } from "vitest";
+import {
+  PROTOCOL_FEATURES,
+  PROTOCOL_VERSION,
+} from "@nylorun/core/compatibility";
 import { doctorSandbox, sandboxBanner } from "../src/doctor.js";
 
 const servers: { close(): void }[] = [];
@@ -7,6 +11,21 @@ afterEach(() => servers.splice(0).forEach((server) => server.close()));
 
 async function runtime(report: unknown): Promise<string> {
   const server = createServer((request, response) => {
+    const url = request.url ?? "/";
+    if (url === "/health") {
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          status: "ok",
+          protocol: {
+            min: PROTOCOL_VERSION,
+            max: PROTOCOL_VERSION,
+            features: [...PROTOCOL_FEATURES],
+          },
+        }),
+      );
+      return;
+    }
     expect(request.headers.authorization).toBe("Bearer key");
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify(report));

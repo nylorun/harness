@@ -17,17 +17,34 @@ const tenantId = "tn_01TESTDEV0000000000000001";
 
 vi.mock("../src/runtime/launcher.js", () => ({
   resolveHome: () => homeRef.value || "/tmp/nylorun-home",
-  runtimeVersion: () => "0.9.0-beta",
-  launcher: () => ({
-    run: async () => ({ events: [], exitCode: 0 }),
-    up: async () => ({
-      url: "http://127.0.0.1:9876",
-      hostId: "host_01habcdefghijklmnopqrstuv",
-      pid: 1,
-      version: "0.9.0-beta",
-      started: true,
+  throwOnLauncherFailure: () => {},
+  launcher: async () => ({
+    home: homeRef.value,
+    build: { path: "", version: "0.9.0-beta", launcher: "" },
+    invoke: async () => ({
+      events: [],
+      result: {
+        url: "http://127.0.0.1:9876",
+        hostId: "host_01habcdefghijklmnopqrstuv",
+        pid: 1,
+        version: "0.9.0-beta",
+        started: true,
+      },
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+    }),
+    invokeStreaming: async () => ({
+      events: [],
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
     }),
   }),
+}));
+
+vi.mock("../src/runtime/version.js", () => ({
+  runtimeVersion: () => "0.9.0-beta",
 }));
 
 vi.mock("../src/project/attach.js", async () => {
@@ -126,8 +143,8 @@ writeFileSync('app.json', JSON.stringify({
     key: process.env.NYLORUN_SERVER_KEY,
   },
 }));
-process.on('SIGTERM',()=>writeFileSync('app-stopped','yes'));
-process.on('SIGINT',()=>writeFileSync('app-stopped','yes'));
+process.on('SIGTERM',()=>{ try { writeFileSync('app-stopped','yes'); } catch {} process.exit(0); });
+process.on('SIGINT',()=>{ try { writeFileSync('app-stopped','yes'); } catch {} process.exit(0); });
 setInterval(()=>{}, 1000);
 `,
     );

@@ -110,13 +110,13 @@ async function main() {
   if (command === "tenant") return await tenantCommand(args);
 
   if (command === "runtime") {
-    if (args[0] === "status" && args.includes("--env")) {
-      // F2-7: print the linked Project's three variables (F1 owns the rest of status).
-      const root = findProjectRoot() ?? process.cwd();
-      await printLinkedEnvExports(root);
-      return;
-    }
-    return await runtimeCommand(args);
+    // F2-7: envHook prints the linked Project's three variables.
+    return await runtimeCommand(args, {
+      envHook: async () => {
+        const root = findProjectRoot() ?? process.cwd();
+        await printLinkedEnvExports(root);
+      },
+    });
   }
 
   if (command === "doctor") {

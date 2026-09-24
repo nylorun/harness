@@ -9,9 +9,10 @@ import { CliError } from "../errors.js";
 import {
   launcher,
   resolveHome,
-  runtimeVersion,
-  type UpResult,
+  throwOnLauncherFailure,
+  type LauncherInvokeResult,
 } from "../runtime/launcher.js";
+import { runtimeVersion } from "../runtime/version.js";
 import {
   readCredentials,
   removeCredentials,
@@ -24,6 +25,14 @@ import {
   writeLink,
   type ProjectLink,
 } from "./link.js";
+
+export interface UpResult {
+  url: string;
+  hostId: string;
+  pid: number;
+  version: string;
+  started: boolean;
+}
 
 export interface AttachedProject {
   projectRoot: string;
@@ -97,7 +106,14 @@ export async function attachProject(
   const fetchImpl = options.fetchImpl ?? fetch;
   const projectRoot = options.projectRoot;
   const home = resolveHome(options.home);
-  const host = await launcher(home).up({ version: runtimeVersion() });
+  const handle = await launcher(home);
+  const upOutcome = await handle.invoke([
+    "up",
+    "--version",
+    runtimeVersion(),
+  ]);
+  throwOnLauncherFailure(upOutcome);
+  const host = upResultFromInvoke(upOutcome);
   const hostUrl = host.url.replace(/\/$/, "");
   const hostId =
     host.hostId ||
@@ -320,6 +336,22 @@ export async function printLinkedEnvExports(
     `export NYLORUN_SERVER_KEY=${shellQuote(credentials.applicationKey)}`,
   );
   console.log(`export NYLORUN_TENANT=${shellQuote(link.tenantId)}`);
+}
+
+function upResultFromInvoke(outcome: LauncherInvokeResult): UpResult {
+  const result = outcome.result ?? {};
+  const url = typeof result.url === "string" ? result.url : "";
+  const hostId = typeof result.hostId === "string" ? result.hostId : "";
+  if (!url) {
+    throw new CliError("Runtime up succeeded without a URL.", 1);
+  }
+  return {
+    url,
+    hostId,
+    pid: typeof result.pid === "number" ? result.pid : 0,
+    version: typeof result.version === "string" ? result.version : "",
+    started: Boolean(result.started),
+  };
 }
 
 function shellQuote(value: string): string {

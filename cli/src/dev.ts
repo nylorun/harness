@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { loadProjectEnvironment } from "./environment.js";
 import { attachProject } from "./project/attach.js";
 import { seedTenantFromProject } from "./project/seed.js";
@@ -64,12 +64,8 @@ export function developmentPreflight(
  * `nylorun dev [entry]` — D§12 steps 1–4.
  * Spawns `tsx watch <entry>` with the three Project environment variables.
  */
-export async function develop(
-  options: DevelopOptions | readonly string[] = {},
-): Promise<number> {
-  const normalized: DevelopOptions = Array.isArray(options)
-    ? { flags: options }
-    : options;
+export async function develop(options: DevelopOptions = {}): Promise<number> {
+  const normalized = options;
   const projectRoot = normalized.projectRoot ?? requireProjectRoot();
   const previous = process.cwd();
   process.chdir(projectRoot);
@@ -84,11 +80,45 @@ export async function develop(
   }
 
   if (preflight.ephemeral) {
-    const { runEphemeralDev } = await import("./runtime/ephemeral.js");
-    return runEphemeralDev({
-      entry: preflight.entry,
-      projectRoot,
+    const { startEphemeral } = await import("./runtime/ephemeral.js");
+    const { writeLink } = await import("./project/link.js");
+    const { writeCredentials } = await import("./project/credentials.js");
+    const ephemeral = await startEphemeral({
+      name: basename(projectRoot),
     });
+    try {
+      await writeCredentials(projectRoot, {
+        applicationKey: ephemeral.applicationKey,
+        principalId: "pr_ephemeral",
+      });
+      await writeLink(projectRoot, {
+        hostUrl: ephemeral.url,
+        hostId: ephemeral.hostId,
+        tenantId: ephemeral.tenant.id,
+      });
+      const envMap = loadProjectEnvironment(projectRoot);
+      await seedTenantFromProject({
+        hostUrl: ephemeral.url,
+        tenantId: ephemeral.tenant.id,
+        applicationKey: ephemeral.applicationKey,
+        projectRoot,
+        env: envMap,
+      });
+      return await spawnWatcher({
+        projectRoot,
+        entry: preflight.entry,
+        tsx: preflight.tsx,
+        envMap,
+        hostUrl: ephemeral.url,
+        tenantId: ephemeral.tenant.id,
+        applicationKey: ephemeral.applicationKey,
+        tenantName: ephemeral.tenant.name,
+        hostStarted: true,
+        ephemeral: true,
+      });
+    } finally {
+      await ephemeral.close();
+    }
   }
 
   const attached = await attachProject({
@@ -104,28 +134,55 @@ export async function develop(
     env: envMap,
   });
 
-  const entryPath = resolve(projectRoot, preflight.entry);
+  return spawnWatcher({
+    projectRoot,
+    entry: preflight.entry,
+    tsx: preflight.tsx,
+    envMap,
+    hostUrl: attached.link.hostUrl,
+    tenantId: attached.link.tenantId,
+    applicationKey: attached.credentials.applicationKey,
+    tenantName: attached.tenantName,
+    hostStarted: attached.hostStarted,
+    ephemeral: false,
+  });
+}
+
+async function spawnWatcher(options: {
+  projectRoot: string;
+  entry: string;
+  tsx: string;
+  envMap: Record<string, string>;
+  hostUrl: string;
+  tenantId: string;
+  applicationKey: string;
+  tenantName: string;
+  hostStarted: boolean;
+  ephemeral: boolean;
+}): Promise<number> {
+  const entryPath = resolve(options.projectRoot, options.entry);
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
-    ...envMap,
-    NYLORUN_RUNTIME_URL: attached.link.hostUrl,
-    NYLORUN_TENANT: attached.link.tenantId,
-    NYLORUN_SERVER_KEY: attached.credentials.applicationKey,
+    ...options.envMap,
+    NYLORUN_RUNTIME_URL: options.hostUrl,
+    NYLORUN_TENANT: options.tenantId,
+    NYLORUN_SERVER_KEY: options.applicationKey,
   };
 
   printBanner({
-    hostUrl: attached.link.hostUrl,
-    hostStarted: attached.hostStarted,
-    tenantName: attached.tenantName,
-    tenantId: attached.link.tenantId,
-    entry: preflight.entry,
+    hostUrl: options.hostUrl,
+    hostStarted: options.hostStarted,
+    ephemeral: options.ephemeral,
+    tenantName: options.tenantName,
+    tenantId: options.tenantId,
+    entry: options.entry,
   });
 
   const child = spawn(
     process.execPath,
-    [preflight.tsx, "watch", "--clear-screen=false", entryPath],
+    [options.tsx, "watch", "--clear-screen=false", entryPath],
     {
-      cwd: projectRoot,
+      cwd: options.projectRoot,
       stdio: "inherit",
       env: childEnv,
       detached: process.platform !== "win32",
@@ -157,13 +214,16 @@ export async function develop(
 function printBanner(options: {
   hostUrl: string;
   hostStarted: boolean;
+  ephemeral: boolean;
   tenantName: string;
   tenantId: string;
   entry: string;
 }): void {
-  const hostNote = options.hostStarted
-    ? "(started; stays running)"
-    : "(already running)";
+  const hostNote = options.ephemeral
+    ? "(ephemeral; removed on exit)"
+    : options.hostStarted
+      ? "(started; stays running)"
+      : "(already running)";
   const short =
     options.tenantId.length > 12
       ? `${options.tenantId.slice(0, 12)}…`
@@ -174,5 +234,7 @@ function printBanner(options: {
   console.log(`Studio: npm run studio`);
   console.log("");
   console.log("Ctrl-C stops this Project only.");
-  console.log("nylorun runtime down  stops the Host.");
+  if (!options.ephemeral) {
+    console.log("nylorun runtime down  stops the Host.");
+  }
 }
