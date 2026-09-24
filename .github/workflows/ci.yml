@@ -112,7 +112,7 @@ jobs:
           fi
           VERSION=$(node -p "require('./runtime/package.json').version")
           "$LAUNCHER" --home "$NYLORUN_HOME" --json install "$VERSION" --from "$BUILD"
-          "$LAUNCHER" --home "$NYLORUN_HOME" --json up
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json up --version "$VERSION"
           "$LAUNCHER" --home "$NYLORUN_HOME" --json status
           "$LAUNCHER" --home "$NYLORUN_HOME" --json down --force
       - name: Launcher unit tests

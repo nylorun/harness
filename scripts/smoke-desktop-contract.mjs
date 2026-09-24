@@ -236,10 +236,19 @@ export async function runLauncherProcess(launcherPath, home, args, extraEnv = {}
     NYLORUN_HOME: home,
     ...extraEnv,
   };
-  const child = spawn(launcherPath, ["--home", home, "--json", ...args], {
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // Node on Windows rejects spawning `.cmd` without a shell (EINVAL / CVE-2024-27980).
+  const windowsCmd =
+    process.platform === "win32" &&
+    /\.cmd$/i.test(launcherPath);
+  const child = spawn(
+    launcherPath,
+    ["--home", home, "--json", ...args],
+    {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(windowsCmd ? { shell: true } : {}),
+    },
+  );
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (chunk) => {
