@@ -231,7 +231,10 @@ try {
       `tool completion missing.\n${text.slice(0, 2000)}\n${error instanceof Error ? error.message : error}`,
     );
   }
-  await page.getByText("Assistant", { exact: true }).first().waitFor();
+  await page
+    .getByText("Assistant", { exact: true })
+    .first()
+    .waitFor({ timeout: 20000 });
   assert.match(
     await page.locator("main").innerText(),
     /shipped|Order lookup complete/i,

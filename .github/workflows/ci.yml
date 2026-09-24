@@ -11,6 +11,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Bound the job so a wedged runner cannot block the PR matrix indefinitely.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
@@ -33,6 +35,9 @@ jobs:
       - run: npm run test:setup
       - name: Validate a proposed release
         if: github.event_name != 'merge_group'
+        # release:check is ~2–10 min when healthy; afdaee7 Validate wedged >50 min
+        # with no log progress on a frozen runner (cancel was 403 for the bot).
+        timeout-minutes: 20
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         shell: bash

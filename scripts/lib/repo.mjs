@@ -48,13 +48,42 @@ export function run(
     child.stderr?.on("data", (chunk) => {
       stderr += chunk;
     });
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeout);
+    let settled = false;
+    const failTimeout = () => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* already exited */
+      }
+      setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* already exited */
+        }
+      }, 5_000).unref?.();
+      reject(
+        Object.assign(
+          new Error(
+            `${command} ${args.join(" ")} timed out after ${timeout}ms.`,
+          ),
+          { code: null, stdout, stderr, timedOut: true },
+        ),
+      );
+    };
+    const timer = setTimeout(failTimeout, timeout);
     child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       reject(error);
     });
     // "close" fires after stdio drains, so captured JSON is never truncated.
     child.once("close", (code) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       if (code === 0) resolve(stdout.trim());
       else
