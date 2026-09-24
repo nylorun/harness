@@ -1,21 +1,16 @@
-/**
- * // CLIENTS-CCR: owned by WS-F1 — reads `cli/package.json` `nylorun.runtime`.
- */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliError } from "../errors.js";
 
 function cliPackageJsonPath(): string {
-  return join(
-    dirname(fileURLToPath(import.meta.url)),
-    "..",
-    "..",
-    "package.json",
-  );
+  // src/runtime/*.ts and dist/runtime/*.js both sit two levels below cli/.
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json");
 }
 
-/** Pinned Runtime build version from `cli/package.json` `nylorun.runtime` (D7). */
+/**
+ * Pinned Runtime build version from `cli/package.json` `nylorun.runtime` (D7).
+ */
 export function runtimeVersion(): string {
   let raw: unknown;
   try {
@@ -26,9 +21,12 @@ export function runtimeVersion(): string {
       1,
     );
   }
-  const version = (raw as { nylorun?: { runtime?: unknown } })?.nylorun
-    ?.runtime;
-  if (typeof version === "string" && version.trim() !== "") return version;
-  // CLIENTS-CCR: F1 adds nylorun.runtime; transitional fallback for local tests.
-  return "0.9.0-beta";
+  const version = (raw as { nylorun?: { runtime?: unknown } })?.nylorun?.runtime;
+  if (typeof version !== "string" || version.trim() === "") {
+    throw new CliError(
+      'cli/package.json is missing "nylorun.runtime" (the pinned Runtime build version).',
+      1,
+    );
+  }
+  return version;
 }

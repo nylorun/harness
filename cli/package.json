@@ -41,5 +41,8 @@
   },
   "bin": {
     "nylorun": "dist/cli.js"
+  },
+  "nylorun": {
+    "runtime": "0.9.0-beta"
   }
 }
