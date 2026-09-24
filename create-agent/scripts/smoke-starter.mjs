@@ -454,12 +454,15 @@ try {
       signal: AbortSignal.timeout(15_000),
     },
   );
+  // Read the body once — assert message args are eager, so do not call
+  // .text() inside the assertion message and then .json() afterward.
+  const modelText = await modelStatus.text();
   assert.equal(
     modelStatus.status,
     200,
-    `model status ${modelStatus.status}: ${(await modelStatus.text()).slice(0, 500)}`,
+    `model status ${modelStatus.status}: ${modelText.slice(0, 500)}`,
   );
-  const modelBody = await modelStatus.json();
+  const modelBody = JSON.parse(modelText);
   assert.equal(
     modelBody.configured,
     false,
