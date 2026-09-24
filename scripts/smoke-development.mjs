@@ -90,10 +90,10 @@ try {
     { project: temporary, built: true, hostRoot, home },
   );
   const url = `http://127.0.0.1:${studioPort}`;
-  assert.deepEqual(
-    await (await fetch(`${url}/nylo-studio.config.json`)).json(),
-    { runtimeUrl: "/_studio/runtime", local: true },
-  );
+  const config = await (await fetch(`${url}/nylo-studio.config.json`)).json();
+  assert.equal(config.runtimeUrl, "/_studio/runtime");
+  assert.equal(config.local, true);
+  assert.match(config.tenant?.id ?? "", /^tn_/);
   assert.match(await (await fetch(url)).text(), /<div id="root">/);
   // release/ ships assistant + sandbox analyst; wait for both, not the first.
   const agents = await waitForAgents(url, 2);

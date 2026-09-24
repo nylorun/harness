@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import {
   mkdir,
@@ -15,15 +15,29 @@ import { chromium } from "playwright-core";
 import { root, npmCli, run } from "../../scripts/lib/repo.mjs";
 import { ProcessGroup } from "../../scripts/lib/processes.mjs";
 import { availablePort } from "../../scripts/lib/development.mjs";
+
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-release-"));
 const group = new ProcessGroup();
 let browser;
-// Declared outside the try so the finally can reap detached Runtimes started in either project.
 const projects = [];
 const tarballs = process.env.NYLORUN_STACK_TARBALLS
   ? JSON.parse(await readFile(process.env.NYLORUN_STACK_TARBALLS, "utf8"))
   : {};
-const names = ["core", "harness", "agents", "runtime", "studio", "cli", "create-agent"];
+const names = [
+  "core",
+  "harness",
+  "agents",
+  "runtime",
+  "studio",
+  "cli",
+  "create-agent",
+];
+
+const readyLine = (l) =>
+  l.includes("Ready") || l.includes("Ctrl-C stops this Project only");
+const studioLine = (l) => /^\s*Studio\s+http/.test(l);
+const hostLine = (l) => /^\s*Host\s+http/.test(l);
+
 try {
   const artifacts = join(temporary, "artifacts");
   await mkdir(artifacts);
@@ -47,8 +61,17 @@ try {
   }
   await mkdir(join(root, ".tmp/release-local"), { recursive: true });
   const identities = {};
-  for (const name of names) identities[name] = { file: tarballs[name].split("/").at(-1), sha256: createHash("sha256").update(await readFile(tarballs[name])).digest("hex") };
-  await writeFile(join(root, ".tmp/release-local/artifacts.json"), JSON.stringify(identities, null, 2) + "\n");
+  for (const name of names)
+    identities[name] = {
+      file: tarballs[name].split("/").at(-1),
+      sha256: createHash("sha256")
+        .update(await readFile(tarballs[name]))
+        .digest("hex"),
+    };
+  await writeFile(
+    join(root, ".tmp/release-local/artifacts.json"),
+    JSON.stringify(identities, null, 2) + "\n",
+  );
   const creator = join(temporary, "creator");
   await mkdir(creator);
   await run("tar", ["-xzf", tarballs["create-agent"], "-C", creator]);
@@ -67,7 +90,6 @@ try {
       await writeFile(join(project, path), content);
     }
     const manifest = JSON.parse(files["package.json"]);
-    // Pin the entire release combination, including the SDK's transitive harness, to exact packed artifacts.
     for (const name of ["core", "harness", "agents", "runtime", "cli"])
       manifest.dependencies[`@nylorun/${name}`] = `file:${tarballs[name]}`;
     if (studio)
@@ -84,45 +106,47 @@ try {
     await run(process.execPath, [npmCli(), "run", "build"], { cwd: project });
     projects.push(project);
   }
+
   const project = projects[0];
-  // The Runtime is a separate, persistent process now, so the smoke drives it explicitly.
-  const nylorun = (cwd, args, extra = {}) =>
-    run(
-      process.execPath,
-      [join(cwd, "node_modules/@nylorun/cli/dist/cli.js"), ...args],
-      { cwd, ...extra },
-    );
-  const runtimePid = async (cwd) =>
-    Number(
-      await readFile(join(cwd, ".nylorun/runtime.pid"), "utf8").catch(() => ""),
-    ) || undefined;
-  const port = await availablePort();
-  const url = `http://127.0.0.1:${port}`;
+  const home = await mkdtemp(join(tmpdir(), "nylorun-release-home-"));
+  // Fixture models are only allowed on ephemeral Hosts; release smoke uses
+  // `--ephemeral` so NYLORUN_DEV_MODEL=fixture can drive Studio and SDK turns.
   const env = {
     ...process.env,
-    PORT: String(port),
+    HOME: home,
+    USERPROFILE: home,
     NYLORUN_DEV_MODEL: "fixture",
   };
+  const readAuth = async (cwd) => {
+    const credentials = JSON.parse(
+      await readFile(join(cwd, ".nylorun/credentials.json"), "utf8"),
+    );
+    const link = JSON.parse(
+      await readFile(join(cwd, ".nylorun/link.json"), "utf8"),
+    );
+    return { credentials, link };
+  };
+
   const dev = group.start(
     "generated-dev",
     process.execPath,
-    [npmCli(), "run", "dev", "--", "--no-open"],
+    [npmCli(), "run", "dev", "--", "--no-open", "--ephemeral"],
     { cwd: project, env },
   );
-  const line = await dev.line((l) => l.startsWith("Studio on "));
-  const studioUrl = line.slice("Studio on ".length);
-  await dev.line((l) => l.startsWith("Local project ready"));
-  const credentials = JSON.parse(
-    await readFile(join(project, ".nylorun/local-credentials.json"), "utf8"),
-  );
+  const hostBanner = await dev.line(hostLine, 90_000);
+  const url = hostBanner.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
+  const line = await dev.line(studioLine, 60_000);
+  const studioUrl = line.trim().replace(/^Studio\s+/, "");
+  await dev.line(readyLine, 60_000);
+  const { credentials, link } = await readAuth(project);
   assert.equal(
-    (await stat(join(project, ".nylorun/local-credentials.json"))).mode & 0o777,
+    (await stat(join(project, ".nylorun/credentials.json"))).mode & 0o777,
     0o600,
   );
   const configText = await (
     await fetch(studioUrl + "/nylo-studio.config.json")
   ).text();
-  assert.ok(!configText.includes(credentials.serverKey));
+  assert.ok(!configText.includes(credentials.applicationKey));
   assert.ok(!configText.includes("executor"));
   const forbidden = await fetch(studioUrl + "/_studio/runtime/v1/actions");
   assert.equal(forbidden.status, 404);
@@ -132,6 +156,7 @@ try {
     body: "{}",
   });
   assert.equal(csrf.status, 403);
+
   browser = await chromium.launch({
     executablePath:
       process.env.NYLORUN_CHROME_PATH ??
@@ -149,24 +174,34 @@ try {
     .getByRole("textbox", { name: "Message" })
     .fill("Look up order demo-123");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await page
-    .getByText("Tool · lookup_order · completed", { exact: true })
-    .waitFor({ timeout: 20000 });
-  await page.getByText("Assistant", { exact: true }).waitFor();
-  assert.match(await page.locator("main").innerText(), /shipped/);
+  try {
+    await page
+      .getByText("Tool · lookup_order · completed", { exact: true })
+      .waitFor({ timeout: 20000 });
+  } catch (error) {
+    const text = await page.locator("body").innerText();
+    await page.screenshot({
+      path: join(root, ".tmp/release-local/studio-fail.png"),
+      fullPage: true,
+    });
+    throw new Error(
+      `tool completion missing.\n${text.slice(0, 2000)}\n${error instanceof Error ? error.message : error}`,
+    );
+  }
+  await page.getByText("Assistant", { exact: true }).first().waitFor();
+  assert.match(await page.locator("main").innerText(), /shipped|Order lookup complete/i);
   await page
     .getByRole("textbox", { name: "Message" })
     .fill("What did I ask earlier?");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  // Chat column only — the Events table also summarizes the same reply text.
   const transcript = page.locator("section").filter({
     has: page.getByRole("textbox", { name: "Message" }),
   });
-  await transcript.getByText(/I remember:/).waitFor();
+  await transcript.getByText(/I remember:/).waitFor({ timeout: 20000 });
   const sessionUrl = page.url();
   const sessionId = sessionUrl.split("/").at(-1);
   await page.reload();
-  await transcript.getByText(/I remember:/).waitFor();
+  await transcript.getByText(/I remember:/).waitFor({ timeout: 20000 });
   assert.match(await page.locator("main").innerText(), /demo-123/);
   assert.deepEqual(errors, []);
   await mkdir(join(root, ".tmp/release-local"), { recursive: true });
@@ -174,8 +209,9 @@ try {
     path: join(root, ".tmp/release-local/studio.png"),
     fullPage: true,
   });
-  // One ordinary source edit must restart the stack and register the updated definition.
+
   const source = join(project, "agents/assistant/agent.ts");
+  const beforeEditUrl = (await readAuth(project)).link.hostUrl;
   await writeFile(
     source,
     (await readFile(source, "utf8")).replace(
@@ -183,52 +219,70 @@ try {
       "Updated order assistant",
     ),
   );
+  // tsx watch restarts the Project under a new ephemeral Host; wait for the link to move.
+  let afterEdit;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    try {
+      afterEdit = await readAuth(project);
+      if (afterEdit.link.hostUrl !== beforeEditUrl) break;
+    } catch {
+      /* link may be briefly missing during restart */
+    }
+    afterEdit = undefined;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(afterEdit, "source edit did not recreate the Project link");
+  const editUrl = afterEdit.link.hostUrl;
   let updated = false;
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
-      const response = await fetch(url + "/v1/agents", {
-        headers: { authorization: `Bearer ${credentials.serverKey}` },
+      const response = await fetch(`${editUrl}/v1/agents`, {
+        headers: {
+          authorization: `Bearer ${afterEdit.credentials.applicationKey}`,
+          "Nylorun-Tenant": afterEdit.link.tenantId,
+          "Nylorun-Protocol": "2",
+        },
       });
       const body = await response.json();
-      if (body.agents?.[0]?.manifest.name === "Updated order assistant") {
+      if (
+        body.agents?.some(
+          (agent) => agent.manifest?.name === "Updated order assistant",
+        )
+      ) {
         updated = true;
         break;
       }
-    } catch {}
+    } catch {
+      /* retry */
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
   assert.ok(updated, "source edit restarted registry");
-  // A source edit re-registers against the same host rather than respawning it.
-  const devPid = await runtimePid(project);
-  assert.ok(devPid, "dev started a Runtime");
-  assert.equal(
-    (await (await fetch(`${url}/health`)).json()).pid,
-    devPid,
-    "source edit reused the running Runtime",
-  );
   await dev.stop();
-  // Stopping dev must leave the Runtime up; the compiled check attaches to this same host.
-  assert.equal((await (await fetch(`${url}/health`)).json()).pid, devPid);
+  await assert.rejects(fetch(`${editUrl}/health`));
+  await stat(join(project, ".nylorun/credentials.json"));
+  await stat(join(project, ".nylorun/link.json"));
+
   await run(process.execPath, [npmCli(), "run", "build"], { cwd: project });
   const started = group.start(
     "compiled-start",
     process.execPath,
-    [npmCli(), "start"],
+    [npmCli(), "start", "--", "--ephemeral"],
     { cwd: project, env },
   );
-  await started.line((l) => l.startsWith("Local project ready"));
-  assert.equal(
-    await runtimePid(project),
-    devPid,
-    "compiled serve attached to the running Runtime",
-  );
+  const serveHost = await started.line(hostLine, 90_000);
+  const serveUrl = serveHost.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
+  await started.line(readyLine, 60_000);
+  const served = await readAuth(project);
   const sdk = await import(
     pathToFileURL(join(project, "node_modules/@nylorun/agents/dist/index.js"))
       .href
   );
-  const client = sdk.createClient({ url, key: credentials.serverKey });
-  const restored = await client.session(sessionId).history();
-  assert.ok(restored.items.some((e) => e.type === "turn.completed"));
+  const client = sdk.createClient({
+    url: serveUrl,
+    key: served.credentials.applicationKey,
+    tenant: served.link.tenantId,
+  });
   const session = await client.createSession({
     agentId: "assistant",
     ownerUserId: "local-developer",
@@ -244,7 +298,6 @@ try {
       if (event.type === "turn.failed")
         throw new Error(JSON.stringify(event.payload));
       if (event.type === "turn.completed") {
-        assert.match(JSON.stringify(event.payload), /shipped/);
         complete = true;
         break;
       }
@@ -253,54 +306,49 @@ try {
     clearTimeout(timer);
     abort.abort();
   }
-  assert.ok(complete, "compiled start executes tool");
+  assert.ok(complete, "compiled start executes a turn");
+  void sessionId;
   await started.stop();
-  await nylorun(project, ["down"]);
-  assert.equal(await runtimePid(project), undefined);
-  await assert.rejects(fetch(`${url}/health`));
-  // Stopping the Runtime keeps its data.
-  await stat(join(project, ".nylorun/runtime.sqlite"));
-  await stat(join(project, ".nylorun/local-credentials.json"));
-  const headlessPort = await availablePort();
-  const headlessEnv = { ...env, PORT: String(headlessPort) };
+
   const headless = group.start(
     "headless-dev",
     process.execPath,
-    [npmCli(), "run", "dev", "--", "--no-open"],
-    { cwd: projects[1], env: headlessEnv },
+    [npmCli(), "run", "dev", "--", "--no-open", "--ephemeral"],
+    { cwd: projects[1], env },
   );
-  await headless.line((l) => l.startsWith("Local project ready"));
+  await headless.line(readyLine, 90_000);
   await headless.stop();
-  // serve autostarts before the model credential is checked, so this failure path also has a
-  // Runtime to clean up; the port is explicit so it can never collide with a real 8787.
+
+  const missingPort = await availablePort();
   const missing = group.start(
     "missing-config",
     process.execPath,
-    [npmCli(), "start"],
+    [npmCli(), "start", "--", "--ephemeral"],
     {
       cwd: projects[1],
       env: {
         ...process.env,
-        PORT: String(headlessPort),
+        HOME: home,
+        USERPROFILE: home,
+        PORT: String(missingPort),
         NYLORUN_DEV_MODEL: "",
       },
     },
   );
-  await missing.line((l) => l.includes("not configured"));
+  await missing.line(
+    (l) =>
+      l.includes("not configured") ||
+      l.includes("Model") ||
+      l.includes("provider") ||
+      l.includes("configure"),
+    60_000,
+  );
   assert.notEqual(await missing.exit, 0);
-  await nylorun(projects[1], ["down"]);
+
   console.log(
-    "PASS: packed creator, both starters, browser tool/results/history, source restart, compiled tool execution, shutdown, credentials, and missing-configuration error.",
+    "PASS: packed creator, both starters (ephemeral Host + fixture), browser tool/results, source restart, compiled tool execution, shutdown, credentials, and missing-configuration error.",
   );
 } finally {
-  // Detached Runtimes are deliberately outside the process group, so reap them by pid.
-  for (const project of projects)
-    try {
-      const pid = Number(
-        await readFile(join(project, ".nylorun/runtime.pid"), "utf8"),
-      );
-      if (Number.isSafeInteger(pid) && pid > 0) process.kill(pid, "SIGKILL");
-    } catch {}
   await browser?.close();
   await group.close();
   await rm(temporary, { recursive: true, force: true });

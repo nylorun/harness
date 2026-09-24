@@ -58,7 +58,7 @@ import {
 } from "../core/executors.js";
 import { hostModelCatalog } from "../model/catalog.js";
 import { piModel } from "../model/pi-model.js";
-import { scriptedModel, gatewayModel, type ModelProvider } from "../core/provider.js";
+import { scriptedModel, gatewayModel, toolFixtureModel, type ModelProvider } from "../core/provider.js";
 import { scrub } from "../redact.js";
 import { createKekFile, readVaultKek } from "../vault/kek.js";
 import { QuarantineError } from "./quarantine-error.js";
@@ -411,7 +411,7 @@ export class TenantRuntime implements TenantHandle {
     else if (config.model.kind === "scripted")
       this.modelProvider = scriptedModel(config.model.output);
     else if (config.model.kind === "fixture")
-      this.modelProvider = scriptedModel("Fixture development response");
+      this.modelProvider = toolFixtureModel();
     else if (config.model.kind === "gateway") {
       const gateway = config.model;
       this.modelProvider = async (effect, signal) => {
