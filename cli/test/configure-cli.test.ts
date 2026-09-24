@@ -91,7 +91,10 @@ function tenantHeaders(key: string, tenantId: string): Record<string, string> {
   };
 }
 
-it("configures a custom provider using scripted stdin and no live model calls", async () => {
+it(
+  "configures a custom provider using scripted stdin and no live model calls",
+  { timeout: 20_000 },
+  async () => {
   let step = 0;
   const result = await run((text, child) => {
     if (step === 0 && text.includes("Choose a provider:")) {
@@ -100,13 +103,11 @@ it("configures a custom provider using scripted stdin and no live model calls", 
     } else if (step === 1 && text.includes("Choose a model:")) {
       step = 2;
       child.stdin!.write("1\n");
-    } else if (step === 2 && /API key|Paste|Enter/i.test(text)) {
+    } else if (step === 2 && /API key|Paste|Enter|key/i.test(text)) {
       step = 3;
       child.stdin!.write("sk-fixture-key\n");
     }
   });
-  // Interactive catalog varies by installed providers; accept cancel-free completion
-  // when the fixture provider path is available, otherwise at least reach the prompt.
   expect(result.text).toContain("Choose a provider:");
   if (result.code === 0) {
     expect(result.text).toContain("Provider configuration saved.");

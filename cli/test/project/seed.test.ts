@@ -37,13 +37,14 @@ it("F3: seeds sandbox via config/seed and does not overwrite on second call", as
   const tenantId = newTenantId();
   let seedCalls = 0;
   let modelPuts = 0;
+  const backends: string[] = [];
   const server = createServer(async (request, response) => {
     if (request.url === "/v1/tenant/config/seed" && request.method === "PUT") {
       seedCalls += 1;
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(chunk as Buffer);
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      expect(body.sandbox).toEqual({ backend: "virtual" });
+      backends.push(body.sandbox.backend);
       response.setHeader("content-type", "application/json");
       response.end(
         JSON.stringify(
@@ -100,4 +101,5 @@ it("F3: seeds sandbox via config/seed and does not overwrite on second call", as
   });
   expect(second.kept).toContain("sandbox.backend");
   expect(seedCalls).toBe(2);
+  expect(backends).toEqual(["virtual", "microsandbox"]);
 });

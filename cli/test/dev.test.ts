@@ -126,10 +126,20 @@ async function wait(check: () => Promise<void>, ms = 20_000) {
 
 it("rejects invalid setup before starting children", async () => {
   const root = await fixture(false, false);
-  expect(() => developmentPreflight([])).toThrow("Install tsx");
+  const previous = process.cwd();
+  try {
+    process.chdir(root);
+    expect(() => developmentPreflight([])).toThrow("Install tsx");
+  } finally {
+    process.chdir(previous);
+  }
   const withTsx = await fixture(true, false);
-  expect(() => developmentPreflight([])).toThrow("Install @nylorun/studio");
-  void withTsx;
+  try {
+    process.chdir(withTsx);
+    expect(() => developmentPreflight([])).toThrow("Install @nylorun/studio");
+  } finally {
+    process.chdir(previous);
+  }
   const task = run(root, ["--bad"]);
   expect(await task.closed).toBe(2);
   expect(task.output()).toMatch(/nylorun <|Usage:/);

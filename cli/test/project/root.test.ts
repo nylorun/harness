@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { findProjectRoot, requireProjectRoot } from "../src/project/root.js";
+import { findProjectRoot, requireProjectRoot } from "../../src/project/root.js";
 
 const roots: string[] = [];
 async function temporary(prefix = "nylorun-project-") {

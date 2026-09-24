@@ -241,6 +241,13 @@ async function main() {
     developmentPreflight(
       [...flags.booleans].filter((flag) => flag !== "--ephemeral"),
     );
+    // Surface Host/autostart exit codes from this process before spawning tsx.
+    if (!flags.booleans.has("--ephemeral")) {
+      const { ensureHost } = await import("./host/lifecycle.js");
+      await ensureHost({
+        autostart: !flags.booleans.has("--no-autostart"),
+      });
+    }
     process.exitCode = await develop([...flags.booleans]);
     return;
   }

@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { newTenantId } from "@nylorun/agents";
-import { matchTenant } from "../src/tenant/commands.js";
-import type { AdminTenant } from "../src/host/admin-client.js";
+import { matchTenant } from "../../src/tenant/commands.js";
+import type { AdminTenant } from "../../src/host/admin-client.js";
 
 function tenant(
   name: string | null,
