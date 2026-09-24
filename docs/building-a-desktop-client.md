@@ -1,6 +1,6 @@
 # Building a desktop client
 
-Draft for Runtime Clients and Admin API version 1. Babai (outside this
+Adopted for Runtime Clients and Admin API version 1. Babai (outside this
 repository) is the reference experience. This document specifies the contracts
 a desktop app must use — not Babai's UI or packaging.
 

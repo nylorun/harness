@@ -1,7 +1,8 @@
 # Package architecture
 
-Status: adopted for Runtime Clients and Admin API (version 1). Builds on the
-clean beta package migration. Cloud migration remains a separate operation.
+Status: adopted (final) for Runtime Clients and Admin API (version 1). Builds
+on the clean beta package migration. Cloud migration remains a separate
+operation.
 
 ## Intent
 
