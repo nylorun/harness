@@ -1,7 +1,5 @@
 # My Nylorun agent
 
-> **DRAFT (WS-I Wave 1).** Project link + Tenant wording. Finalize in Wave 3.
-
 Requires Node 24 and npm 11. Agent and tool definitions live in `agents/`. A
 **Runtime Host** holds your sessions in isolated **Tenants**; this project
 attaches through a **Project link** and connects your tools through the SDK's
@@ -45,6 +43,7 @@ Export the linked Project environment:
 
 ```sh
 eval "$(npx nylorun runtime status --env)"
+# → NYLORUN_RUNTIME_URL, NYLORUN_SERVER_KEY, NYLORUN_TENANT
 ```
 
 Project link and credentials live in gitignored `.nylorun/` beside this project.

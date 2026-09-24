@@ -1,13 +1,10 @@
 # @nylorun/agents
 
-> **DRAFT (WS-I Wave 1).** Tenant selection and protocol negotiation land with
-> Runtime Tenants. Finalize in Wave 3. Vocabulary:
-> [runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
-
 One application install provides definition authoring, a session client, and a
 connected customer executor. This beta is currently built locally; no packages
 were published in this pass. Use the workspace or install packed SDK and core
-artifacts together until publishing is enabled.
+artifacts together until publishing is enabled. Vocabulary:
+[runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
 
 ```ts
 import { Agent, createClient, connectAgents, tool } from "@nylorun/agents";
@@ -58,6 +55,13 @@ await connection.ready;
 await connection.close();
 ```
 
+Or, after linking a Project:
+
+```sh
+eval "$(npx nylorun runtime status --env)"
+# → NYLORUN_RUNTIME_URL, NYLORUN_SERVER_KEY, NYLORUN_TENANT
+```
+
 Every request sets `Nylorun-Tenant` and `Nylorun-Protocol`. A `tenant` field in a
 body or query is never read from caller input. Before the first authenticated
 request, `Transport` fetches `/health` once, checks protocol compatibility, and
@@ -96,7 +100,7 @@ const assistant = Agent({
       type: "streamable-http",
       url: "https://mcp.example.com/github",
     },
-  })
+  }),
 );
 ```
 
@@ -124,7 +128,7 @@ The model gets `bash`, `read`, `write`, `edit`, `grep` and `glob` on a Linux mac
 }))
 ```
 
-The `dev` preset allows package registries and code hosts. Private networks, loopback, the host and cloud metadata endpoints are always blocked. Options from the full design that are not in this version (`setup`, `files`, `secrets`, `mount`, `onStart`, `scope`, ...) throw a `SandboxError` that says so. See [the sandbox design](../docs/design/sandboxes.md).
+The `dev` preset allows package registries and code hosts. Private networks, loopback, the host and cloud metadata endpoints are always blocked. Options from the full design that are not in this version (`setup`, `files`, `secrets`, `mount`, `onStart`, …) throw a `SandboxError` that says so. See [the sandbox design](../docs/design/sandboxes.md).
 
 Put an agent in another agent's `tools` to let the model delegate to it:
 
@@ -134,15 +138,21 @@ import { z } from "zod";
 
 const researcher = Agent({
   id: "researcher",
-  description: "Investigates an order's history. Returns a short summary with the ids it relied on.",
-  instructions: "Investigate one question about one order. Be exhaustive, then be brief.",
+  description:
+    "Investigates an order's history. Returns a short summary with the ids it relied on.",
+  instructions:
+    "Investigate one question about one order. Be exhaustive, then be brief.",
   tools: [searchOrders, readTicket],
-  outputSchema: z.object({ summary: z.string(), evidence: z.array(z.string()) }),
+  outputSchema: z.object({
+    summary: z.string(),
+    evidence: z.array(z.string()),
+  }),
 });
 
 const support = Agent({
   id: "support",
-  instructions: "For anything needing more than two lookups, delegate to researcher with a complete, self-contained task.",
+  instructions:
+    "For anything needing more than two lookups, delegate to researcher with a complete, self-contained task.",
   tools: [lookupOrder, refundOrder, researcher],
 });
 ```

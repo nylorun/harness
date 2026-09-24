@@ -1,9 +1,8 @@
 # @nylorun/studio
 
-> **DRAFT (WS-I Wave 1).** Tenant-aware proxy and UI copy. Finalize in Wave 3.
-
 Local session dashboard for one **Tenant** on the OSS Runtime Host. Requires
-Node 24.
+Node 24. Vocabulary:
+[runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
 
 The starter's `npm run dev` starts Studio automatically. To attach to an
 already running linked Project, use `npm run studio`, or `nylorun studio`, which

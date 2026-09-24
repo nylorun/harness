@@ -1,10 +1,7 @@
 # Runtime Tenants vocabulary
 
-> **DRAFT (WS-I Wave 1).** Companion design `runtime-tenants.md` was not available
-> when this was drafted. Terms follow the Runtime Tenants implementation plan
-> (Wave 0 contracts and Host / Tenant / Project link terminology). Finalize in
-> Wave 3 against merged behaviour. Every agent uses these terms in code,
-> comments, errors and CLI output.
+Terms follow the Runtime Tenants model as shipped on this branch. Every agent
+uses these terms in code, comments, errors and CLI output.
 
 Agent definitions describe capabilities. The harness engine advances execution.
 A **Runtime Host** listens once and routes work into isolated **Tenants**. A
@@ -16,10 +13,10 @@ Host process or its storage.
 **Runtime Host** (or **Host**): The long-lived process that binds one address,
 discovers Tenants under its Host root (`NYLORUN_HOME` or `~/.nylorun`), validates
 `Nylorun-Protocol` and `Nylorun-Tenant`, serves admin routes, and forwards Tenant
-routes to the matching Tenant Runtime. `/health` reports `hostId` and protocol
-range; `/ready` is true only after discovery has finished. The Host writes
-`host.json`, `host-state.json`, `host-credentials.json` and `runtime.log` — not
-a registry of Tenant contents.
+routes to the matching Tenant Runtime. `/health` reports `service: "nylorun-runtime"`,
+`hostId` and protocol range; `/ready` is true only after discovery has finished.
+The Host writes `host.json`, `host-state.json`, `host-credentials.json` and
+`runtime.log` — not a registry of Tenant contents.
 _Avoid_: calling the Host a "scope", "project Runtime", or "global Runtime".
 
 **Tenant**: One isolated unit of sessions, principals, vault, sandboxes, plugin
@@ -42,8 +39,8 @@ _Avoid_: equating "Runtime" alone with a single Project's process.
 `{ hostUrl, hostId, tenantId }`, plus `.nylorun/credentials.json` (mode 0600)
 holding the application key and executor tokens. A fresh clone or second
 worktree does not attach until it creates or chooses a link.
-_Avoid_: "project scope" and "global scope"; `--global`, `--db`, and
-`NYLORUN_SQLITE_PATH` as ways to choose isolation.
+_Avoid_: naming isolation by Project-local vs shared home layout; removed CLI
+flags and env vars that selected a SQLite path.
 
 **Application principal**: Bearer credential hashed in the Tenant `principals`
 table. Authorizes definition and session routes for that Tenant only.
@@ -51,7 +48,7 @@ _Avoid_: "server token" / `serverToken` as the public name (legacy API).
 
 **Executor principal**: Bearer credential hashed in the Tenant `executors`
 table, scoped to an `agentId`. Never equal to an application principal hash.
-_Avoid_: "startup scopes" / `NYLORUN_EXECUTORS_JSON` (removed).
+_Avoid_: startup env registration of executors (removed).
 
 **Admin key**: Host-level secret in `host-credentials.json` (mode 0600).
 Authorizes `/v1/admin/*` only; never accepted as a Tenant bearer.
@@ -63,11 +60,11 @@ _Avoid_: treating package-version equality as the compatibility check.
 
 ## Terms to avoid (appear nowhere in new copy)
 
-| Avoid | Use instead |
-| --- | --- |
-| project scope / global scope | Host root + Tenant + Project link |
-| scopeId (as Host identity) | `hostId` |
-| `--global`, `--db`, `NYLORUN_SQLITE_PATH` | Host root / Tenant paths (CLI) |
-| `/v1/host/model*` (Tenant routes) | `/v1/tenant/model*` |
-| `startRuntime` / `createRuntime` | `startEphemeralRuntime` (tests) / Host entry |
-| `NYLORUN_EXECUTORS_JSON` | `PUT /v1/executors` with application credential |
+| Avoid                                     | Use instead                                     |
+| ----------------------------------------- | ----------------------------------------------- |
+| project scope / global scope              | Host root + Tenant + Project link               |
+| scopeId (as Host identity)                | `hostId`                                        |
+| `--global`, `--db`, `NYLORUN_SQLITE_PATH` | Host root / Tenant paths (CLI)                  |
+| `/v1/host/model*` (Tenant routes)         | `/v1/tenant/model*`                             |
+| `startRuntime` / `createRuntime`          | `startEphemeralRuntime` (tests) / Host entry    |
+| `NYLORUN_EXECUTORS_JSON`                  | `PUT /v1/executors` with application credential |

@@ -1,10 +1,7 @@
 # @nylorun/cli
 
-> **DRAFT (WS-I Wave 1).** Host lifecycle (Wave 1) and Project link / `tenant`
-> commands (Wave 2) are described from the Runtime Tenants plan. Finalize in
-> Wave 3. Vocabulary: [runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
-
-The local `nylorun` executable. Requires Node 24+.
+The local `nylorun` executable. Requires Node 24+. Vocabulary:
+[runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
 
 ```sh
 nylorun runtime up                 # start the Runtime Host (detached)
@@ -20,6 +17,7 @@ nylorun serve [entry]              # compiled build (default dist/agents/index.j
 nylorun configure                  # replace model credential on the linked Tenant
 nylorun studio
 nylorun tenant current|list|use|status|reset|delete
+nylorun doctor sandbox             # which sandbox backend this machine offers
 ```
 
 ## The Runtime Host is a separate, persistent process
@@ -35,7 +33,7 @@ listening, and leave it running on exit. Pass `--no-autostart` to fail instead
 
 The **Host root** is `NYLORUN_HOME` or `~/.nylorun` (resolved absolute once).
 It holds `host.json`, admin credentials, installed runtimes and every Tenant.
-There is no project/global "scope": isolation is per **Tenant**.
+Isolation is per **Tenant**, not per Project directory.
 
 A **Project** stores only:
 
@@ -48,32 +46,40 @@ only hashes are sent), writes link + credentials after success, and prints a
 banner with Host address and Tenant name/id.
 
 ```sh
-# After a Project is linked (Wave 2):
 eval "$(npx nylorun runtime status --env)"
 # → NYLORUN_RUNTIME_URL, NYLORUN_SERVER_KEY, NYLORUN_TENANT
 ```
 
-`--global`, `--db`, and `NYLORUN_SQLITE_PATH` are removed. Port defaults to
-`8787` on loopback (or a free port persisted on first automatic setup);
-`--port` is strict.
+Port defaults to `8787` on loopback. On first automatic Host setup, if that port
+is taken, the CLI picks a free loopback port, persists it in `host.json`, and
+prints the URL. Explicit `--port` is strict (exit 4 on collision).
 
-## Exit codes (draft)
+## Exit codes
 
-| Code | Meaning |
-| --- | --- |
-| 0 | Success, including `down` when nothing was running |
-| 1 | Generic failure |
-| 2 | Usage error |
-| 3 | `runtime status` or `logs`: not running |
-| 4 | Port held by another process |
-| 5 | Protocol / feature incompatible with this CLI |
-| 6 | `--no-autostart` and nothing is listening |
-| 7 | The Host did not become ready |
-| 130 / 143 | SIGINT / SIGTERM |
+| Code      | Meaning                                            |
+| --------- | -------------------------------------------------- |
+| 0         | Success, including `down` when nothing was running |
+| 1         | Generic failure                                    |
+| 2         | Usage error                                        |
+| 3         | `runtime status` or `logs`: not running            |
+| 4         | Port held by another process                       |
+| 5         | Protocol / feature incompatible with this CLI      |
+| 6         | `--no-autostart` and nothing is listening          |
+| 7         | The Host did not become ready                      |
+| 130 / 143 | SIGINT / SIGTERM                                   |
 
 `dev` loads `agents/index.ts` using project-installed `tsx` and watches changes.
 Studio and `tsx` are optional development dependencies; the CLI is a production
 dependency when the application's `start` script uses it.
+
+## Troubleshooting
+
+| Symptom                | What to do                                                              |
+| ---------------------- | ----------------------------------------------------------------------- |
+| Quarantined Tenant     | `nylorun tenant status` shows reason and `repair`                       |
+| `426` / exit 5         | `nylorun runtime restart` from a newer CLI, or pin a matching older CLI |
+| Port conflict (exit 4) | Stop the other process or `nylorun runtime up --port <n>`               |
+| Logs                   | `nylorun runtime logs --follow`                                         |
 
 See [package architecture](../docs/design/package-architecture.md) and
 [MIGRATION.md](../MIGRATION.md#runtime-tenants-breaking-beta).

@@ -1,8 +1,5 @@
 # Building agents
 
-> **DRAFT (WS-I Wave 1).** Companion design missing; authored from Runtime
-> Tenants Wave 0 vocabulary and SDK surfaces. Finalize in Wave 3.
-
 Author definitions with `@nylorun/agents`. Run them against a **Tenant** on a
 **Runtime Host**. A local Project attaches through a **Project link**. Full
 terms: [runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
@@ -39,6 +36,7 @@ Or, after linking a Project:
 
 ```sh
 eval "$(npx nylorun runtime status --env)"
+# → NYLORUN_RUNTIME_URL, NYLORUN_SERVER_KEY, NYLORUN_TENANT
 ```
 
 ## Rules that matter for Tenants
@@ -52,4 +50,4 @@ eval "$(npx nylorun runtime status --env)"
 
 See [agents/README.md](../agents/README.md) for skills, MCP, sandbox, and
 subagents; [MIGRATION.md](../MIGRATION.md#runtime-tenants-breaking-beta) for the
-breaking move off project/global scope.
+breaking move to Host root + Tenant + Project link.

@@ -2,16 +2,16 @@
 
 ## Repository map
 
-| Directory | Responsibility |
-|---|---|
-| `core/` | Shared definitions and contracts |
-| `harness/` | Agent execution engine |
-| `cli/` | Local `nylorun` orchestration |
-| `runtime/` | Providers, hosting and persistence |
-| `studio/` | Dashboard and programmatic startup |
-| `create-agent/` | Starter, renderer, compatibility pins, and stack tests |
-| `examples/` | Generated application shell and authored demonstrations |
-| `scripts/` | Repository development, validation, and release tooling |
+| Directory       | Responsibility                                          |
+| --------------- | ------------------------------------------------------- |
+| `core/`         | Shared definitions and contracts                        |
+| `harness/`      | Agent execution engine                                  |
+| `cli/`          | Local `nylorun` orchestration                           |
+| `runtime/`      | Providers, hosting and persistence                      |
+| `studio/`       | Dashboard and programmatic startup                      |
+| `create-agent/` | Starter, renderer, compatibility pins, and stack tests  |
+| `examples/`     | Generated application shell and authored demonstrations |
+| `scripts/`      | Repository development, validation, and release tooling |
 
 Harness and Runtime must not depend on each other. Studio depends on neither.
 Cross-package contracts are tested in the creator. Examples remains a separate
@@ -44,21 +44,22 @@ Vocabulary: [runtime/src/CONTEXT.md](./runtime/src/CONTEXT.md).
 
 ## Development
 
-| Command | Use |
-|---|---|
-| `npm run dev` | Supported local example with package rebuilds and Studio |
-| `npm run dev -- --no-open` | Keep the browser closed |
-| `npm run dev -- --no-studio` | Run only the agent server |
-| `npm run dev -- --no-autostart` | Fail instead of starting a Runtime (use in CI) |
-| `npx nylorun runtime up` / `npx nylorun runtime down` | Start or stop the Runtime Host |
-| `npx nylorun runtime status` | Report Host id, address, protocol and Tenants |
-| `eval "$(npx nylorun runtime status --env)"` | Export URL, key and Tenant for the linked Project (draft) |
-| `npm run dev -- --port 4200 --studio-port 4201` | Choose different ports |
-| `npm run dev:starter` | Preview a fresh starter against local packages |
-| `npm run build` | Build all seven packages |
-| `npm test` | Run package, tooling, and examples tests after setup |
-| `npm run check` | Build and run the standard repository checks |
-| `npm run check:stack` | Check generated starter contracts and built example assets |
+| Command                                               | Use                                                        |
+| ----------------------------------------------------- | ---------------------------------------------------------- |
+| `npm run dev`                                         | Supported local example with package rebuilds and Studio   |
+| `npm run dev -- --no-open`                            | Keep the browser closed                                    |
+| `npm run dev -- --no-studio`                          | Run only the agent server                                  |
+| `npm run dev -- --no-autostart`                       | Fail instead of starting a Runtime (use in CI)             |
+| `npx nylorun runtime up` / `npx nylorun runtime down` | Start or stop the Runtime Host                             |
+| `npx nylorun runtime status`                          | Report Host id, address, protocol and Tenants              |
+| `eval "$(npx nylorun runtime status --env)"`          | Export URL, key and Tenant for the linked Project          |
+| `npx nylorun runtime logs --follow`                   | Multiplex Host + Tenant logs                               |
+| `npm run dev -- --port 4200 --studio-port 4201`       | Choose different ports                                     |
+| `npm run dev:starter`                                 | Preview a fresh starter against local packages             |
+| `npm run build`                                       | Build all seven packages                                   |
+| `npm test`                                            | Run package, tooling, and examples tests after setup       |
+| `npm run check`                                       | Build and run the standard repository checks               |
+| `npm run check:stack`                                 | Check generated starter contracts and built example assets |
 
 Agent edits restart the development stack. Start a new session after definition
 changes. Harness/SDK/Runtime edits rebuild and restart the host. A compile error
@@ -98,16 +99,17 @@ Run `npm run check`; run `npm run check:stack` for packaging or cross-package ch
 See [RELEASING.md](./RELEASING.md) for administrators and
 [DEPLOYMENT.md](./DEPLOYMENT.md) for application hosting.
 
-| Problem | Action |
-|---|---|
-| Toolchain mismatch | Use Node 24 and npm 11; setup prints the detected versions |
-| Missing/stale package build | Stop development and run `npm run setup` |
-| Occupied port | The CLI exits 4 and names the port; stop the other service or pass `--port` |
-| Protocol `426` | Upgrade CLI (`nylorun runtime restart`) or pin `@nylorun/cli` within the Host protocol range |
-| Quarantined Tenant | `nylorun tenant status` shows reason and `repair` (locked KEK, migration, …) |
-| Model setup error | Run `npx nylorun runtime up`, then `npm run configure`, or replace the vault credential from Studio |
-| Generated-file conflict | Move the intended change into the template/recipe, then sync |
-| Interrupted release preparation | Inspect the diff; do not blindly rerun or discard it |
+| Problem                         | Action                                                                                                                                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Toolchain mismatch              | Use Node 24 and npm 11; setup prints the detected versions                                                                                                                      |
+| Missing/stale package build     | Stop development and run `npm run setup`                                                                                                                                        |
+| Occupied port                   | The CLI exits 4 and names the port; stop the other service or pass `--port`. First automatic Host setup may pick a free loopback port and persist it in `host.json`             |
+| Protocol `426`                  | Upgrade CLI (`nylorun runtime restart`) or pin `@nylorun/cli` / `@nylorun/agents` within the Host protocol range                                                                |
+| Quarantined Tenant              | `nylorun tenant status` shows `code` and `repair` (`locked`, `kek-missing`, `corrupt`, `schema-too-new`, `migration-failed`, `envelope-invalid`, `open-timeout`, `open-failed`) |
+| Model setup error               | Run `npx nylorun runtime up`, then `npm run configure`, or replace the vault credential from Studio                                                                             |
+| Need Host / Tenant logs         | `npx nylorun runtime logs --follow`                                                                                                                                             |
+| Generated-file conflict         | Move the intended change into the template/recipe, then sync                                                                                                                    |
+| Interrupted release preparation | Inspect the diff; do not blindly rerun or discard it                                                                                                                            |
 
 Contributions are licensed under [Apache-2.0](./LICENSE); no CLA is required.
 Report vulnerabilities through [SECURITY.md](./SECURITY.md), not public issues.
