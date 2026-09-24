@@ -30,7 +30,9 @@ const probes = [
 ];
 
 it("says nothing when no agent declares a sandbox", async () => {
-  expect(await sandboxBanner("http://127.0.0.1:9", "key", [manifest()])).toBeUndefined();
+  expect(
+    await sandboxBanner("http://127.0.0.1:9", "key", [manifest()], "tn_test"),
+  ).toBeUndefined();
 });
 
 it("names the backend, image and network", async () => {
@@ -42,8 +44,8 @@ it("names the backend, image and network", async () => {
     probes,
     defaultImage: "python:3.13-slim",
   });
-  expect(await sandboxBanner(url, "key", [manifest({})])).toBe(
-    "sandbox: microsandbox VM · image python:3.13-slim · network: dev"
+  expect(await sandboxBanner(url, "key", [manifest({})], "tn_test")).toBe(
+    "sandbox: microsandbox VM · image python:3.13-slim · network: dev",
   );
 });
 
@@ -55,7 +57,14 @@ it("names the reason and the fix after a fallback", async () => {
     reason: "microsandbox unavailable: no usable /dev/kvm",
     probes: [{ ...probes[0], available: false }, probes[1]],
   });
-  expect(await sandboxBanner(url, "key", [manifest({ network: { preset: "none" } })])).toBe(
-    "sandbox: virtual shell (microsandbox unavailable: no usable /dev/kvm) · run `npx nylorun doctor sandbox` for options"
+  expect(
+    await sandboxBanner(
+      url,
+      "key",
+      [manifest({ network: { preset: "none" } })],
+      "tn_test",
+    ),
+  ).toBe(
+    "sandbox: virtual shell (microsandbox unavailable: no usable /dev/kvm) · run `npx nylorun doctor sandbox` for options",
   );
 });

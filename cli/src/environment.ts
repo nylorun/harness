@@ -2,20 +2,30 @@ import { readFileSync, statSync } from "node:fs";
 import { writeFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { loadEnvFile } from "node:process";
+import { parseEnv } from "node:util";
 
-export function loadProjectEnvironment(root = process.cwd()): void {
+/**
+ * Read the Project `.env` into a value map. Does not mutate `process.env` (F3).
+ */
+export function loadProjectEnvironment(
+  root = process.cwd(),
+): Record<string, string> {
   const file = join(root, ".env");
   try {
     if (statSync(file).isDirectory())
       throw new Error(
-        "The .env directory must be migrated manually: back it up, create a .env file with MODEL_PROVIDER, MODEL and MODEL_PROVIDER_API_KEY, and move OAuth credentials to .nylorun/auth.json. See the Runtime migration guide."
+        "The .env directory must be migrated manually: back it up, create a .env file with MODEL_PROVIDER, MODEL and MODEL_PROVIDER_API_KEY, and move OAuth credentials to .nylorun/auth.json. See the Runtime migration guide.",
       );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
     throw error;
   }
-  loadEnvFile(file);
+  const parsed = parseEnv(readFileSync(file, "utf8"));
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
 }
 
 // Match complete dotenv assignments, including quoted multiline values.
@@ -25,7 +35,7 @@ const assignment =
 export async function saveEnvironment(
   root: string,
   updates: Record<string, string | undefined>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<void> {
   const file = join(root, ".env");
   let contents = "";
@@ -42,7 +52,7 @@ export async function saveEnvironment(
         return quote + value + quote;
     }
     throw new Error(
-      "This value contains all dotenv quote delimiters; set it through your process environment instead."
+      "This value contains all dotenv quote delimiters; set it through your process environment instead.",
     );
   };
   const remaining = new Set(Object.keys(updates));
@@ -54,7 +64,7 @@ export async function saveEnvironment(
       return updates[key] === undefined
         ? ""
         : `${key}=${encode(updates[key]!)}${suffix}\n`;
-    }
+    },
   );
   if (contents && !contents.endsWith("\n")) contents += "\n";
   for (const key of remaining)
