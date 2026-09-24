@@ -1,7 +1,4 @@
-import {
-  type ServerResponse,
-  type IncomingMessage,
-} from "node:http";
+import { type ServerResponse, type IncomingMessage } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   mkdirSync,
@@ -33,21 +30,33 @@ import {
   type ExecutorScope,
   type SessionCommand,
   type LiveEvent,
+  DefinitionDocumentSchema,
 } from "@nylorun/core/contracts";
 import {
   createDurableCheckpoint,
+  createFlowCheckpoint,
   runDurable,
+  runFlowDurable,
   type DurableCheckpoint,
   type DurableSessionTool,
+  type FlowCheckpoint,
   type HostEffect,
   type EffectResolution,
 } from "@nylorun/harness/run";
+import {
+  deriveSessionId,
+  emitLoopActionEvents,
+  isWorkflowManifest,
+  reconcilePendingAgentEffects,
+  wakeLinkedWorkflow,
+} from "../core/flow-host.js";
 import { hashManifest } from "@nylorun/core/compatibility";
 import {
   delegateManifest,
   schemaFromJSON,
   type AgentManifest,
   type JsonObject,
+  type JsonValue,
 } from "@nylorun/core/define";
 import { Store, canonical } from "../core/store.js";
 import {
@@ -58,7 +67,12 @@ import {
 } from "../core/executors.js";
 import { hostModelCatalog } from "../model/catalog.js";
 import { piModel } from "../model/pi-model.js";
-import { scriptedModel, gatewayModel, toolFixtureModel, type ModelProvider } from "../core/provider.js";
+import {
+  scriptedModel,
+  gatewayModel,
+  toolFixtureModel,
+  type ModelProvider,
+} from "../core/provider.js";
 import { scrub } from "../redact.js";
 import { createKekFile, readVaultKek } from "../vault/kek.js";
 import { QuarantineError } from "./quarantine-error.js";
@@ -68,11 +82,7 @@ import {
 } from "./principals.js";
 import { resetTenant } from "./reset.js";
 import { buildTenantStatus, seedTenantConfig } from "./status.js";
-import type {
-  TenantConfig,
-  TenantHandle,
-  TenantSummary,
-} from "./types.js";
+import type { TenantConfig, TenantHandle, TenantSummary } from "./types.js";
 import type { TenantEnvelope } from "@nylorun/core/contracts";
 import { VaultError } from "../vault/error.js";
 import { VaultService, type AuthorizeResult } from "../vault/service.js";
@@ -115,11 +125,13 @@ interface Session {
   info?: any;
   status: string;
   activeTurnId: string | null;
-  checkpoint?: DurableCheckpoint;
+  checkpoint?: DurableCheckpoint | FlowCheckpoint;
   state?: any;
   turnStartState?: any;
   waits?: unknown;
   error?: string;
+  /** Last completed turn output (for linked agent → workflow settle). */
+  lastOutput?: JsonValue;
   creation: unknown;
   vaultIds?: readonly string[];
   credentialSelections?: readonly CredentialSelection[];
@@ -285,7 +297,7 @@ export class TenantRuntime implements TenantHandle {
   private constructor(
     private readonly config: TenantConfig,
     hooks: TenantOpenHooks,
-    envelope: TenantEnvelope,
+    envelope: TenantEnvelope
   ) {
     this.envelope = envelope;
     if (
@@ -319,7 +331,7 @@ export class TenantRuntime implements TenantHandle {
           "locked",
           "Another Runtime owns this Tenant database",
           "nylorun tenant status",
-          { lockPath: this.lockPath, lockPid: oldPid },
+          { lockPath: this.lockPath, lockPid: oldPid }
         );
       } catch (error) {
         if (error instanceof QuarantineError) throw error;
@@ -347,7 +359,7 @@ export class TenantRuntime implements TenantHandle {
         throw new QuarantineError(
           "kek-missing",
           "Vault key-encryption key is missing for ciphertext in this Tenant",
-          "restore the vault-kek file beside tenant.sqlite",
+          "restore the vault-kek file beside tenant.sqlite"
         );
       }
       this.store = store;
@@ -370,14 +382,14 @@ export class TenantRuntime implements TenantHandle {
         ...(row.principalId === undefined
           ? {}
           : { principalId: row.principalId }),
-      })),
+      }))
     );
 
     this.vault = new VaultService(
       this.store.db,
       (fn) => this.store.tx(fn),
       () => this.ensureKek(),
-      config.vaultFetch ?? globalThis.fetch,
+      config.vaultFetch ?? globalThis.fetch
     );
     this.mcp = new McpPool({
       pluginData: paths.pluginData,
@@ -396,7 +408,7 @@ export class TenantRuntime implements TenantHandle {
       emit: (sessionId, turnId, type, payload) => {
         if (this.closed) return;
         const event = this.store.tx(() =>
-          this.store.event(sessionId, turnId, type, payload),
+          this.store.event(sessionId, turnId, type, payload)
         );
         this.publish(event);
       },
@@ -435,7 +447,7 @@ export class TenantRuntime implements TenantHandle {
           this.store.put("effects", effect.request.effectId, effect);
           const sess = this.store.get<Session>(
             "sessions",
-            effect.request.sessionId,
+            effect.request.sessionId
           );
           if (
             sess &&
@@ -452,19 +464,46 @@ export class TenantRuntime implements TenantHandle {
     });
     this.retireLegacyHooks();
     this.expireClaims();
+    // Orphaned fn/verify claims from a prior process: re-offer immediately.
+    this.store.tx(() => {
+      for (const action of this.store.all<Action>("actions")) {
+        if (
+          action.status === "claimed" &&
+          (action.kind === "fn" || action.kind === "verify")
+        ) {
+          action.status = "pending";
+          action.claimId = null;
+          action.leaseExpiresAt = null;
+          this.store.put("actions", action.actionId, action);
+          const s = this.store.get<Session>("sessions", action.sessionId);
+          if (s && (s.status === "waiting" || s.status === "running")) {
+            s.status = "runnable";
+            this.store.put("sessions", s.id, s);
+          }
+        }
+      }
+    });
+    this.notify();
     this.timer = setInterval(
       () => this.expireClaims(),
-      Math.min(config.leaseMs ?? 30000, 5000),
+      Math.min(config.leaseMs ?? 30000, 5000)
     );
     this.timer.unref();
     for (const sess of this.store.all<Session>("sessions"))
       if (sess.status === "running" || sess.status === "runnable")
         this.schedule(sess.id);
+    this.store.tx(() => {
+      reconcilePendingAgentEffects({
+        store: this.store,
+        schedule: (sid) => this.schedule(sid),
+        publish: (e) => this.publish(e),
+      });
+    });
   }
 
   static async open(
     config: TenantConfig,
-    hooks: TenantOpenHooks = {},
+    hooks: TenantOpenHooks = {}
   ): Promise<TenantRuntime> {
     const envelope = readEnvelope(config);
     return new TenantRuntime(config, hooks, envelope);
@@ -501,18 +540,25 @@ export class TenantRuntime implements TenantHandle {
    */
   private retireLegacyHooks(): void {
     this.store.tx(() => {
-      for (const action of this.store.all<{ actionId: string; kind: string; status: string }>(
-        "actions"
-      ))
+      for (const action of this.store.all<{
+        actionId: string;
+        kind: string;
+        status: string;
+      }>("actions"))
         if (
-          (action.kind === "beforeModelCall" || action.kind === "afterModelCall") &&
+          (action.kind === "beforeModelCall" ||
+            action.kind === "afterModelCall") &&
           (action.status === "pending" || action.status === "claimed")
         ) {
           action.status = "cancelled";
           this.store.put("actions", action.actionId, action);
         }
       for (const s of this.store.all<Session>("sessions"))
-        if (s.activeTurnId && s.manifest?.manifestSchemaVersion !== 4) {
+        if (
+          s.activeTurnId &&
+          !isWorkflowManifest(s.manifest) &&
+          s.manifest?.manifestSchemaVersion !== 4
+        ) {
           this.store.event(s.id, s.activeTurnId, "turn.failed", {
             error: {
               code: "execution.incompatible",
@@ -535,8 +581,12 @@ export class TenantRuntime implements TenantHandle {
           action.status === "claimed" &&
           Date.parse(action.leaseExpiresAt!) <= Date.now()
         ) {
-          if (action.kind === "hook") {
-            // Hooks are pure by contract, so a lost claim is simply delivered again.
+          if (
+            action.kind === "hook" ||
+            action.kind === "fn" ||
+            action.kind === "verify"
+          ) {
+            // Hooks, fn and verify are pure / repeat-safe; a lost claim is offered again.
             // The next claim bumps the generation, which fences any late result.
             action.status = "pending";
             action.claimId = null;
@@ -582,17 +632,28 @@ export class TenantRuntime implements TenantHandle {
     const controller = new AbortController();
     this.running.set(id, controller);
     try {
-      await this.prepareMcp(id, controller.signal);
+      // prepareMcp mutates the session's mcpSnapshot; read current after it.
+      if (!isWorkflowManifest(this.session(id).manifest))
+        await this.prepareMcp(id, controller.signal);
       const current = this.session(id);
-      const result = await runDurable({
-        manifest: current.manifest,
-        checkpoint: current.checkpoint!,
-        signal: controller.signal,
-        sessionTools: sessionToolsOf(current.mcpSnapshot),
-        host: {
-          resolveEffect: (e) => this.resolveEffect(e, controller.signal),
-        },
-      });
+      const host = {
+        resolveEffect: (e: HostEffect) =>
+          this.resolveEffect(e, controller.signal),
+      };
+      const result = isWorkflowManifest(current.manifest)
+        ? await runFlowDurable({
+            manifest: current.manifest,
+            checkpoint: current.checkpoint as FlowCheckpoint,
+            signal: controller.signal,
+            host,
+          })
+        : await runDurable({
+            manifest: current.manifest,
+            checkpoint: current.checkpoint as DurableCheckpoint,
+            signal: controller.signal,
+            sessionTools: sessionToolsOf(current.mcpSnapshot),
+            host,
+          });
       let event: LiveEvent | undefined;
       this.store.tx(() => {
         const current = this.session(id);
@@ -611,10 +672,13 @@ export class TenantRuntime implements TenantHandle {
             : result.status;
           current.waits = { effectIds: result.effectIds };
         } else if ("result" in result) {
-          current.state =
-            result.status === "failed"
-              ? current.turnStartState
-              : result.result.state;
+          const flow = isWorkflowManifest(current.manifest);
+          if (!flow) {
+            current.state =
+              result.status === "failed"
+                ? current.turnStartState
+                : (result.result as any).state;
+          }
           current.checkpoint = result.checkpoint;
           this.store.put(
             "checkpoints",
@@ -626,6 +690,8 @@ export class TenantRuntime implements TenantHandle {
             result.status === "paused"
               ? (result.result as any).pending
               : undefined;
+          if (result.status === "completed")
+            current.lastOutput = (result.result as any).output;
           if (result.status !== "paused") current.activeTurnId = null;
           event = this.store.event(
             id,
@@ -649,6 +715,9 @@ export class TenantRuntime implements TenantHandle {
                   error: {
                     code: (result.result as any).error?.code,
                     message: (result.result as any).error?.message,
+                    ...((result.result as any).error?.path
+                      ? { path: (result.result as any).error.path }
+                      : {}),
                   },
                 }
               : {}
@@ -656,7 +725,30 @@ export class TenantRuntime implements TenantHandle {
         }
         this.store.put("sessions", id, current);
       });
-      if (event) this.publish(event);
+      if (event) {
+        this.publish(event);
+        if (event.type === "turn.completed" || event.type === "turn.failed") {
+          this.store.tx(() => {
+            wakeLinkedWorkflow({
+              agentSessionId: id,
+              store: this.store,
+              output:
+                event!.type === "turn.completed"
+                  ? (event!.payload as { output?: JsonValue }).output
+                  : undefined,
+              failed: event!.type === "turn.failed",
+              error:
+                event!.type === "turn.failed"
+                  ? String(
+                      (event!.payload as { message?: string }).message ?? ""
+                    )
+                  : undefined,
+              schedule: (sid) => this.schedule(sid),
+              publish: (e) => this.publish(e),
+            });
+          });
+        }
+      }
     } catch (error) {
       let event: LiveEvent | undefined;
       this.store.tx(() => {
@@ -682,7 +774,21 @@ export class TenantRuntime implements TenantHandle {
         current.activeTurnId = null;
         this.store.put("sessions", id, current);
       });
-      if (event) this.publish(event);
+      if (event) {
+        this.publish(event);
+        this.store.tx(() => {
+          wakeLinkedWorkflow({
+            agentSessionId: id,
+            store: this.store,
+            failed: true,
+            error: String(
+              (event!.payload as { message?: string }).message ?? ""
+            ),
+            schedule: (sid) => this.schedule(sid),
+            publish: (e) => this.publish(e),
+          });
+        });
+      }
     } finally {
       this.running.delete(id);
       if (
@@ -693,8 +799,7 @@ export class TenantRuntime implements TenantHandle {
     }
   }
   private invokeModel(request: HostEffect, signal: AbortSignal) {
-    if (!this.useVaultModel)
-      return this.modelProvider(request, signal);
+    if (!this.useVaultModel) return this.modelProvider(request, signal);
     const adapter = piModel({
       root: this.config.paths.home,
       readHostModel: () => this.vault.readHostModel(),
@@ -727,15 +832,48 @@ export class TenantRuntime implements TenantHandle {
       if (existing) {
         if (canonical(existing.request) !== canonical(request))
           throw new Error("Effect identity request drift");
-        return existing.status === "completed"
-          ? { status: "completed", outcome: existing.outcome }
-          : {
-              status:
-                existing.status === "uncertain" ||
-                existing.status === "invoking"
-                  ? "uncertain"
-                  : "pending",
-            };
+        if (existing.status === "completed")
+          return { status: "completed", outcome: existing.outcome };
+        if (request.kind === "agent" && existing.status === "pending") {
+          const agentSessionId = existing.agentSessionId as string | undefined;
+          if (agentSessionId) {
+            const agent = this.store.get<Session>("sessions", agentSessionId);
+            if (agent?.status === "completed") {
+              const outcome = { value: agent.lastOutput ?? null };
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+              return { status: "completed", outcome };
+            }
+            if (agent?.status === "failed") {
+              const outcome = {
+                value: {
+                  kind: "failed",
+                  code: "agent.failed",
+                  message: agent.error ?? "Agent turn failed",
+                },
+              };
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+              return { status: "completed", outcome };
+            }
+          }
+        }
+        return {
+          status:
+            existing.status === "uncertain" || existing.status === "invoking"
+              ? "uncertain"
+              : "pending",
+        };
+      }
+      if (
+        request.kind === "agent" ||
+        request.kind === "fn" ||
+        request.kind === "verify"
+      ) {
+        // Handled outside the agent-manifest path below.
+        return { status: "pending", __flow: true } as any;
       }
       if (request.kind === "delegation") {
         // Lifecycle points of an agent used as a tool: journaled once, so replays never re-emit.
@@ -756,12 +894,18 @@ export class TenantRuntime implements TenantHandle {
       }
       const agentManifest = manifestFor(s.manifest, request.agent);
       if (!agentManifest)
-        throw new Error(`Agent '${request.agent?.id ?? ""}' is not used as a tool`);
+        throw new Error(
+          `Agent '${request.agent?.id ?? ""}' is not used as a tool`
+        );
       const mcpTool =
         request.kind === "tool" ? mcpToolOf(s, request) : undefined;
       const sandboxTool =
         request.kind === "tool" && !mcpTool
-          ? sandboxCapabilityOf(agentManifest, request.capabilityId, request.toolName)
+          ? sandboxCapabilityOf(
+              agentManifest,
+              request.capabilityId,
+              request.toolName
+            )
           : undefined;
       this.store.put("effects", request.effectId, {
         request,
@@ -810,7 +954,9 @@ export class TenantRuntime implements TenantHandle {
               capabilityId: request.capabilityId!,
               toolName: request.toolName!,
               ...(tool?.inputSchema ? { inputSchema: tool.inputSchema } : {}),
-              ...(tool?.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+              ...(tool?.outputSchema
+                ? { outputSchema: tool.outputSchema }
+                : {}),
             };
       this.store.put("actions", action.actionId, action);
       event = this.store.event(s.id, s.activeTurnId, "action.pending", {
@@ -824,14 +970,23 @@ export class TenantRuntime implements TenantHandle {
     });
     if (event) this.publish(event);
     if (notify) this.notify();
+    if (
+      resolution &&
+      (resolution as any).__flow &&
+      (request.kind === "agent" ||
+        request.kind === "fn" ||
+        request.kind === "verify")
+    ) {
+      return this.resolveNewFlowEffect(request, signal);
+    }
     if (!invoke) return resolution!;
     try {
       const value =
         invoke === "mcp"
           ? await this.callMcpTool(request)
           : invoke === "sandbox"
-            ? await this.callSandboxTool(request, signal)
-            : await this.invokeModel(request, signal);
+          ? await this.callSandboxTool(request, signal)
+          : await this.invokeModel(request, signal);
       return this.store.tx(() => {
         const s = this.session(request.sessionId);
         if (
@@ -864,20 +1019,203 @@ export class TenantRuntime implements TenantHandle {
       return { status: "uncertain" };
     }
   }
+
+  /** Journal and dispatch a new flow effect (agent / fn / verify). */
+  private async resolveNewFlowEffect(
+    request: HostEffect,
+    signal: AbortSignal
+  ): Promise<EffectResolution> {
+    if (signal.aborted) throw new Error("Turn cancelled");
+    const existing = this.store.get("effects", request.effectId);
+    if (existing) {
+      if (existing.status === "completed")
+        return { status: "completed", outcome: existing.outcome };
+      if (request.kind === "agent") {
+        const agentSessionId = existing.agentSessionId as string | undefined;
+        if (agentSessionId) {
+          const agent = this.store.get<Session>("sessions", agentSessionId);
+          if (agent?.status === "completed") {
+            const outcome = { value: agent.lastOutput ?? null };
+            this.store.tx(() => {
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+            });
+            return { status: "completed", outcome };
+          }
+        }
+      }
+      return { status: "pending" };
+    }
+
+    if (request.kind === "fn" || request.kind === "verify") {
+      let event: LiveEvent | undefined;
+      this.store.tx(() => {
+        const s = this.session(request.sessionId);
+        this.store.put("effects", request.effectId, {
+          request,
+          status: "pending",
+        });
+        const kind = request.kind as "fn" | "verify";
+        const action = {
+          actionId: request.effectId,
+          sessionId: request.sessionId,
+          turnId: request.turnId,
+          agentId: request.agentId,
+          manifestHash: request.manifestHash,
+          implementationVersion: s.implementationVersion,
+          input: request.input as any,
+          context: request.context,
+          status: "pending" as const,
+          generation: 0,
+          claimId: null,
+          leaseExpiresAt: null,
+          kind,
+          path: request.path!,
+          key: request.key!,
+        } satisfies Action;
+        this.store.put("actions", action.actionId, action);
+        event = this.store.event(s.id, s.activeTurnId, "action.pending", {
+          actionId: action.actionId,
+          kind: action.kind,
+          path: action.path,
+          key: action.key,
+          input: action.input,
+        });
+      });
+      if (event) this.publish(event);
+      this.notify();
+      return { status: "pending" };
+    }
+
+    // agent effect: create linked session + message via the public contract path
+    const body = request.input as {
+      agentId: string;
+      input: JsonValue;
+      path: string;
+    };
+    const path = body.path ?? request.path!;
+    const workflow = this.session(request.sessionId);
+    const agentSessionId = deriveSessionId(workflow.id, path);
+    const iterations = request.iterations ?? "-";
+    const n = Number(request.context.n ?? iterations.split(".")[0] ?? 1);
+
+    this.store.tx(() => {
+      this.store.put("effects", request.effectId, {
+        request,
+        status: "pending",
+        agentSessionId,
+      });
+      this.store.put("links", agentSessionId, {
+        workflowSessionId: workflow.id,
+        path,
+        effectId: request.effectId,
+        turnId: request.turnId,
+      });
+    });
+
+    if (!this.store.get<Session>("sessions", agentSessionId)) {
+      const definition =
+        this.store.get("definitions", body.agentId) ??
+        fail(404, "Definition not found");
+      const created: Session = {
+        id: agentSessionId,
+        agentId: body.agentId,
+        ownerUserId: workflow.ownerUserId,
+        manifest: definition.manifest,
+        manifestHash: definition.manifestHash,
+        implementationVersion: definition.implementationVersion,
+        status: "idle",
+        activeTurnId: null,
+        creation: {
+          requestId: `flow-put-${request.effectId}`,
+          agentId: body.agentId,
+          ownerUserId: workflow.ownerUserId,
+        },
+        vaultIds: workflow.vaultIds,
+        credentialSelections: workflow.credentialSelections,
+        pluginRoots: definition.pluginRoots ?? {},
+      };
+      this.store.tx(() => this.store.put("sessions", agentSessionId, created));
+    }
+
+    const idempotencyKey = `${request.turnId}:${path}:${iterations}`;
+    const messageInput = body.input;
+    const messageCommand: SessionCommand =
+      typeof messageInput === "string"
+        ? {
+            type: "message",
+            content: messageInput,
+            requestId: `flow-${request.effectId}`,
+            idempotencyKey,
+          }
+        : {
+            type: "message",
+            data: messageInput,
+            requestId: `flow-${request.effectId}`,
+            idempotencyKey,
+          };
+    const accepted = this.command(agentSessionId, messageCommand, {
+      kind: "application",
+      principalId: "flow-host",
+    }) as { turnId: string | null };
+
+    const events: LiveEvent[] = [];
+    this.store.tx(() => {
+      const s = this.session(request.sessionId);
+      events.push(
+        this.store.event(s.id, s.activeTurnId, "loop.iteration", {
+          path: String(request.context.loopPath ?? path.split("/")[0]),
+          n,
+          sessionId: agentSessionId,
+          turnId: accepted.turnId ?? undefined,
+        })
+      );
+      events.push(
+        this.store.event(s.id, s.activeTurnId, "node.agent", {
+          path,
+          iterations,
+          sessionId: agentSessionId,
+          turnId: accepted.turnId,
+        })
+      );
+    });
+    for (const e of events) this.publish(e);
+
+    // May already be settled if the agent was fast / replayed.
+    const agent = this.session(agentSessionId);
+    if (agent.status === "completed") {
+      const outcome = { value: agent.lastOutput ?? null };
+      this.store.tx(() => {
+        this.store.put("effects", request.effectId, {
+          request,
+          status: "completed",
+          outcome,
+          agentSessionId,
+        });
+      });
+      return { status: "completed", outcome };
+    }
+    return { status: "pending" };
+  }
+
   private scope(request: IncomingMessage): AuthScope {
     const header = request.headers.authorization;
     const token = header?.startsWith("Bearer ") ? header.slice(7) : "";
     if (!token || !header?.startsWith("Bearer ")) {
-      this.config.logger.warn("credential rejected", { reason: "missing_bearer" });
+      this.config.logger.warn("credential rejected", {
+        reason: "missing_bearer",
+      });
       return failOpaque();
     }
     const tokenHash = hashToken(token);
     const principal = findPrincipalByTokenHash(this.store.db, tokenHash);
-    if (principal)
-      return { kind: "application", principalId: principal.id };
+    if (principal) return { kind: "application", principalId: principal.id };
     const executor = this.registry.find(tokenHash);
     if (!executor) {
-      this.config.logger.warn("credential rejected", { reason: "unknown_token" });
+      this.config.logger.warn("credential rejected", {
+        reason: "unknown_token",
+      });
       return failOpaque();
     }
     return { kind: "executor", executor };
@@ -908,6 +1246,7 @@ export class TenantRuntime implements TenantHandle {
     scope: AuthScope
   ): unknown {
     let event: LiveEvent | undefined;
+    const extraEvents: LiveEvent[] = [];
     let schedule = false;
     const response = this.store.tx(() => {
       const s = this.session(id);
@@ -962,6 +1301,44 @@ export class TenantRuntime implements TenantHandle {
           kind: action.kind,
           result: command.outcome.value,
         });
+        if (action.kind === "verify") {
+          const verdict = command.outcome.value as {
+            pass?: boolean;
+            feedback?: string;
+            data?: unknown;
+            kind?: string;
+          };
+          if (verdict?.kind !== "failed") {
+            extraEvents.push(
+              this.store.event(id, s.activeTurnId, "loop.verified", {
+                path: String(action.context?.loopPath ?? action.path ?? ""),
+                n: Number(action.context?.n ?? 1),
+                pass: Boolean(verdict?.pass),
+                ...(verdict?.feedback !== undefined
+                  ? { feedback: verdict.feedback }
+                  : {}),
+                ...(verdict?.data !== undefined ? { data: verdict.data } : {}),
+              })
+            );
+          }
+        } else if (action.kind === "fn" && action.context?.role === "decide") {
+          const decision = command.outcome.value as {
+            input?: unknown;
+            output?: unknown;
+            agent?: unknown;
+          };
+          extraEvents.push(
+            this.store.event(id, s.activeTurnId, "loop.decided", {
+              path: String(action.context?.loopPath ?? action.path ?? ""),
+              n: Number(action.context?.n ?? 1),
+              next:
+                "output" in decision && !("input" in decision)
+                  ? "output"
+                  : "input",
+              patched: Boolean(decision.agent),
+            })
+          );
+        }
         const receipt = {
           status: "accepted",
           turnId: s.activeTurnId,
@@ -1012,19 +1389,32 @@ export class TenantRuntime implements TenantHandle {
             fail(409, "Session has active or unresolved work");
           s.turnStartState = s.state;
           s.activeTurnId = randomUUID();
-          s.checkpoint = createDurableCheckpoint({
-            manifest: s.manifest,
-            sessionId: id,
-            turnId: s.activeTurnId,
-            input:
+          if (isWorkflowManifest(s.manifest)) {
+            const input: JsonValue =
               "content" in command
                 ? command.content
-                : typeof command.data === "string"
+                : (command.data as JsonValue);
+            s.checkpoint = createFlowCheckpoint({
+              manifest: s.manifest,
+              sessionId: id,
+              turnId: s.activeTurnId,
+              input,
+            });
+          } else {
+            s.checkpoint = createDurableCheckpoint({
+              manifest: s.manifest,
+              sessionId: id,
+              turnId: s.activeTurnId,
+              input:
+                "content" in command
+                  ? command.content
+                  : typeof command.data === "string"
                   ? command.data
                   : JSON.stringify(command.data),
-            state: s.state,
-            info: s.info,
-          });
+              state: s.state,
+              info: s.info,
+            });
+          }
         } else {
           if (s.status !== "paused" || !s.state || !s.activeTurnId)
             fail(409, "Session is not awaiting a response");
@@ -1051,6 +1441,11 @@ export class TenantRuntime implements TenantHandle {
                   interactionId: command.interactionId,
                   value: command.value,
                 };
+          if (isWorkflowManifest(s.manifest))
+            fail(
+              409,
+              "Workflow sessions do not accept approve/respond on the root (tracer)"
+            );
           s.checkpoint = createDurableCheckpoint({
             manifest: s.manifest,
             sessionId: id,
@@ -1087,6 +1482,7 @@ export class TenantRuntime implements TenantHandle {
       return response;
     });
     if (event) this.publish(event);
+    for (const extra of extraEvents) this.publish(extra);
     if (input.type === "cancel") this.running.get(id)?.abort();
     if (schedule) this.schedule(id);
     return response;
@@ -1119,7 +1515,7 @@ export class TenantRuntime implements TenantHandle {
   async handle(
     request: IncomingMessage,
     response: ServerResponse,
-    _url?: URL,
+    _url?: URL
   ): Promise<void> {
     const json = (value: unknown, status = 200) => {
       const payload = JSON.stringify(value);
@@ -1167,7 +1563,8 @@ export class TenantRuntime implements TenantHandle {
             actions: this.store
               .all<Action>("actions")
               .filter(
-                (a) => a.status === "pending" && a.agentId === scope.executor.agentId
+                (a) =>
+                  a.status === "pending" && a.agentId === scope.executor.agentId
               ),
           });
         const actionId = path[2];
@@ -1250,9 +1647,7 @@ export class TenantRuntime implements TenantHandle {
           await this.dispatchVault(scope, method, path, url, request)
         );
       if (path[1] === "tenant")
-        return json(
-          await this.dispatchTenant(scope, method, path, request)
-        );
+        return json(await this.dispatchTenant(scope, method, path, request));
       const principalId = this.requireApplication(scope);
       if (path[1] === "executors" && path.length === 2 && method === "GET")
         return json({
@@ -1287,7 +1682,10 @@ export class TenantRuntime implements TenantHandle {
           new Set(body.executors.map((e) => e.token)).size !==
             body.executors.length
         )
-          fail(400, "Executor registrations must be unique per agent and token");
+          fail(
+            400,
+            "Executor registrations must be unique per agent and token"
+          );
         const updatedAt = new Date().toISOString();
         const records = body.executors.map((executor) => ({
           agentId: executor.agentId,
@@ -1306,7 +1704,10 @@ export class TenantRuntime implements TenantHandle {
             fail(409, "Executor tokens must be unique");
           // A token hash may not appear in both principals and executors (D3).
           if (applicationHashes.includes(record.tokenHash))
-            fail(400, "Executor tokens require independent credentials and an agent id");
+            fail(
+              400,
+              "Executor tokens require independent credentials and an agent id"
+            );
         }
         // Persist the whole batch first; the in-memory registry must never run ahead of SQLite.
         this.store.tx(() => {
@@ -1336,7 +1737,10 @@ export class TenantRuntime implements TenantHandle {
           if (replacedByDifferent)
             this.config.logger.warn(
               "executor registration replaced by different application credential",
-              { agentId: record.agentId, previousPrincipalId: previous.principalId },
+              {
+                agentId: record.agentId,
+                previousPrincipalId: previous.principalId,
+              }
             );
           return {
             agentId: record.agentId,
@@ -1399,10 +1803,10 @@ export class TenantRuntime implements TenantHandle {
       ) {
         const body = PutAgentRequestSchema.parse(await this.body(request));
         if (body.manifest.id !== path[2]) fail(400, "Agent id mismatch");
-        AgentManifestSchema.parse(body.manifest);
+        DefinitionDocumentSchema.parse(body.manifest);
         const definition = {
           ...body,
-          manifestHash: hashManifest(body.manifest),
+          manifestHash: hashManifest(body.manifest as any),
         };
         this.store.tx(() => {
           this.store.put("definitions", path[2]!, definition);
@@ -1472,7 +1876,11 @@ export class TenantRuntime implements TenantHandle {
             : undefined);
         if (method === "GET" && path[3] === "items")
           return json(
-            this.store.history(id, cursor, url.searchParams.get("agent") ?? undefined)
+            this.store.history(
+              id,
+              cursor,
+              url.searchParams.get("agent") ?? undefined
+            )
           );
         if (method === "GET" && path[3] === "events") {
           const history = this.store.history(id, cursor);
@@ -1668,7 +2076,7 @@ export class TenantRuntime implements TenantHandle {
       throw new QuarantineError(
         "kek-missing",
         "Vault key-encryption key is required",
-        "restore the vault-kek file beside tenant.sqlite",
+        "restore the vault-kek file beside tenant.sqlite"
       );
     this.kek = createKekFile(this.kekPath);
     return this.kek;
@@ -1720,7 +2128,7 @@ export class TenantRuntime implements TenantHandle {
             this.executorStreams.clear();
           },
         },
-        body.scope,
+        body.scope
       );
       // Reset leaves the Tenant open for new work.
       this.closing = false;
@@ -1733,12 +2141,9 @@ export class TenantRuntime implements TenantHandle {
       method === "PUT"
     ) {
       const body = SeedTenantConfigRequestSchema.parse(
-        await this.body(request),
+        await this.body(request)
       );
-      return seedTenantConfig(
-        { store: this.store, vault: this.vault },
-        body,
-      );
+      return seedTenantConfig({ store: this.store, vault: this.vault }, body);
     }
     if (path[2] === "models" && path.length === 3 && method === "GET")
       return hostModelCatalog();
@@ -1817,10 +2222,10 @@ export class TenantRuntime implements TenantHandle {
   summary(): TenantSummary {
     const sessions = this.store.all<Session>("sessions");
     const runningSessions = sessions.filter(
-      (sess) => sess.status === "running" || sess.status === "runnable",
+      (sess) => sess.status === "running" || sess.status === "runnable"
     ).length;
     const connectedExecutors = [...this.executorStreams.values()].filter(
-      (set) => set.size > 0,
+      (set) => set.size > 0
     ).length;
     const pendingActions = this.store
       .all<Action>("actions")
@@ -1839,12 +2244,15 @@ export class TenantRuntime implements TenantHandle {
 
   async drain(
     activeWork: "drain" | "cancel",
-    timeoutMs = 30_000,
+    timeoutMs = 30_000
   ): Promise<void> {
     this.closing = true;
     if (activeWork === "cancel") {
       for (const sess of this.store.all<Session>("sessions"))
-        if (sess.activeTurnId && ["running", "runnable", "paused"].includes(sess.status))
+        if (
+          sess.activeTurnId &&
+          ["running", "runnable", "paused"].includes(sess.status)
+        )
           this.command(
             sess.id,
             {
@@ -1856,7 +2264,7 @@ export class TenantRuntime implements TenantHandle {
             {
               kind: "application",
               principalId: "drain",
-            },
+            }
           );
     }
     const deadline = Date.now() + timeoutMs;
@@ -1883,7 +2291,9 @@ export class TenantRuntime implements TenantHandle {
 
 function readEnvelope(config: TenantConfig): TenantEnvelope {
   if (existsSync(config.paths.envelope)) {
-    return JSON.parse(readFileSync(config.paths.envelope, "utf8")) as TenantEnvelope;
+    return JSON.parse(
+      readFileSync(config.paths.envelope, "utf8")
+    ) as TenantEnvelope;
   }
   const now = new Date().toISOString();
   return {
@@ -1902,11 +2312,10 @@ function readEnvelope(config: TenantConfig): TenantEnvelope {
 export async function openTenantRuntime(
   config: TenantConfig,
   // TENANTS-CCR: optional hooks for tests until TenantConfig grows them
-  hooks?: TenantOpenHooks,
+  hooks?: TenantOpenHooks
 ): Promise<TenantHandle> {
   return TenantRuntime.open(config, hooks ?? {});
 }
-
 
 /** What an action runs, for events: a tool name, or a hook point and its capabilities. */
 function actionTarget(action: Action) {

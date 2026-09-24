@@ -172,6 +172,21 @@ export {
 } from "./definition/schema.js";
 export { implementationsFor, bindingFromAgent } from "./definition/binding.js";
 export type { AgentBinding } from "./definition/binding.js";
+export {
+  Loop,
+  isBuiltWorkflow,
+} from "./definition/workflow/index.js";
+export type {
+  BuiltWorkflow,
+  LoopOptions,
+  LoopRunnable,
+  LoopVerifyFn,
+  LoopDecideFn,
+  LoopVerifyArgs,
+  LoopDecideArgs,
+  LoopDecision,
+} from "./definition/workflow/index.js";
+export type { Verdict, WorkflowBinding, WorkflowManifest } from "./types/workflow.js";
 export type {
   BoundMiddleware,
   BoundToolDefinition,

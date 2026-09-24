@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
-/** Tenant schema version (D4). v2 adds tenant_settings for config seed (A18). */
-export const TENANT_SCHEMA_VERSION = 2;
+/** Tenant schema version (D4). v2 adds tenant_settings; v3 adds workflow links. */
+export const TENANT_SCHEMA_VERSION = 3;
 
 export function schemaVersionOf(db: DatabaseSync): number {
   const row = db.prepare("PRAGMA user_version").get() as {
@@ -14,13 +14,14 @@ export function schemaVersionOf(db: DatabaseSync): number {
  * Migrates a Tenant database to `TENANT_SCHEMA_VERSION`.
  * Carries vault-scope DDL as a migration step, not ad hoc (D3, D4).
  */
-export function migrateTenantDatabase(
-  db: DatabaseSync,
-): { from: number; to: number } {
+export function migrateTenantDatabase(db: DatabaseSync): {
+  from: number;
+  to: number;
+} {
   const from = schemaVersionOf(db);
   if (from > TENANT_SCHEMA_VERSION) {
     throw new Error(
-      `Tenant schema version ${from} is newer than Host ${TENANT_SCHEMA_VERSION}`,
+      `Tenant schema version ${from} is newer than Host ${TENANT_SCHEMA_VERSION}`
     );
   }
   if (from === TENANT_SCHEMA_VERSION) {
@@ -112,6 +113,11 @@ export function migrateTenantDatabase(
         );
       `);
     }
+    if (from < 3) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS links(id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      `);
+    }
     db.exec(`PRAGMA user_version = ${TENANT_SCHEMA_VERSION}`);
     db.exec("COMMIT");
   } catch (error) {
@@ -128,11 +134,9 @@ function migrateVaultScope(db: DatabaseSync): void {
     name: string;
   }[];
   if (!columns.some((column) => column.name === "scope"))
-    db.exec(
-      "ALTER TABLE vaults ADD COLUMN scope TEXT NOT NULL DEFAULT 'user'",
-    );
+    db.exec("ALTER TABLE vaults ADD COLUMN scope TEXT NOT NULL DEFAULT 'user'");
   db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS vaults_one_host ON vaults(scope) WHERE scope = 'host'",
+    "CREATE UNIQUE INDEX IF NOT EXISTS vaults_one_host ON vaults(scope) WHERE scope = 'host'"
   );
 }
 
@@ -150,7 +154,7 @@ export type SandboxBackendSetting = "auto" | "microsandbox" | "virtual";
 /** Non-secret Tenant settings persisted for seed / configFor (A18). */
 export function readTenantSetting(
   db: DatabaseSync,
-  key: string,
+  key: string
 ): string | undefined {
   const row = db
     .prepare("SELECT value FROM tenant_settings WHERE key=?")
@@ -161,11 +165,11 @@ export function readTenantSetting(
 export function writeTenantSetting(
   db: DatabaseSync,
   key: string,
-  value: string,
+  value: string
 ): void {
   db.prepare(
     `INSERT INTO tenant_settings(key,value) VALUES(?,?)
-     ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value`
   ).run(key, value);
 }
 

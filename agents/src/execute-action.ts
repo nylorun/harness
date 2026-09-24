@@ -1,13 +1,16 @@
 import {
   delegateOf,
   implementationsFor,
+  isBuiltWorkflow,
   isToolError,
   normalizeToolDefinition,
   normalizedSchemasFor,
   runHookPoint,
   type BuiltAgent,
+  type BuiltWorkflow,
   type JsonValue,
   type ToolExecutionContext,
+  type WorkflowBinding,
 } from "@nylorun/core/define";
 import type { Action, ActionOutcome } from "@nylorun/core/contracts";
 class Suspend {
@@ -17,12 +20,22 @@ const object = (value: unknown): Record<string, any> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, any>)
     : {};
+
+export type ExecutableDefinition = BuiltAgent | BuiltWorkflow;
+
 /** Executes code only after a host-issued claim. No engine dependency. */
 export async function executeAction(
   action: Action,
-  root: BuiltAgent,
+  root: ExecutableDefinition,
   signal: AbortSignal
 ): Promise<ActionOutcome> {
+  if (action.kind === "fn" || action.kind === "verify") {
+    if (!isBuiltWorkflow(root))
+      throw new Error(`Action ${action.kind} requires a workflow definition`);
+    return executeWorkflowFn(action, root.getBinding(), signal);
+  }
+  if (isBuiltWorkflow(root))
+    throw new Error(`Unsupported action kind ${action.kind} on workflow`);
   // Work for an agent used as a tool runs that agent's code, served from the root's binding.
   const agent = action.agent ? delegatedAgent(root, action.agent.id) : root;
   const ref = action.agent ?? { id: root.id, path: root.id };
@@ -199,6 +212,50 @@ export async function executeAction(
     };
   }
 }
+
+async function executeWorkflowFn(
+  action: Extract<Action, { kind: "fn" | "verify" }>,
+  binding: WorkflowBinding,
+  signal: AbortSignal,
+): Promise<ActionOutcome> {
+  const impl = binding.nodes[action.key];
+  if (!impl || impl.kind !== action.kind)
+    throw new Error(`No ${action.kind} implementation for key ${action.key}`);
+  signal.throwIfAborted();
+  try {
+    // Verify may receive a tool-like context later (L3/L4); tracer passes input only.
+    const value =
+      action.kind === "verify"
+        ? await (impl.fn as (args: unknown, ctx?: unknown) => unknown)(
+            action.input,
+            {
+              signal,
+              info: action.context.info,
+              session: { id: action.sessionId },
+              step: async <T>(_name: string, fn: () => Promise<T> | T) => fn(),
+              approve: async () => {
+                throw new Error("Approvals in verify are not available in the tracer");
+              },
+              ask: async () => {
+                throw new Error("ask in verify is not available in the tracer");
+              },
+              progress() {},
+            },
+          )
+        : await (impl.fn as (args: unknown) => unknown)(action.input);
+    return { value };
+  } catch (error) {
+    if (signal.aborted) throw signal.reason;
+    return {
+      value: {
+        kind: "failed",
+        code: action.kind === "verify" ? "loop.verify-failed" : "fn.failed",
+        message: message(error),
+      },
+    };
+  }
+}
+
 function delegatedAgent(root: BuiltAgent, id: string): BuiltAgent {
   for (const capability of Object.values(implementationsFor(root))) {
     const child = delegateOf(capability.tools?.[id])?.agent;

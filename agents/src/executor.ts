@@ -4,7 +4,12 @@ import {
   ActionClaimResponseSchema,
   type Action,
 } from "@nylorun/core/contracts";
-import type { BuiltAgent } from "@nylorun/core/define";
+import {
+  agentFrom,
+  isBuiltWorkflow,
+  type BuiltAgent,
+  type BuiltWorkflow,
+} from "@nylorun/core/define";
 import {
   AgentsClient,
   assertNoMiddlewareClosures,
@@ -22,10 +27,10 @@ import {
   type Destination,
 } from "./http.js";
 import { readSSE } from "./sse.js";
-import { executeAction } from "./execute-action.js";
+import { executeAction, type ExecutableDefinition } from "./execute-action.js";
 
 export interface ConnectOptions {
-  agents: readonly AgentSource[];
+  agents: readonly (AgentSource | BuiltWorkflow)[];
   /** Application-mode client; when set, connectAgents uses application mode (D§7.2). */
   application?: AgentsClient;
   runtime?: Destination;
@@ -47,15 +52,34 @@ function implementationVersionOf(options: ConnectOptions): string {
   );
 }
 
-function buildAgents(options: ConnectOptions): Map<string, BuiltAgent> {
-  const agents = new Map<string, BuiltAgent>();
-  for (const source of options.agents) {
-    const built = source.build?.() ?? (source as BuiltAgent);
+function buildAgents(options: ConnectOptions): Map<string, ExecutableDefinition> {
+  const agents = new Map<string, ExecutableDefinition>();
+  const addAgent = (built: BuiltAgent) => {
     assertNoMiddlewareClosures(built);
     AgentManifestSchema.parse(built.manifest);
     if (agents.has(built.id))
       throw new Error(`Duplicate connected agent ${built.id}`);
     agents.set(built.id, built);
+  };
+  for (const source of options.agents) {
+    if (isBuiltWorkflow(source)) {
+      if (agents.has(source.id))
+        throw new Error(`Duplicate connected agent ${source.id}`);
+      agents.set(source.id, source);
+      for (const binding of Object.values(source.getBinding().agents))
+        addAgent(agentFrom(binding.manifest, binding.implementations));
+      continue;
+    }
+    const built = source.build?.() ?? (source as BuiltAgent);
+    if (isBuiltWorkflow(built)) {
+      if (agents.has(built.id))
+        throw new Error(`Duplicate connected agent ${built.id}`);
+      agents.set(built.id, built);
+      for (const binding of Object.values(built.getBinding().agents))
+        addAgent(agentFrom(binding.manifest, binding.implementations));
+      continue;
+    }
+    addAgent(built);
   }
   if (!agents.size) throw new Error("connectAgents requires at least one agent");
   return agents;
@@ -64,7 +88,7 @@ function buildAgents(options: ConnectOptions): Map<string, BuiltAgent> {
 function connectExecutorMode(
   options: ConnectOptions,
   runtime: Destination,
-  agents: Map<string, BuiltAgent>,
+  agents: Map<string, ExecutableDefinition>,
 ): AgentConnection {
   const transport = new Transport(runtime, "executor");
   const version = implementationVersionOf(options);
@@ -133,7 +157,7 @@ function connectExecutorMode(
   };
   const processAction = async (
     action: Action,
-    agent: BuiltAgent,
+    agent: ExecutableDefinition,
     work: AbortController,
   ) => {
     const stop = () => work.abort(signal.reason);
@@ -292,7 +316,7 @@ function connectExecutorMode(
 function connectApplicationMode(
   options: ConnectOptions,
   application: AgentsClient,
-  agents: Map<string, BuiltAgent>,
+  agents: Map<string, ExecutableDefinition>,
 ): AgentConnection {
   const version = implementationVersionOf(options);
   const children: AgentConnection[] = [];
@@ -328,7 +352,7 @@ function connectApplicationMode(
       );
       const child = connectExecutorMode(
         {
-          agents: [agent],
+          agents: [agent as AgentSource],
           implementationVersion: version,
           onError: options.onError,
         },

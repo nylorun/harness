@@ -1,9 +1,11 @@
 import type {
   AgentManifest,
   BuiltAgent,
+  BuiltWorkflow,
   JsonValue,
+  WorkflowManifest,
 } from "@nylorun/core/define";
-import { delegateOf } from "@nylorun/core/define";
+import { delegateOf, isBuiltWorkflow } from "@nylorun/core/define";
 import {
   LiveEventSchema,
   SessionItemsResponseSchema,
@@ -18,9 +20,9 @@ import { Transport, id, segment, type Destination } from "./http.js";
 import { observeSSE } from "./sse.js";
 export interface AgentSource {
   readonly id: string;
-  readonly manifest: AgentManifest;
-  build?(): BuiltAgent;
-  getBinding?: BuiltAgent["getBinding"];
+  readonly manifest: AgentManifest | WorkflowManifest;
+  build?(): BuiltAgent | BuiltWorkflow;
+  getBinding?: BuiltAgent["getBinding"] | BuiltWorkflow["getBinding"];
 }
 
 const middlewareClosure =
@@ -28,10 +30,14 @@ const middlewareClosure =
 
 /** The agent's declarations, then those of each agent it uses as a tool, keyed `<child>/<capability>`. */
 function declarationsOf(agent: AgentSource) {
+  if (isBuiltWorkflow(agent) || (agent.manifest as { kind?: string }).kind === "workflow")
+    return [];
   const built = agent.build?.() ?? agent;
+  if (isBuiltWorkflow(built)) return [];
   const binding = built.getBinding?.();
-  const found = (binding?.declarations ?? []).map((item) => ({ key: item.id, item }));
-  for (const tool of binding?.tools ?? []) {
+  if (!binding || !("declarations" in binding)) return [];
+  const found = (binding.declarations ?? []).map((item) => ({ key: item.id, item }));
+  for (const tool of binding.tools ?? []) {
     const child = delegateOf(tool)?.agent;
     for (const item of child?.getBinding().declarations ?? [])
       found.push({ key: `${child!.id}/${item.id}`, item });
@@ -82,10 +88,27 @@ export class AgentsClient {
       options.signal
     );
   }
-  saveAgent(
-    agent: AgentSource,
+  async saveAgent(
+    agent: AgentSource | BuiltWorkflow,
     options: { implementationVersion: string; requestId?: string }
   ) {
+    if (isBuiltWorkflow(agent)) {
+      for (const binding of Object.values(agent.getBinding().agents)) {
+        await this.saveAgent(
+          {
+            id: binding.manifest.id,
+            manifest: binding.manifest,
+            getBinding: () => binding,
+          },
+          options,
+        );
+      }
+      return this.transport.json(`/v1/agents/${segment(agent.id)}`, "PUT", {
+        requestId: options.requestId ?? id(),
+        manifest: agent.manifest,
+        implementationVersion: options.implementationVersion,
+      });
+    }
     assertNoMiddlewareClosures(agent);
     const pluginRoots = pluginRootsOf(agent);
     return this.transport.json(`/v1/agents/${segment(agent.id)}`, "PUT", {
