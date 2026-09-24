@@ -5,7 +5,15 @@ import type {
   Credential,
   CredentialStore,
 } from "@earendil-works/pi-ai";
-import { modelsFor, type Selection } from "@nylorun/runtime/configuration";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import {
+  createProvider,
+  type Model,
+} from "@earendil-works/pi-ai";
+import {
+  stream,
+  streamSimple,
+} from "@earendil-works/pi-ai/api/openai-completions";
 
 export class ConfigurationCancelled extends Error {
   readonly exitCode: number;
@@ -22,6 +30,142 @@ export type PromptedModel = {
   auth: Credential;
 };
 
+export type ModelCatalog = {
+  providers: {
+    id: string;
+    name: string;
+    models: { id: string; name: string }[];
+    auth?: { apiKey?: unknown; oauth?: unknown };
+  }[];
+};
+
+export type Selection = Readonly<{
+  provider: string;
+  model: string;
+  custom?: Readonly<{ baseUrl: string }>;
+}>;
+
+/**
+ * Build a pi-ai registry for interactive login. Catalog listing prefers the
+ * Tenant API payload when provided (F2-4).
+ */
+function modelsFor(
+  selection: Selection,
+  credentials: CredentialStore,
+  catalog?: ModelCatalog,
+) {
+  const models = builtinModels({ credentials });
+  if (selection.custom) {
+    const model: Model<"openai-completions"> = {
+      id: selection.model,
+      name: selection.model,
+      api: "openai-completions",
+      provider: "custom",
+      baseUrl: selection.custom.baseUrl,
+      reasoning: false,
+      input: ["text", "image"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 16384,
+    };
+    models.setProvider(
+      createProvider({
+        id: "custom",
+        name: "Custom OpenAI-compatible",
+        baseUrl: selection.custom.baseUrl,
+        auth: {
+          apiKey: {
+            label: "Custom API key",
+            schemas: [],
+            async resolve() {
+              const credential = await credentials.read("custom");
+              if (!credential || credential.type !== "api_key") return undefined;
+              const key = (credential as { key?: string }).key;
+              if (!key) return undefined;
+              return { type: "api_key" as const, auth: { apiKey: key } };
+            },
+          } as never,
+        },
+        models: [model],
+        api: { stream, streamSimple },
+      }),
+    );
+  }
+  return {
+    models,
+    listProviders(): { id: string; name: string; auth: { apiKey?: unknown; oauth?: unknown } }[] {
+      if (catalog?.providers.length) {
+        return catalog.providers.map((provider) => {
+          const live = models.getProvider(provider.id);
+          return {
+            id: provider.id,
+            name: provider.name,
+            auth: {
+              ...(live?.auth?.apiKey || provider.auth?.apiKey
+                ? { apiKey: live?.auth?.apiKey ?? {} }
+                : {}),
+              ...(live?.auth?.oauth || provider.auth?.oauth
+                ? { oauth: live?.auth?.oauth ?? {} }
+                : {}),
+              ...(!live?.auth?.apiKey &&
+              !live?.auth?.oauth &&
+              !provider.auth?.apiKey &&
+              !provider.auth?.oauth
+                ? { apiKey: {} }
+                : {}),
+            },
+          };
+        });
+      }
+      return models.getProviders().map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        auth: {
+          ...(provider.auth?.apiKey ? { apiKey: provider.auth.apiKey } : {}),
+          ...(provider.auth?.oauth ? { oauth: provider.auth.oauth } : {}),
+        },
+      }));
+    },
+    listModels(providerId: string): { id: string; name: string }[] {
+      const fromCatalog = catalog?.providers.find((p) => p.id === providerId);
+      if (fromCatalog?.models.length) return fromCatalog.models;
+      return models.getModels(providerId).map((model) => ({
+        id: model.id,
+        name: model.name,
+      }));
+    },
+  };
+}
+
+/** Fetch GET /v1/tenant/models when a connection is available. */
+export async function fetchModelCatalog(options: {
+  url: string;
+  key: string;
+  tenantId: string;
+  fetchImpl?: typeof fetch;
+}): Promise<ModelCatalog> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const { PROTOCOL_HEADER, PROTOCOL_VERSION, TENANT_HEADER } = await import(
+    "@nylorun/agents"
+  );
+  const response = await fetchImpl(
+    `${options.url.replace(/\/$/, "")}/v1/tenant/models`,
+    {
+      headers: {
+        authorization: `Bearer ${options.key}`,
+        [TENANT_HEADER]: options.tenantId,
+        [PROTOCOL_HEADER]: String(PROTOCOL_VERSION),
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Runtime model catalog returned ${response.status}`);
+  }
+  return (await response.json()) as ModelCatalog;
+}
+
 // Internal options also allow isolated prompt tests without changing process globals.
 export async function configureProvider(
   options: {
@@ -29,7 +173,9 @@ export async function configureProvider(
     root?: string;
     input?: Readable;
     output?: Writable;
-  } = {}
+    /** Tenant API catalog from GET /v1/tenant/models. */
+    catalog?: ModelCatalog;
+  } = {},
 ): Promise<PromptedModel> {
   const output = options.output ?? process.stdout;
   const controller = new AbortController();
@@ -47,16 +193,14 @@ export async function configureProvider(
     async delete() {},
     async modify(_id, fn) {
       const next = await fn(captured);
-      if (next?.type === "api_key" && !next.key)
+      if (next?.type === "api_key" && !(next as { key?: string }).key)
         throw new Error("An API key is required.");
       if (next) captured = next;
       return next ?? captured;
     },
   };
-  const models = modelsFor({ provider: "", model: "" }, store, {
-    environment: false,
-  });
-  const providers = models.getProviders();
+  const registry = modelsFor({ provider: "", model: "" }, store, options.catalog);
+  const providers = registry.listProviders();
   const prompt = createInterface({
     input: options.input ?? process.stdin,
     output,
@@ -65,7 +209,7 @@ export async function configureProvider(
   const onInt = () => controller.abort(new ConfigurationCancelled("SIGINT"));
   const onClose = () =>
     controller.abort(
-      new Error("Configuration input closed before setup completed.")
+      new Error("Configuration input closed before setup completed."),
     );
   const closeOnAbort = () => prompt.close();
   prompt.on("SIGINT", onInt);
@@ -83,7 +227,7 @@ export async function configureProvider(
     signal.throwIfAborted();
     output.write("0. Custom OpenAI-compatible provider\n");
     providers.forEach((provider, index) =>
-      output.write(`${index + 1}. ${provider.name} (${provider.id})\n`)
+      output.write(`${index + 1}. ${provider.name} (${provider.id})\n`),
     );
     const choice = Number(await question("Choose a provider: "));
     if (choice === 0) {
@@ -98,34 +242,34 @@ export async function configureProvider(
         model,
         custom: { baseUrl },
       };
-      const customModels = modelsFor(selection, store, { environment: false });
-      if (!(await customModels.checkAuth("custom", { signal })))
-        await customModels.login("custom", "api_key", interaction());
+      const custom = modelsFor(selection, store, options.catalog);
+      if (!(await custom.models.checkAuth("custom", { signal })))
+        await custom.models.login("custom", "api_key", interaction());
       return prompted(selection);
     } else {
       const chosen = providers[choice - 1];
       if (!chosen) throw new Error("Choose a listed provider.");
-      const available = models.getModels(chosen.id);
+      const available = registry.listModels(chosen.id);
       available.forEach((model, index) =>
-        output.write(`${index + 1}. ${model.name} (${model.id})\n`)
+        output.write(`${index + 1}. ${model.name} (${model.id})\n`),
       );
       const model = available[Number(await question("Choose a model: ")) - 1];
       if (!model) throw new Error("Choose a listed model.");
-      if (!(await models.checkAuth(chosen.id, { signal }))) {
+      if (!(await registry.models.checkAuth(chosen.id, { signal }))) {
         let method: "api_key" | "oauth" = chosen.auth.apiKey
           ? "api_key"
           : "oauth";
         if (chosen.auth.apiKey && chosen.auth.oauth) {
           const answer = (
             await question(
-              "Choose authentication: 1. API key (default), 2. OAuth: "
+              "Choose authentication: 1. API key (default), 2. OAuth: ",
             )
           ).trim();
           if (answer && !["1", "2"].includes(answer))
             throw new Error("Choose authentication 1 or 2.");
           if (answer === "2") method = "oauth";
         }
-        await models.login(chosen.id, method, interaction());
+        await registry.models.login(chosen.id, method, interaction());
       }
       return prompted({ provider: chosen.id, model: model.id });
     }
@@ -145,7 +289,7 @@ export async function configureProvider(
       prompt: async (item) => {
         if (item.type !== "select") return question(item.message + ": ");
         item.options.forEach((option, index) =>
-          output.write(`${index + 1}. ${option.label}\n`)
+          output.write(`${index + 1}. ${option.label}\n`),
         );
         const answer = (await question(item.message + " ")).trim();
         const option =
@@ -159,8 +303,8 @@ export async function configureProvider(
           ("url" in event
             ? event.url
             : "verificationUri" in event
-            ? event.verificationUri
-            : event.message) + "\n"
+              ? event.verificationUri
+              : event.message) + "\n",
         );
       },
     };
