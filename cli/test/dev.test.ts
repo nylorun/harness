@@ -41,16 +41,36 @@ async function fixture(app = true, studio = true) {
       join(root, "node_modules/tsx/package.json"),
       '{"type":"module","exports":{"./cli":"./cli.js"}}',
     );
+    // Mock tsx: register a .ts loader (fixture agents are JS-shaped) then run entry.
     await writeFile(
       join(root, "node_modules/tsx/cli.js"),
       `
 import {writeFileSync} from 'node:fs';
+import {register} from 'node:module';
 import {pathToFileURL} from 'node:url';
 writeFileSync('app.json', JSON.stringify({args:process.argv.slice(2)}));
 process.on('SIGTERM',()=>writeFileSync('app-stopped','yes'));
+register('data:text/javascript,' + encodeURIComponent(\`
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+export async function load(url, context, nextLoad) {
+  if (url.endsWith('.ts')) {
+    return {
+      format: 'module',
+      shortCircuit: true,
+      source: readFileSync(fileURLToPath(url), 'utf8'),
+    };
+  }
+  return nextLoad(url, context);
+}
+\`), pathToFileURL('./'));
 try { await import(pathToFileURL(process.argv[4]).href); }
-catch(error) { console.error(error.message); process.exitCode=1; }
-finally { writeFileSync('app-stopped','yes'); }
+catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+} finally {
+  writeFileSync('app-stopped', 'yes');
+}
 `,
     );
   }
