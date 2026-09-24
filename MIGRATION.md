@@ -1,3 +1,131 @@
+# Runtime Clients and Admin API (breaking beta)
+
+Vocabulary: [runtime/src/CONTEXT.md](./runtime/src/CONTEXT.md). Companion docs:
+[package architecture](docs/design/package-architecture.md),
+[responsibility boundaries](docs/responsibility-boundaries.md),
+[building a desktop client](docs/building-a-desktop-client.md).
+
+Every process that talks to a Runtime is a **client**. Two client packages
+cover the two surfaces: `@nylorun/agents` (Tenant API) and `@nylorun/admin`
+(Admin API). A local OSS Runtime is installed and started by the **launcher**
+inside a per-platform **Runtime build**. The CLI and desktop apps run that
+launcher as a process; nothing imports `@nylorun/runtime`.
+
+### Upgrade a generated application (steps 1–4)
+
+#### 1. Add `src/main.ts`; change `start` and `dev`
+
+Before (Tenants-era starter):
+
+```json
+{
+  "scripts": {
+    "dev": "nylorun dev",
+    "start": "nylorun serve"
+  },
+  "dependencies": {
+    "@nylorun/agents": "…",
+    "@nylorun/cli": "…"
+  }
+}
+```
+
+After:
+
+```ts
+// src/main.ts
+import { connectAgents } from "@nylorun/agents";
+import { agents } from "../agents/index.js";
+
+await connectAgents({ agents }).ready;
+```
+
+```json
+{
+  "scripts": {
+    "dev": "nylorun dev",
+    "build": "…unchanged…",
+    "start": "node dist/src/main.js",
+    "check": "tsc --noEmit"
+  }
+}
+```
+
+`connectAgents` in application mode saves definitions, registers executor
+credentials **derived** from the application key, and connects. The same entry
+runs under `nylorun dev` (with `tsx watch`) and in production (`npm start`).
+Stored executor tokens in `.nylorun/credentials.json` are ignored and dropped
+on the next write.
+
+#### 2. Move CLI and Studio to `devDependencies`
+
+Before:
+
+```json
+{
+  "dependencies": {
+    "@nylorun/agents": "…",
+    "@nylorun/cli": "…"
+  },
+  "devDependencies": {
+    "@nylorun/studio": "…"
+  },
+  "scripts": {
+    "studio": "nylorun studio"
+  }
+}
+```
+
+After:
+
+```json
+{
+  "dependencies": {
+    "@nylorun/agents": "…",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@nylorun/cli": "…",
+    "@nylorun/studio": "…",
+    "tsx": "…",
+    "typescript": "…"
+  },
+  "scripts": {
+    "studio": "nylorun-studio"
+  }
+}
+```
+
+Production `npm ls --omit=dev` must list only `@nylorun/agents` and
+`@nylorun/core` from Nylorun.
+
+#### 3. Deployments use three environment variables
+
+Set `NYLORUN_RUNTIME_URL`, `NYLORUN_TENANT` and `NYLORUN_SERVER_KEY`. Do not
+ship executor tokens. `createClient()` / `connectAgents({ agents })` resolve
+from options, then these variables, then the Project link.
+
+#### 4. Removed commands
+
+| Removed | Replacement |
+| --- | --- |
+| `nylorun serve` | `node dist/src/main.js` (`npm start`) against a running Host |
+| `nylorun studio` | `nylorun-studio` (Studio's own binary) |
+| `--no-studio` on `dev` | Omit the `studio` script / `@nylorun/studio` if unused |
+| CLI depending on `@nylorun/runtime` | CLI runs the launcher inside a Runtime build |
+
+### Existing Host roots
+
+- A Host started by the Tenants-era CLI is reused while it runs.
+- Its next restart moves it onto a Runtime build.
+- `host.json` gains `format` and `runtimeVersion` on the first launcher write.
+- Project link and credentials accept format `0` (missing `format`) and write
+  format `1`.
+
+Upgrade `@nylorun/core`, `@nylorun/agents`, `@nylorun/admin`, `@nylorun/cli`,
+`@nylorun/studio` and Runtime builds together (breaking beta set). Protocol
+feature `admin-status` is additive on protocol `2`.
+
 # Scoped hooks and manifest schema 4
 
 `beforeModelCall` and `afterModelCall` are replaced by two verbs with an explicit scope.

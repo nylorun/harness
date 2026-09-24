@@ -1,31 +1,33 @@
 # Package and application responsibilities
 
-The adopted [package architecture](design/package-architecture.md) is the reference
-for dependency direction, public interfaces and migration.
+The adopted [package architecture](design/package-architecture.md) is the
+reference for dependency direction, public interfaces and migration.
 
 | Concern | Owner |
 | --- | --- |
-| Agent/tool authoring, manifests, shared validation | Core, exposed to applications by the agents SDK |
-| Runtime requests, authentication headers, HTTP errors, SSE observation | Agents SDK client |
+| Definitions, wire schemas, protocol and features, error codes, Admin API, Project-link and build-manifest schemas, id generation | `core` |
+| Tenant API requests, SSE, protocol negotiation, connection resolution, saving definitions, derived executor credentials, claiming actions, running tools and hooks | `agents` |
+| Admin API requests, safe Tenant creation, connection resolution from local Host settings | `admin` |
+| Agent loop, execution state and effects | `harness` |
+| Listener, Tenant routing, both surfaces, loopback checks | Runtime Host (`runtime`) |
+| Tenant storage, scheduling, principals, vaults, sandboxes, providers, Tenant logs | Tenant Runtime (`runtime`) |
+| Installing builds, starting, stopping, upgrading, version policy, `host.json`, `host-credentials.json`, `host-state.json`, locks, log rotation | Launcher |
+| Commands, prompts, Project links, `.env` seeding, running the application under a watcher, bootstrap | `cli` |
+| Dashboard and trusted proxy | `studio` |
+| Babai's experience, bootstrap and keychain storage | Babai |
+| Generated application shell and tested package pins | `create-agent` |
 | Customer tool/hook functions, external services and business policy | Developer application |
-| Claiming actions and invoking customer code | Agents SDK executor |
-| Agent loop, execution state and effects | Harness engine |
-| Session persistence, scheduling, scoped authorization, providers | OSS runtime or Cloud runtime |
-| Local process startup, project registration, configuration prompts | CLI |
-| Developer dashboard and trusted local proxy | Studio |
-| Generated application shell and tested package pins | Create-agent |
 
-Neither runtime imports the SDK. Both hosts consume harness and core; their
-storage and scheduling implementations may differ. SDK clients communicate with
-the host over HTTP/SSE. Studio reuses the SDK client and keeps server credentials
-in its trusted proxy.
+Neither host imports a client package. Both hosts consume harness and core;
+their storage and scheduling may differ. Client packages talk to hosts over
+HTTP/SSE. Studio reuses `@nylorun/agents` and keeps credentials in its trusted
+proxy. The launcher is part of the Runtime build; clients run it as a process
+and never import it.
 
 Agent definitions do not own model credentials or run the loop. Local tool
-implementations stay in the application executor; only manifests cross the wire.
-Host scheduling and the engine determine which actions are issued. The executor
-claims scoped work and returns outcomes. External side effects are not guaranteed
-exactly once by package structure or reconnection behavior.
+implementations stay in the application executor; only manifests cross the
+wire. Derived executor tokens are never stored. External side effects are not
+guaranteed exactly once by package structure or reconnection behavior.
 
-Harness remains usable for explicit in-process execution through `/run`. Live
-schema validators, middleware and closures cross the core/engine seam through a
-local binding; they are not serialized. Core never imports engine internals.
+Harness remains usable for explicit in-process execution through `/run`. Core
+never imports engine internals.
