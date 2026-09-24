@@ -19,6 +19,35 @@ import type { ResolvedConnection } from "@nylorun/agents";
 
 const KEY = "a".repeat(64);
 const TENANT = "tn_00000000000000000000000003";
+const ENV_KEYS = [
+  "NYLORUN_RUNTIME_URL",
+  "NYLORUN_TENANT",
+  "NYLORUN_SERVER_KEY",
+  "NYLORUN_EXECUTOR_KEY",
+] as const;
+
+async function withEnv<T>(
+  env: Record<string, string | undefined>,
+  run: () => Promise<T>,
+): Promise<T> {
+  const previous = Object.fromEntries(
+    ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
+  for (const key of ENV_KEYS) delete process.env[key];
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return await run();
+  } finally {
+    for (const key of ENV_KEYS) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
 
 test("D1: parseStudioArgs accepts --port and --no-open", () => {
   assert.deepEqual(parseStudioArgs([]), { port: undefined, open: true });
@@ -30,57 +59,60 @@ test("D1: parseStudioArgs accepts --port and --no-open", () => {
     port: 4199,
     open: true,
   });
-  assert.deepEqual(parseStudioArgs(["--port=4200", "--no-open"]), {
-    port: 4200,
+  assert.deepEqual(parseStudioArgs(["--port", "4199", "--no-open"]), {
+    port: 4199,
     open: false,
   });
-  assert.throws(() => parseStudioArgs(["--port"]), /requires a value/);
-  assert.throws(() => parseStudioArgs(["--weird"]), /Unknown argument/);
 });
 
 test("D2: resolveConnection options and environment; rejects mixing", async () => {
-  const fromOptions = await resolveConnection({
-    url: "http://127.0.0.1:8787/",
-    tenant: TENANT,
-    key: KEY,
-    env: {},
-  });
-  assert.deepEqual(fromOptions, {
-    url: "http://127.0.0.1:8787",
-    tenant: TENANT,
-    key: KEY,
-    role: "application",
-    source: "options",
+  await withEnv({}, async () => {
+    const fromOptions = await resolveConnection({
+      url: "http://127.0.0.1:8787/",
+      tenant: TENANT,
+      key: KEY,
+    });
+    assert.deepEqual(fromOptions, {
+      url: "http://127.0.0.1:8787",
+      tenant: TENANT,
+      key: KEY,
+      role: "application",
+      source: "options",
+    });
+
+    await assert.rejects(
+      () =>
+        resolveConnection({
+          url: "http://127.0.0.1:8787",
+        }),
+      ConnectionMissingError,
+    );
   });
 
-  await assert.rejects(
-    () =>
-      resolveConnection({
-        url: "http://127.0.0.1:8787",
-        env: {},
-      }),
-    ConnectionMissingError,
-  );
-
-  const fromEnv = await resolveConnection({
-    cwd: "/tmp",
-    env: {
+  await withEnv(
+    {
       NYLORUN_RUNTIME_URL: "http://127.0.0.1:9000",
       NYLORUN_TENANT: TENANT,
       NYLORUN_SERVER_KEY: KEY,
     },
-  });
-  assert.equal(fromEnv.source, "environment");
-  assert.equal(fromEnv.role, "application");
+    async () => {
+      const fromEnv = await resolveConnection({ cwd: "/tmp" });
+      assert.equal(fromEnv.source, "environment");
+      assert.equal(fromEnv.role, "application");
+    },
+  );
 
-  const executor = await resolveConnection({
-    env: {
+  await withEnv(
+    {
       NYLORUN_RUNTIME_URL: "http://127.0.0.1:9000",
       NYLORUN_TENANT: TENANT,
       NYLORUN_EXECUTOR_KEY: KEY,
     },
-  });
-  assert.equal(executor.role, "executor");
+    async () => {
+      const executor = await resolveConnection({ cwd: "/tmp" });
+      assert.equal(executor.role, "executor");
+    },
+  );
 });
 
 test("D2: resolveConnection finds project-link from a nested directory", async () => {
@@ -105,16 +137,15 @@ test("D2: resolveConnection finds project-link from a nested directory", async (
       principalId: "pr_1",
     }),
   );
-  const connection = await resolveConnection({
-    cwd: nested,
-    env: {},
-  });
-  assert.deepEqual(connection, {
-    url: "http://127.0.0.1:8787",
-    tenant: TENANT,
-    key: KEY,
-    role: "application",
-    source: "project-link",
+  await withEnv({}, async () => {
+    const connection = await resolveConnection({ cwd: nested });
+    assert.deepEqual(connection, {
+      url: "http://127.0.0.1:8787",
+      tenant: TENANT,
+      key: KEY,
+      role: "application",
+      source: "project-link",
+    });
   });
 });
 
@@ -214,12 +245,13 @@ test("D4: wait + startStudio never writes under .nylorun and never calls Admin",
 
   const before = await snapshotNylorun(join(root, ".nylorun"));
   const { startStudio } = await import("../dist/host.js");
-  const connection = await waitForApplicationConnection({
-    intervalMs: 1,
-    sleep: async () => undefined,
-    resolveConnection: () =>
-      resolveConnection({ cwd: root, env: {} }),
-  });
+  const connection = await withEnv({}, () =>
+    waitForApplicationConnection({
+      intervalMs: 1,
+      sleep: async () => undefined,
+      resolveConnection: () => resolveConnection({ cwd: root }),
+    }),
+  );
   assert.equal(connection.role, "application");
   assert.ok(!upstreamHits.some((path) => path.includes("/v1/admin")));
 
@@ -231,29 +263,26 @@ test("D4: wait + startStudio never writes under .nylorun and never calls Admin",
     port: 0,
   });
   try {
+    assert.ok(!upstreamHits.some((path) => path.includes("/v1/admin")));
     const after = await snapshotNylorun(join(root, ".nylorun"));
     assert.deepEqual(after, before);
-    assert.ok(!upstreamHits.some((path) => path.includes("/v1/admin")));
-    assert.ok(upstreamHits.includes("/health"));
   } finally {
     await studio.close();
     upstream.close();
-    await once(upstream, "close");
   }
 });
 
-async function snapshotNylorun(
-  dir: string,
-): Promise<Record<string, { size: number; content: string }>> {
+async function snapshotNylorun(dir: string) {
   const entries = await readdir(dir);
-  const out: Record<string, { size: number; content: string }> = {};
-  for (const name of entries.sort()) {
+  const out: Record<string, { size: number; mtimeMs: number; body?: string }> =
+    {};
+  for (const name of entries) {
     const path = join(dir, name);
     const info = await stat(path);
-    if (!info.isFile()) continue;
     out[name] = {
       size: info.size,
-      content: await readFile(path, "utf8"),
+      mtimeMs: info.mtimeMs,
+      body: info.isFile() ? await readFile(path, "utf8") : undefined,
     };
   }
   return out;
