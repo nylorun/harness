@@ -27,6 +27,17 @@ import {
 } from "../../scripts/lib/local-build.mjs";
 import { startLocalRegistry } from "../../scripts/lib/local-registry.mjs";
 
+// Hard wall-clock bound so a wedged CI runner/step cannot sit forever when
+// Actions log upload already stalled (BlobNotFound while status=in_progress).
+const SMOKE_DEADLINE_MS = Number(process.env.NYLORUN_SMOKE_DEADLINE_MS ?? 8 * 60_000);
+const smokeDeadline = setTimeout(() => {
+  console.error(
+    `smoke-starter exceeded ${SMOKE_DEADLINE_MS}ms wall clock; aborting.`,
+  );
+  process.exit(2);
+}, SMOKE_DEADLINE_MS);
+smokeDeadline.unref?.();
+
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-release-"));
 const group = new ProcessGroup();
 let browser;
@@ -444,6 +455,7 @@ try {
     "PASS: packed creator, both starters (ephemeral Host + fixture), browser tool/results, source restart, compiled npm start, shutdown, credentials, and missing-configuration error.",
   );
 } finally {
+  clearTimeout(smokeDeadline);
   await browser?.close();
   await group.close();
   await registry?.close?.();

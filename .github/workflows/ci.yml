@@ -30,9 +30,16 @@ jobs:
       - run: npm run check:stack -- --built
       # Worker deployment belongs to the deferred hosting profile.
       - run: npx playwright-core install --with-deps chromium
-      - run: node create-agent/scripts/smoke-starter.mjs
-      - run: npm run test:dev
-      - run: npm run test:setup
+      - name: Smoke starter
+        # Healthy smoke is ~2 min; 3459c18 wedged here >20m with BlobNotFound logs.
+        timeout-minutes: 12
+        run: node create-agent/scripts/smoke-starter.mjs
+      - name: Test dev
+        timeout-minutes: 10
+        run: npm run test:dev
+      - name: Test setup
+        timeout-minutes: 10
+        run: npm run test:setup
       - name: Validate a proposed release
         if: github.event_name != 'merge_group'
         # release:check is ~2–10 min when healthy; afdaee7 Validate wedged >50 min
@@ -52,6 +59,7 @@ jobs:
           fi
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
