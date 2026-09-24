@@ -1,9 +1,11 @@
+import { resolve } from "node:path";
 import { CliError } from "../errors.js";
 import {
   exitCodeForStatusState,
 } from "./exit-codes.js";
 import {
   launcher,
+  resolveHome,
   throwOnLauncherFailure,
   type LauncherHandle,
   type LauncherOptions,
@@ -69,19 +71,6 @@ function parsePort(value: string | undefined): number | undefined {
   return port;
 }
 
-function resolveHome(env: NodeJS.ProcessEnv = process.env): string {
-  const home = env.NYLORUN_HOME;
-  if (home !== undefined && home.trim() !== "") return home;
-  const userHome = env.HOME ?? env.USERPROFILE;
-  if (!userHome) {
-    throw new CliError(
-      "Cannot resolve Host root: set NYLORUN_HOME or HOME.",
-      1,
-    );
-  }
-  return `${userHome}/.nylorun`;
-}
-
 export interface RuntimeCommandOptions extends LauncherOptions {
   home?: string;
   /** Injected launcher handle (tests). */
@@ -98,7 +87,11 @@ export async function runtimeCommand(
   args: readonly string[],
   options: RuntimeCommandOptions = {},
 ): Promise<void> {
-  const home = options.home ?? resolveHome(options.env ?? process.env);
+  const home =
+    options.home ??
+    (options.env?.NYLORUN_HOME
+      ? resolve(options.env.NYLORUN_HOME)
+      : resolveHome());
   const handle =
     options.handle ??
     (await launcher(home, {

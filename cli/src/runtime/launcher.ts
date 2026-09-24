@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { CliError } from "../errors.js";
 import { bootstrap } from "./bootstrap.js";
 import { newestBuild, type InstalledBuild } from "./builds.js";
@@ -8,6 +9,14 @@ import {
 } from "./exit-codes.js";
 import { renderProgress, type ProgressEvent } from "./progress.js";
 import { runtimeVersion } from "./version.js";
+
+/** Resolve NYLORUN_HOME, an explicit home, or `~/.nylorun`. */
+export function resolveHome(home?: string): string {
+  if (home !== undefined && home.trim() !== "") return resolve(home);
+  const fromEnv = process.env.NYLORUN_HOME?.trim();
+  if (fromEnv) return resolve(fromEnv);
+  return resolve(join(homedir(), ".nylorun"));
+}
 
 export type LauncherJsonEvent =
   | ProgressEvent
