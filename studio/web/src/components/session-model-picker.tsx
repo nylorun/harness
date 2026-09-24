@@ -60,8 +60,8 @@ export function SessionModelPicker({
 
   const refresh = useCallback(async () => {
     const [providersResponse, catalogResponse] = await Promise.all([
-      runtime("/v1/host/providers"),
-      runtime("/v1/host/models"),
+      runtime("/v1/tenant/providers"),
+      runtime("/v1/tenant/models"),
     ]);
     if (!providersResponse.ok || !catalogResponse.ok)
       throw new Error("The Runtime did not return connected model providers.");
@@ -138,7 +138,7 @@ export function SessionModelPicker({
     setPending(true);
     setError("");
     try {
-      const response = await runtime("/v1/host/model/selection", {
+      const response = await runtime("/v1/tenant/model/selection", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

@@ -1,0 +1,157 @@
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import test from "node:test";
+import {
+  PROTOCOL_HEADER,
+  PROTOCOL_VERSION,
+  TENANT_HEADER,
+} from "@nylorun/agents";
+import { proxyRuntime } from "../dist/proxy.js";
+
+const TENANT = "tn_00000000000000000000000003";
+
+async function withUpstream(
+  handler: (
+    req: import("node:http").IncomingMessage,
+    res: import("node:http").ServerResponse,
+  ) => void,
+  run: (upstreamUrl: string) => Promise<void>,
+) {
+  const server = createServer(handler);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  try {
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+}
+
+test("proxy forwards Tenant and Protocol headers and allows /v1/tenant routes", async () => {
+  const seen: { path: string; headers: Record<string, string | string[] | undefined> }[] = [];
+  await withUpstream(
+    (req, res) => {
+      seen.push({ path: req.url ?? "", headers: { ...req.headers } });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    },
+    async (upstreamUrl) => {
+      const studio = createServer((req, res) => {
+        void proxyRuntime(req, res, {
+          origin: "http://127.0.0.1:4161",
+          runtimeUrl: upstreamUrl,
+          serverKey: "server-secret",
+          tenantId: TENANT,
+        });
+      });
+      studio.listen(0, "127.0.0.1");
+      await once(studio, "listening");
+      const address = studio.address();
+      assert.ok(address && typeof address === "object");
+      const origin = `http://127.0.0.1:${address.port}`;
+      try {
+        const response = await fetch(
+          `${origin}/_studio/runtime/v1/tenant/model`,
+          {
+            headers: { host: `127.0.0.1:${address.port}` },
+          },
+        );
+        assert.equal(response.status, 200);
+        assert.equal(seen.length, 1);
+        assert.equal(seen[0]!.path, "/v1/tenant/model");
+        assert.equal(seen[0]!.headers.authorization, "Bearer server-secret");
+        assert.equal(seen[0]!.headers[TENANT_HEADER.toLowerCase()], TENANT);
+        assert.equal(
+          seen[0]!.headers[PROTOCOL_HEADER.toLowerCase()],
+          String(PROTOCOL_VERSION),
+        );
+      } finally {
+        studio.close();
+        await once(studio, "close");
+      }
+    },
+  );
+});
+
+test("proxy rejects legacy /v1/host model routes", async () => {
+  await withUpstream(
+    (_req, res) => {
+      res.writeHead(200);
+      res.end("{}");
+    },
+    async (upstreamUrl) => {
+      const studio = createServer((req, res) => {
+        void proxyRuntime(req, res, {
+          origin: "http://127.0.0.1:4161",
+          runtimeUrl: upstreamUrl,
+          serverKey: "server-secret",
+          tenantId: TENANT,
+        });
+      });
+      studio.listen(0, "127.0.0.1");
+      await once(studio, "listening");
+      const address = studio.address();
+      assert.ok(address && typeof address === "object");
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:${address.port}/_studio/runtime/v1/host/model`,
+        );
+        assert.equal(response.status, 404);
+        const body = (await response.json()) as { message: string };
+        assert.match(body.message, /Unsupported/);
+      } finally {
+        studio.close();
+        await once(studio, "close");
+      }
+    },
+  );
+});
+
+test("proxy allows /health for SDK compatibility checks", async () => {
+  let hit = false;
+  await withUpstream(
+    (req, res) => {
+      hit = req.url === "/health";
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          status: "ok",
+          service: "nylorun-runtime",
+          version: "0.9.0-beta",
+          protocol: { min: 2, max: 2, features: ["runtime-tenants"] },
+          coreVersion: "0.4.0-beta",
+          hostId: "host_1",
+          pid: 1,
+        }),
+      );
+    },
+    async (upstreamUrl) => {
+      const studio = createServer((req, res) => {
+        void proxyRuntime(req, res, {
+          origin: "http://127.0.0.1:4161",
+          runtimeUrl: upstreamUrl,
+          serverKey: "server-secret",
+          tenantId: TENANT,
+        });
+      });
+      studio.listen(0, "127.0.0.1");
+      await once(studio, "listening");
+      const address = studio.address();
+      assert.ok(address && typeof address === "object");
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:${address.port}/_studio/runtime/health`,
+        );
+        assert.equal(response.status, 200);
+        assert.equal(hit, true);
+      } finally {
+        studio.close();
+        await once(studio, "close");
+      }
+    },
+  );
+});
