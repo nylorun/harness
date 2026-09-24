@@ -18,7 +18,7 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir, homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { root, npm, run, readJson } from "../lib/repo.mjs";
 import { availablePort } from "../lib/development.mjs";
