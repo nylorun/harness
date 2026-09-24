@@ -1,9 +1,8 @@
 # Runtime Host deployment
 
-> **DRAFT (WS-I Wave 1).** Host + Tenant layout. Finalize in Wave 3.
-
 This release supports one local Node 24 **Runtime Host** process with SQLite
 **Tenants**, connected customer executors, and optional local Studio.
+Vocabulary: [runtime/src/CONTEXT.md](./runtime/src/CONTEXT.md).
 
 ```sh
 npm run build

@@ -20,10 +20,6 @@ and conformance gates remain open.
 > **Experimental beta.** Public APIs may change before 1.0. Prefer the `@beta`
 > dist-tag for installs until then.
 
-> **DRAFT (WS-I Wave 1) — Runtime Tenants.** Docs below describe the Host /
-> Tenant / Project link model landing on this branch. Behaviour is finalized in
-> Wave 3. See [MIGRATION.md](./MIGRATION.md#runtime-tenants-breaking-beta).
-
 ## Quick start
 
 Create a local agent project (Studio enabled by default):
@@ -39,11 +35,11 @@ Tenant's vault.
 
 Useful flags (after `--`):
 
-| Flag | Effect |
-|---|---|
-| `--no-studio` | Scaffold a headless project without Studio |
-| `--no-open` | Start development without opening a browser |
-| `--yes` | Accept npm install prompts |
+| Flag          | Effect                                      |
+| ------------- | ------------------------------------------- |
+| `--no-studio` | Scaffold a headless project without Studio  |
+| `--no-open`   | Start development without opening a browser |
+| `--yes`       | Accept npm install prompts                  |
 
 The generated app depends on the SDK and CLI; Studio is a development
 dependency. The `@nylorun/cli` package provides `nylorun` and brings the OSS
@@ -65,36 +61,37 @@ starts (or attaches to) a Runtime Host and stores the model provider in the
 linked Tenant vault on first run. The Host keeps running after you stop `dev`,
 so sessions survive a source change; `npx nylorun runtime down` stops it.
 
-Print the three export lines for a linked Project (draft — Wave 2 CLI):
+Print the three export lines for a linked Project:
 
 ```sh
 eval "$(npx nylorun runtime status --env)"
+# → NYLORUN_RUNTIME_URL, NYLORUN_SERVER_KEY, NYLORUN_TENANT
 ```
 
 ## Packages
 
-| Package | Role |
-|---|---|
-| [`@nylorun/core`](./core) | Shared definitions, contracts and manifest identity |
-| [`@nylorun/harness`](./harness) | Execution engine and checkpoints |
-| [`@nylorun/cli`](./cli) | Host lifecycle, Project link and local orchestration |
-| [`@nylorun/agents`](./agents) | Session SDK, authoring and authenticated SSE customer executor |
-| [`@nylorun/runtime`](./runtime) | Runtime Host, Tenant Runtime and providers |
-| [`@nylorun/studio`](./studio) | Local dashboard for a linked Tenant |
-| [`@nylorun/create-agent`](./create-agent) | Project scaffolding, compatibility pins, and examples sync |
-| [`examples`](./examples) | Authored capability demonstrations on the generated project shell |
+| Package                                   | Role                                                              |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| [`@nylorun/core`](./core)                 | Shared definitions, contracts and manifest identity               |
+| [`@nylorun/harness`](./harness)           | Execution engine and checkpoints                                  |
+| [`@nylorun/cli`](./cli)                   | Host lifecycle, Project link and local orchestration              |
+| [`@nylorun/agents`](./agents)             | Session SDK, authoring and authenticated SSE customer executor    |
+| [`@nylorun/runtime`](./runtime)           | Runtime Host, Tenant Runtime and providers                        |
+| [`@nylorun/studio`](./studio)             | Local dashboard for a linked Tenant                               |
+| [`@nylorun/create-agent`](./create-agent) | Project scaffolding, compatibility pins, and examples sync        |
+| [`examples`](./examples)                  | Authored capability demonstrations on the generated project shell |
 
 ## Documentation
 
-| Doc | Audience |
-|---|---|
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | Contributors — setup, checks, workflow |
-| [RELEASING.md](./RELEASING.md) | Maintainers — version, publish, dist-tags |
-| [MIGRATION.md](./MIGRATION.md) | Breaking beta migration (incl. Runtime Tenants draft) |
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | Application hosting |
-| [docs/BUILDING_AGENTS.md](./docs/BUILDING_AGENTS.md) | Authoring agents against a Tenant (draft) |
-| [SECURITY.md](./SECURITY.md) | Vulnerability reports |
-| [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Community standards |
+| Doc                                                  | Audience                                        |
+| ---------------------------------------------------- | ----------------------------------------------- |
+| [CONTRIBUTING.md](./CONTRIBUTING.md)                 | Contributors — setup, checks, workflow          |
+| [RELEASING.md](./RELEASING.md)                       | Maintainers — version, publish, dist-tags       |
+| [MIGRATION.md](./MIGRATION.md)                       | Breaking beta migration (incl. Runtime Tenants) |
+| [DEPLOYMENT.md](./DEPLOYMENT.md)                     | Application hosting                             |
+| [docs/BUILDING_AGENTS.md](./docs/BUILDING_AGENTS.md) | Authoring agents against a Tenant               |
+| [SECURITY.md](./SECURITY.md)                         | Vulnerability reports                           |
+| [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)           | Community standards                             |
 
 Package-level READMEs: [Harness](./harness/README.md) · [Runtime](./runtime/README.md) · [Studio](./studio/README.md) · [Examples](./examples/README.md)
 
