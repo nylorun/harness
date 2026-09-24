@@ -146,6 +146,8 @@ try {
     "createRunState",
     "runDurable",
     "createDurableCheckpoint",
+    "runFlowDurable",
+    "createFlowCheckpoint",
     "createExecutionState",
     "validateExecutionState",
     "bindingFromAgent",

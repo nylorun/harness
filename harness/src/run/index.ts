@@ -66,6 +66,7 @@ export { checkCompatibility, createExecutionState, validateExecutionState, execu
 export type { Implementations, ExecutionState, RunResult, RunOptions };
 
 export { createDurableCheckpoint, runDurable } from "./durable.js";
+export { createFlowCheckpoint, runFlowDurable } from "../flow/index.js";
 export type {
   DurableCheckpoint,
   DurableSessionTool,
@@ -74,4 +75,5 @@ export type {
   DurableHost,
   DurableResult,
 } from "./durable.js";
+export type { FlowCheckpoint } from "../flow/checkpoint.js";
 export type { ModelAdapter, ModelCandidate, ModelCall, ModelRequest } from "@nylorun/core/define";

@@ -8,3 +8,4 @@ export type * from "./types/model.js";
 export type * from "./types/shared.js";
 export type * from "./types/manifest.js";
 export type * from "./types/transcript.js";
+export type * from "./types/workflow.js";

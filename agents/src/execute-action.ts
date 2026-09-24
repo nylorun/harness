@@ -37,6 +37,8 @@ export async function executeAction(
         ),
       },
     };
+  if (action.kind !== "tool" || !("capabilityId" in action))
+    throw new Error(`Unsupported action kind ${action.kind}`);
   const impl = implementationsFor(agent)[action.capabilityId];
   if (!impl) throw new Error(`No capability ${action.capabilityId}`);
   const raw = impl.tools?.[action.toolName];

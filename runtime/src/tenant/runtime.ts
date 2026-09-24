@@ -1016,7 +1016,12 @@ export class TenantRuntime implements TenantHandle {
             manifest: s.manifest,
             sessionId: id,
             turnId: s.activeTurnId,
-            input: command.content,
+            input:
+              "content" in command
+                ? command.content
+                : typeof command.data === "string"
+                  ? command.data
+                  : JSON.stringify(command.data),
             state: s.state,
             info: s.info,
           });
@@ -1905,8 +1910,19 @@ export async function openTenantRuntime(
 
 /** What an action runs, for events: a tool name, or a hook point and its capabilities. */
 function actionTarget(action: Action) {
+  if (action.kind === "hook")
+    return {
+      hook: action.hook,
+      ...(action.agent ? { agent: action.agent } : {}),
+    };
+  if (action.kind === "tool" && "toolName" in action)
+    return {
+      toolName: action.toolName,
+      ...(action.agent ? { agent: action.agent } : {}),
+    };
   return {
-    ...(action.kind === "hook" ? { hook: action.hook } : { toolName: action.toolName }),
+    path: action.path,
+    key: action.key,
     ...(action.agent ? { agent: action.agent } : {}),
   };
 }

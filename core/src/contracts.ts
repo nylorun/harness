@@ -1,6 +1,8 @@
 /** Public wire contracts only. Never import checkpoint or engine modules here. */
 import { z } from "zod";
 import type { AgentManifest } from "./types/manifest.js";
+import type { JsonValue } from "./types/shared.js";
+import type { WorkflowManifest } from "./types/workflow.js";
 import {
   SANDBOX_NETWORK_PRESETS,
   SANDBOX_TOOL_NAMES,
@@ -12,12 +14,23 @@ import { hookListIssue } from "./definition/hooks.js";
 import { DELEGATE_INPUT_SCHEMA } from "./definition/delegate.js";
 import { canonical } from "./utils/canonical.js";
 export type { AgentManifest } from "./types/manifest.js";
+export type { WorkflowManifest } from "./types/workflow.js";
 export { PROTOCOL_VERSION, ERROR_CODES } from "./compatibility.js";
 export type { ErrorCode } from "./compatibility.js";
 import { ERROR_CODES } from "./compatibility.js";
 export const RequestIdSchema = z.string().min(1);
 export const IdempotencyKeySchema = z.string().min(1).max(256);
 const jsonObject = z.record(z.string(), z.unknown());
+const jsonValue: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValue),
+    z.record(z.string(), jsonValue),
+  ])
+);
 const mcpServerSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -243,10 +256,125 @@ const absolutePath = z.string().min(1).refine(
   (value) => value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value),
   { message: "plugin root must be an absolute path" },
 );
+const workflowFnRefSchema = z.object({ fn: z.literal(true) }).strict();
+const workflowNodeSchema: z.ZodTypeAny = z.lazy(() =>
+  z.union([
+    z.object({ agent: z.string().min(1) }).strict(),
+    z
+      .object({
+        tool: z
+          .object({
+            name: z.string().min(1),
+            description: z.string().optional(),
+            inputSchema: jsonObject.optional(),
+            outputSchema: jsonObject.optional(),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        chain: z
+          .object({
+            id: z.string().min(1),
+            steps: z.array(workflowNodeSchema).min(1),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        switch: z
+          .object({
+            id: z.string().min(1),
+            on: workflowFnRefSchema,
+            cases: z.record(z.string(), workflowNodeSchema),
+            default: workflowNodeSchema.optional(),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        parallel: z
+          .object({
+            id: z.string().min(1),
+            branches: z.record(z.string(), workflowNodeSchema),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        map: z
+          .object({
+            id: z.string().min(1),
+            over: workflowFnRefSchema,
+            each: workflowNodeSchema,
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        loop: z
+          .object({
+            id: z.string().min(1),
+            run: workflowNodeSchema,
+            verify: z.union([
+              workflowFnRefSchema,
+              z.object({ agent: z.string().min(1) }).strict(),
+              z
+                .object({
+                  slot: z
+                    .object({
+                      id: z.string().min(1).optional(),
+                      input: workflowFnRefSchema.optional(),
+                      run: workflowNodeSchema,
+                    })
+                    .strict(),
+                })
+                .strict(),
+            ]),
+            decide: workflowFnRefSchema,
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        slot: z
+          .object({
+            id: z.string().min(1).optional(),
+            input: workflowFnRefSchema.optional(),
+            run: workflowNodeSchema,
+          })
+          .strict(),
+      })
+      .strict(),
+  ])
+);
+/** Workflow definition document. `kind: "workflow"`; a missing `kind` is never a workflow. */
+export const WorkflowManifestSchema = z
+  .object({
+    kind: z.literal("workflow"),
+    workflowSchemaVersion: z.literal(1),
+    id: z.string().min(1),
+    root: workflowNodeSchema,
+    sandbox: sandboxManifestSchema.optional(),
+  })
+  .strict() as z.ZodType<WorkflowManifest>;
+/** Registry document: agent (no `kind`, or legacy) or workflow (`kind: "workflow"`). */
+export const DefinitionDocumentSchema = z.union([
+  AgentManifestSchema,
+  WorkflowManifestSchema,
+]);
+export type DefinitionDocument = AgentManifest | WorkflowManifest;
 export const PutAgentRequestSchema = z
   .object({
     requestId: RequestIdSchema,
-    manifest: AgentManifestSchema,
+    /** Agent or workflow document. Registry `kind` is carried on the document. */
+    manifest: DefinitionDocumentSchema,
     implementationVersion: z.string().min(1),
     pluginRoots: z.record(z.string(), absolutePath).optional(),
   })
@@ -267,6 +395,8 @@ export const PutSessionRequestSchema = z
     info: jsonObject.optional(),
     vaultIds: z.array(z.string().min(1)).optional(),
     credentialSelections: z.array(CredentialSelectionSchema).optional(),
+    /** Share another session's sandbox (same owner, Tenant, and identical specs). */
+    sandbox: z.object({ session: z.string().min(1) }).strict().optional(),
   })
   .strict();
 export type PutSessionRequest = z.infer<typeof PutSessionRequestSchema>;
@@ -432,13 +562,27 @@ const commandBase = {
   requestId: RequestIdSchema,
   idempotencyKey: IdempotencyKeySchema,
 };
-export const MessageEventBodySchema = z
-  .object({
-    ...commandBase,
-    type: z.literal("message"),
-    content: z.string().min(1),
-  })
-  .strict();
+const messageBase = {
+  ...commandBase,
+  type: z.literal("message"),
+  /** Optional turn manifest (Loop patch); validated as a variant of the pinned agent. */
+  manifest: AgentManifestSchema.optional(),
+};
+/** Exactly one of `content` or `data`. Optional `manifest` for per-turn agent patches. */
+export const MessageEventBodySchema = z.union([
+  z
+    .object({
+      ...messageBase,
+      content: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...messageBase,
+      data: jsonValue,
+    })
+    .strict(),
+]);
 export const ActionOutcomeSchema = z
   .object({
     value: z.unknown(),
@@ -456,7 +600,7 @@ export const ActionResultCommandSchema = z
     outcome: ActionOutcomeSchema,
   })
   .strict();
-export const SessionCommandSchema = z.discriminatedUnion("type", [
+export const SessionCommandSchema = z.union([
   MessageEventBodySchema,
   z
     .object({
@@ -553,20 +697,56 @@ export const ActionHookSchema = z
   })
   .strict();
 export type ActionHook = z.infer<typeof ActionHookSchema>;
-export const ActionSchema = z.discriminatedUnion("kind", [
-  z.object({
+const agentToolActionSchema = z
+  .object({
     ...actionBase,
     kind: z.literal("tool"),
     capabilityId: z.string(),
     toolName: z.string(),
     inputSchema: jsonObject.optional(),
     outputSchema: jsonObject.optional(),
-  }),
-  z.object({
+  })
+  .strict();
+/** Tool node on a workflow: routed by path + key instead of capabilityId. */
+const workflowToolActionSchema = z
+  .object({
+    ...actionBase,
+    kind: z.literal("tool"),
+    path: z.string().min(1),
+    key: z.string().min(1),
+    inputSchema: jsonObject.optional(),
+    outputSchema: jsonObject.optional(),
+  })
+  .strict();
+const hookActionSchema = z
+  .object({
     ...actionBase,
     kind: z.literal("hook"),
     hook: ActionHookSchema,
-  }),
+  })
+  .strict();
+const fnActionSchema = z
+  .object({
+    ...actionBase,
+    kind: z.literal("fn"),
+    path: z.string().min(1),
+    key: z.string().min(1),
+  })
+  .strict();
+const verifyActionSchema = z
+  .object({
+    ...actionBase,
+    kind: z.literal("verify"),
+    path: z.string().min(1),
+    key: z.string().min(1),
+  })
+  .strict();
+export const ActionSchema = z.union([
+  agentToolActionSchema,
+  workflowToolActionSchema,
+  hookActionSchema,
+  fnActionSchema,
+  verifyActionSchema,
 ]);
 export type Action = z.infer<typeof ActionSchema>;
 export const ActionClaimRequestSchema = z

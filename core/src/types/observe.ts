@@ -13,6 +13,82 @@ import type {
   ToolResult,
 } from "./tool.js";
 
+/** Curated failure carried on workflow `node.failed` and `turn.failed`. */
+export interface WorkflowErrorPayload {
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+}
+
+/** LiveEvent payloads for workflow sessions (`workflows.md` §11, `loops.md` §4.6). */
+export type WorkflowLiveEventPayload =
+  | {
+      readonly type: "node.started";
+      readonly path: string;
+      readonly kind: string;
+      readonly key: string;
+      readonly iterations?: string;
+    }
+  | {
+      readonly type: "node.completed";
+      readonly path: string;
+      readonly iterations?: string;
+    }
+  | {
+      readonly type: "node.failed";
+      readonly path: string;
+      readonly iterations?: string;
+      readonly error: WorkflowErrorPayload;
+    }
+  | {
+      readonly type: "node.agent";
+      readonly path: string;
+      readonly iterations?: string;
+      readonly sessionId: string;
+      readonly turnId: string;
+    }
+  | {
+      readonly type: "switch.selected";
+      readonly path: string;
+      readonly case: string;
+    }
+  | {
+      readonly type: "map.items";
+      readonly path: string;
+      readonly count: number;
+    }
+  | {
+      readonly type: "loop.iteration";
+      readonly path: string;
+      readonly n: number;
+      readonly sessionId?: string;
+      readonly turnId?: string;
+      readonly manifestHash?: string;
+    }
+  | {
+      readonly type: "loop.waiting";
+      readonly path: string;
+      readonly n: number;
+      readonly sessionId: string;
+      readonly interactions: readonly RequiredInteraction[];
+    }
+  | {
+      readonly type: "loop.verified";
+      readonly path: string;
+      readonly n: number;
+      readonly pass: boolean;
+      readonly feedback?: string;
+      readonly data?: JsonValue;
+      readonly verifierSessionId?: string;
+    }
+  | {
+      readonly type: "loop.decided";
+      readonly path: string;
+      readonly n: number;
+      readonly next: "input" | "output";
+      readonly patched: boolean;
+    };
+
 export type ObserveToolSnapshot = ToolDescriptor;
 
 /** JSON-only model-configuration view suitable for an observation stream. */
