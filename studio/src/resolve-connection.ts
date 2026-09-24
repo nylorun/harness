@@ -31,11 +31,12 @@ function requireComplete(
   source: string,
   parts: Readonly<{ url?: string; tenant?: string; key?: string }>,
   missing: string,
-): asserts parts is { url: string; tenant: string; key: string } {
+): { url: string; tenant: string; key: string } {
   if (!parts.url || !parts.tenant || !parts.key)
     throw new ConnectionMissingError(
       `connection_missing: ${source} is incomplete (${missing}). Tried options, environment, and project-link.`,
     );
+  return { url: parts.url, tenant: parts.tenant, key: parts.key };
 }
 
 async function fromOptions(options: {
@@ -47,11 +48,15 @@ async function fromOptions(options: {
   const tenant = trim(options.tenant);
   const key = trim(options.key);
   if (!hasAny([url, tenant, key])) return undefined;
-  requireComplete("options", { url, tenant, key }, "need url, tenant, and key");
+  const complete = requireComplete(
+    "options",
+    { url, tenant, key },
+    "need url, tenant, and key",
+  );
   return {
-    url: url.replace(/\/$/u, ""),
-    tenant,
-    key,
+    url: complete.url.replace(/\/$/u, ""),
+    tenant: complete.tenant,
+    key: complete.key,
     role: "application",
     source: "options",
   };
@@ -67,15 +72,15 @@ function fromEnvironment(
   if (!hasAny([url, tenant, applicationKey, executorKey])) return undefined;
   const key = executorKey ?? applicationKey;
   const role = executorKey !== undefined ? "executor" : "application";
-  requireComplete(
+  const complete = requireComplete(
     "environment",
     { url, tenant, key },
     "need NYLORUN_RUNTIME_URL, NYLORUN_TENANT, and NYLORUN_SERVER_KEY or NYLORUN_EXECUTOR_KEY",
   );
   return {
-    url: url.replace(/\/$/u, ""),
-    tenant,
-    key,
+    url: complete.url.replace(/\/$/u, ""),
+    tenant: complete.tenant,
+    key: complete.key,
     role,
     source: "environment",
   };
