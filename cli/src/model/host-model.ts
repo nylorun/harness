@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Credential } from "@earendil-works/pi-ai";
+import {
+  PROTOCOL_HEADER,
+  PROTOCOL_VERSION,
+  TENANT_HEADER,
+} from "@nylorun/agents";
 import { configureProvider, type PromptedModel } from "./configure.js";
+import { loadProjectEnvironment } from "../environment.js";
 
 /** Wire shape of GET/PUT `/v1/tenant/model` — local copy so CLI stays off `@nylorun/core`. */
 type HostModelView =
@@ -15,26 +21,35 @@ type HostModelView =
       readonly baseUrl?: string;
     };
 
-function tenantHeaders(serverKey: string): Record<string, string> {
-  const tenant = process.env.NYLORUN_TENANT?.trim();
+function tenantHeaders(
+  serverKey: string,
+  tenantId: string,
+): Record<string, string> {
+  return {
+    authorization: `Bearer ${serverKey}`,
+    [TENANT_HEADER]: tenantId,
+    [PROTOCOL_HEADER]: String(PROTOCOL_VERSION),
+  };
+}
+
+function resolveTenantId(explicit?: string): string {
+  const tenant = explicit?.trim() || process.env.NYLORUN_TENANT?.trim();
   if (!tenant) {
     throw new Error(
       "Set NYLORUN_TENANT (or pass tenant via Project link) before calling Tenant model routes",
     );
   }
-  return {
-    authorization: `Bearer ${serverKey}`,
-    "Nylorun-Tenant": tenant,
-    "Nylorun-Protocol": "2",
-  };
+  return tenant;
 }
 
 export async function getHostModel(
   runtimeUrl: string,
   serverKey: string,
+  tenantId?: string,
 ): Promise<HostModelView> {
+  const tenant = resolveTenantId(tenantId);
   const response = await fetch(`${runtimeUrl}/v1/tenant/model`, {
-    headers: tenantHeaders(serverKey),
+    headers: tenantHeaders(serverKey, tenant),
   });
   if (!response.ok)
     throw new Error(`Runtime model status returned ${response.status}`);
@@ -45,11 +60,13 @@ export async function putHostModel(
   runtimeUrl: string,
   serverKey: string,
   model: PromptedModel,
+  tenantId?: string,
 ): Promise<HostModelView> {
+  const tenant = resolveTenantId(tenantId);
   const response = await fetch(`${runtimeUrl}/v1/tenant/model`, {
     method: "PUT",
     headers: {
-      ...tenantHeaders(serverKey),
+      ...tenantHeaders(serverKey, tenant),
       "content-type": "application/json",
     },
     body: JSON.stringify({
@@ -74,14 +91,28 @@ export async function putHostModel(
 export async function ensureHostModel(options: {
   runtimeUrl: string;
   serverKey: string;
+  tenantId: string;
   root?: string;
+  env?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
 }): Promise<void> {
-  const current = await getHostModel(options.runtimeUrl, options.serverKey);
+  const current = await getHostModel(
+    options.runtimeUrl,
+    options.serverKey,
+    options.tenantId,
+  );
   if (current.configured) return;
-  const seeded = seedFromProject(options.root ?? process.cwd());
+  const env =
+    options.env ?? loadProjectEnvironment(options.root ?? process.cwd());
+  if (env.NYLORUN_DEV_MODEL?.trim() === "fixture") return;
+  const seeded = seedFromEnv(env, options.root ?? process.cwd());
   if (seeded) {
-    await putHostModel(options.runtimeUrl, options.serverKey, seeded);
+    await putHostModel(
+      options.runtimeUrl,
+      options.serverKey,
+      seeded,
+      options.tenantId,
+    );
     return;
   }
   if (process.stdin.isTTY && process.stdout.isTTY) {
@@ -89,7 +120,12 @@ export async function ensureHostModel(options: {
       root: options.root,
       signal: options.signal,
     });
-    await putHostModel(options.runtimeUrl, options.serverKey, prompted);
+    await putHostModel(
+      options.runtimeUrl,
+      options.serverKey,
+      prompted,
+      options.tenantId,
+    );
     return;
   }
   throw new Error(
@@ -97,12 +133,15 @@ export async function ensureHostModel(options: {
   );
 }
 
-function seedFromProject(root: string): PromptedModel | undefined {
-  const provider = process.env.MODEL_PROVIDER?.trim();
-  const model = process.env.MODEL?.trim();
+function seedFromEnv(
+  env: Readonly<Record<string, string>>,
+  root: string,
+): PromptedModel | undefined {
+  const provider = env.MODEL_PROVIDER?.trim();
+  const model = env.MODEL?.trim();
   if (!provider || !model) return undefined;
-  const baseUrl = process.env.MODEL_PROVIDER_BASE_URL?.trim();
-  const key = process.env.MODEL_PROVIDER_API_KEY;
+  const baseUrl = env.MODEL_PROVIDER_BASE_URL?.trim();
+  const key = env.MODEL_PROVIDER_API_KEY;
   const auth = key
     ? ({ type: "api_key", key } as const)
     : legacyCredential(root, provider);

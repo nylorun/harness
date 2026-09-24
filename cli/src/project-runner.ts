@@ -1,47 +1,28 @@
 import { createRequire } from "node:module";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import {
   createClient,
   connectAgents,
+  PROTOCOL_HEADER,
+  PROTOCOL_VERSION,
+  TENANT_HEADER,
   type AgentSource,
   type AgentConnection,
 } from "@nylorun/agents";
+import { startEphemeralRuntime } from "@nylorun/runtime";
 import { ensureHostModel } from "./model/host-model.js";
 import { CliError } from "./errors.js";
-import {
-  ensureDataDir,
-  loadScopeEnvironment,
-  probeHealth,
-  resolveScope,
-  type Scope,
-} from "./scope.js";
-import { ensureRuntime } from "./runtime-host.js";
-
-export interface LocalCredentials {
-  serverKey: string;
-  executors: Record<string, string>;
-}
-
-export async function localCredentials(
-  path: string
-): Promise<LocalCredentials> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  try {
-    const value = JSON.parse(await readFile(path, "utf8"));
-    if (typeof value.serverKey !== "string" || !value.executors)
-      throw new Error("Invalid local credentials");
-    await chmod(path, 0o600);
-    return value;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    const value = { serverKey: randomBytes(32).toString("hex"), executors: {} };
-    await writeFile(path, JSON.stringify(value), { mode: 0o600, flag: "wx" });
-    return value;
-  }
-}
+import { loadProjectEnvironment } from "./environment.js";
+import { attachProject, type AttachedProject } from "./project/attach.js";
+import { writeCredentials } from "./project/credentials.js";
+import { writeLink } from "./project/link.js";
+import { seedTenantFromProject } from "./project/seed.js";
+import { findProjectRoot, requireProjectRoot } from "./project/root.js";
+import { probeHostHealth } from "./host/root.js";
 
 export interface ExecutorScopeToken {
   token: string;
@@ -49,25 +30,28 @@ export interface ExecutorScopeToken {
   implementationVersion: string;
 }
 
-/** Registers or rotates this project's executor credentials on the running host. */
+/** Registers or rotates this Project's executor credentials on the Tenant. */
 export async function putExecutors(
   url: string,
-  serverKey: string,
-  executors: readonly ExecutorScopeToken[]
+  applicationKey: string,
+  tenantId: string,
+  executors: readonly ExecutorScopeToken[],
 ): Promise<void> {
   const response = await fetch(`${url}/v1/executors`, {
     method: "PUT",
     headers: {
-      authorization: `Bearer ${serverKey}`,
+      authorization: `Bearer ${applicationKey}`,
+      [TENANT_HEADER]: tenantId,
+      [PROTOCOL_HEADER]: String(PROTOCOL_VERSION),
       "content-type": "application/json",
     },
     body: JSON.stringify({ executors }),
   });
   if (!response.ok)
     throw new CliError(
-      `The Runtime at ${url} rejected this project's executors (${response.status}): ${await response
+      `The Runtime at ${url} rejected this Project's executors (${response.status}): ${await response
         .text()
-        .catch(() => "")}`
+        .catch(() => "")}`,
     );
 }
 
@@ -75,32 +59,126 @@ export interface RunProjectOptions {
   studio?: boolean;
   open?: boolean;
   autostart?: boolean;
-  scope?: Scope;
+  ephemeral?: boolean;
+  projectRoot?: string;
 }
 
 export async function runProject(
   entry: string,
-  options: RunProjectOptions = {}
+  options: RunProjectOptions = {},
 ): Promise<void> {
-  const scope = options.scope ?? resolveScope();
-  loadScopeEnvironment(scope);
-  const registry = await import(pathToFileURL(resolve(entry)).href);
+  const projectRoot = options.projectRoot ?? requireProjectRoot();
+  const envMap = loadProjectEnvironment(projectRoot);
+
+  let ephemeral:
+    | {
+        close(): Promise<void>;
+        url: string;
+        tenantId: string;
+        applicationKey: string;
+        hostRoot: string;
+      }
+    | undefined;
+  let attached: AttachedProject;
+  let hostStarted = false;
+
+  if (options.ephemeral) {
+    const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-ephemeral-"));
+    const baseline: Record<string, string> = {};
+    if (process.env.PATH) baseline.PATH = process.env.PATH;
+    if (process.env.LANG) baseline.LANG = process.env.LANG;
+    if (process.env.TZ) baseline.TZ = process.env.TZ;
+    for (const [key, value] of Object.entries(process.env)) {
+      if (key.startsWith("LC_") && value) baseline[key] = value;
+    }
+    const model =
+      envMap.NYLORUN_DEV_MODEL?.trim() === "fixture" ||
+      process.env.NYLORUN_DEV_MODEL?.trim() === "fixture"
+        ? ({ kind: "fixture" } as const)
+        : undefined;
+    const started = await startEphemeralRuntime({
+      hostRoot,
+      baseline,
+      ...(model ? { model } : {}),
+      name: "ephemeral",
+      retainRoot: true,
+    });
+    ephemeral = started;
+    await writeCredentials(projectRoot, {
+      applicationKey: started.applicationKey,
+      principalId: "ephemeral",
+      executors: {},
+    });
+    // Ephemeral Host has no durable hostId file exposed the same way; use health.
+    const health = await probeHostHealth(started.url);
+    const hostId = health.health?.hostId ?? "host_ephemeral";
+    await writeLink(projectRoot, {
+      hostUrl: started.url,
+      hostId,
+      tenantId: started.tenantId,
+    });
+    attached = {
+      projectRoot,
+      link: {
+        hostUrl: started.url,
+        hostId,
+        tenantId: started.tenantId,
+      },
+      credentials: {
+        applicationKey: started.applicationKey,
+        principalId: "ephemeral",
+        executors: {},
+      },
+      host: {
+        state: "running",
+        root: hostRoot,
+        url: started.url,
+        hostId,
+      },
+      tenantName: "ephemeral",
+      hostStarted: true,
+    };
+    hostStarted = true;
+  } else {
+    attached = await attachProject({
+      projectRoot,
+      autostart: options.autostart !== false,
+    });
+    hostStarted = attached.hostStarted;
+  }
+
+  const { link, credentials } = attached;
+  const url = link.hostUrl;
+  const tenantId = link.tenantId;
+
+  const registry = await import(pathToFileURL(resolve(projectRoot, entry)).href);
   if (!Array.isArray(registry.agents) || !registry.agents.length)
     throw new Error(`${entry} must export a non-empty agents array`);
   const agents = registry.agents as AgentSource[];
-  await ensureDataDir(scope);
-  const credentials = await localCredentials(scope.credentialsPath);
-  const version = process.env.NYLORUN_IMPLEMENTATION_VERSION ?? "dev";
+
+  const version =
+    envMap.NYLORUN_IMPLEMENTATION_VERSION ??
+    process.env.NYLORUN_IMPLEMENTATION_VERSION ??
+    "dev";
+  const nextCredentials = {
+    ...credentials,
+    executors: { ...credentials.executors },
+  };
   const scopes = agents.map((agent) => {
-    const token = (credentials.executors[agent.id] ??=
+    const token = (nextCredentials.executors[agent.id] ??=
       randomBytes(32).toString("hex"));
     return { token, agentId: agent.id, implementationVersion: version };
   });
-  await writeFile(scope.credentialsPath, JSON.stringify(credentials), {
-    mode: 0o600,
+  await writeCredentials(projectRoot, nextCredentials);
+
+  await seedTenantFromProject({
+    hostUrl: url,
+    tenantId,
+    applicationKey: nextCredentials.applicationKey,
+    projectRoot,
+    env: envMap,
   });
 
-  const url = scope.url;
   let studio: { close(): Promise<void>; address: string } | undefined;
   const connections: AgentConnection[] = [];
   let watchdog: NodeJS.Timeout | undefined;
@@ -110,18 +188,41 @@ export async function runProject(
       if (watchdog) clearInterval(watchdog);
       await Promise.allSettled(connections.map((c) => c.close()));
       await studio?.close().catch(() => {});
-      for (const agent of agents) await (agent as any).close?.();
+      for (const agent of agents) await (agent as { close?: () => Promise<void> }).close?.();
+      if (ephemeral) {
+        await ephemeral.close();
+        await rm(ephemeral.hostRoot, { recursive: true, force: true }).catch(
+          () => {},
+        );
+      }
     })());
-  // The Runtime is a separate, persistent process now, so shutting this one down leaves it up.
   const stop = () => void close().finally(() => (process.exitCode = 0));
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
   try {
-    await ensureRuntime(scope, { autostart: options.autostart !== false });
-    await putExecutors(url, credentials.serverKey, scopes);
-    if (process.env.NYLORUN_DEV_MODEL !== "fixture")
-      await ensureHostModel({ runtimeUrl: url, serverKey: credentials.serverKey });
-    const client = createClient({ url, key: credentials.serverKey });
+    await putExecutors(
+      url,
+      nextCredentials.applicationKey,
+      tenantId,
+      scopes,
+    );
+    if (
+      envMap.NYLORUN_DEV_MODEL?.trim() !== "fixture" &&
+      process.env.NYLORUN_DEV_MODEL?.trim() !== "fixture"
+    ) {
+      await ensureHostModel({
+        runtimeUrl: url,
+        serverKey: nextCredentials.applicationKey,
+        tenantId,
+        root: projectRoot,
+        env: envMap,
+      });
+    }
+    const client = createClient({
+      url,
+      key: nextCredentials.applicationKey,
+      tenant: tenantId,
+    });
     for (let index = 0; index < agents.length; index++) {
       await client.saveAgent(agents[index]!, {
         implementationVersion: version,
@@ -129,11 +230,15 @@ export async function runProject(
       const connection = connectAgents({
         agents: [agents[index]!],
         implementationVersion: version,
-        runtime: { url, key: scopes[index]!.token },
+        runtime: {
+          url,
+          key: scopes[index]!.token,
+          tenant: tenantId,
+        },
         onError: (error) =>
           console.error(
             "Executor:",
-            error instanceof Error ? error.message : error
+            error instanceof Error ? error.message : error,
           ),
       });
       connections.push(connection);
@@ -141,27 +246,35 @@ export async function runProject(
     }
     if (options.studio) {
       const modulePath = createRequire(
-        join(process.cwd(), "package.json")
+        join(projectRoot, "package.json"),
       ).resolve("@nylorun/studio");
       const module = await import(pathToFileURL(modulePath).href);
       studio = await module.startStudio({
         runtimeUrl: url,
-        serverKey: credentials.serverKey,
+        serverKey: nextCredentials.applicationKey,
+        tenant: { id: tenantId, name: attached.tenantName },
         open: options.open !== false,
       });
-      console.log(`Studio on ${studio!.address}`);
     }
-    console.log(
-      `Local project ready at ${url}; ${agents.length} connected agent(s).`
-    );
+    printBanner({
+      hostUrl: url,
+      hostStarted: hostStarted || Boolean(ephemeral),
+      ephemeral: Boolean(ephemeral),
+      tenantName: attached.tenantName,
+      tenantId,
+      studioAddress: studio?.address,
+      agentCount: agents.length,
+    });
     const sandbox = await (
       await import("./doctor.js")
     ).sandboxBanner(
       url,
-      credentials.serverKey,
-      agents.map((agent) => agent.manifest)
+      nextCredentials.applicationKey,
+      agents.map((agent) => agent.manifest),
+      tenantId,
     );
     if (sandbox) console.log(sandbox);
+
     await new Promise<void>((settle) => {
       const finish = () => {
         if (!stopping) void close();
@@ -169,14 +282,12 @@ export async function runProject(
       };
       process.once("SIGINT", finish);
       process.once("SIGTERM", finish);
-      // Without a child to watch, a Runtime that dies would leave this process connected to
-      // nothing; three consecutive failed probes end the run with a pointer to the log.
       let failures = 0;
       watchdog = setInterval(async () => {
         if (stopping) return;
-        if ((await probeHealth(url, 2000)).health) return void (failures = 0);
+        if ((await probeHostHealth(url, 2000)).health) return void (failures = 0);
         if (++failures < 3) return;
-        console.error('Runtime stopped unexpectedly; see "nylorun logs".');
+        console.error('Runtime Host stopped unexpectedly; see "nylorun runtime logs".');
         process.exitCode = 1;
         finish();
       }, 5000);
@@ -188,3 +299,40 @@ export async function runProject(
     await close();
   }
 }
+
+function printBanner(options: {
+  hostUrl: string;
+  hostStarted: boolean;
+  ephemeral: boolean;
+  tenantName: string;
+  tenantId: string;
+  studioAddress?: string;
+  agentCount: number;
+}): void {
+  const hostNote = options.ephemeral
+    ? "(ephemeral; removed on exit)"
+    : options.hostStarted
+      ? "(started; stays running)"
+      : "(already running)";
+  const short =
+    options.tenantId.length > 12
+      ? `${options.tenantId.slice(0, 12)}…`
+      : options.tenantId;
+  console.log(`Host          ${options.hostUrl}  ${hostNote}`);
+  console.log(`Tenant        ${options.tenantName}  ${short}`);
+  if (options.studioAddress) console.log(`Studio        ${options.studioAddress}`);
+  console.log(
+    `Ready         ${options.agentCount} connected agent(s).`,
+  );
+  console.log("");
+  console.log("Ctrl-C stops this Project only.");
+  if (!options.ephemeral) {
+    console.log('nylorun runtime down  stops the Host.');
+  }
+}
+
+/** Resolve Project root for commands that may run outside attach. */
+export function projectRootOrCwd(cwd = process.cwd()): string {
+  return findProjectRoot(cwd) ?? cwd;
+}
+

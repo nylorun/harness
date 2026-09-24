@@ -2,19 +2,25 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const DEV_FLAGS = [
+  "--no-studio",
+  "--no-open",
+  "--no-autostart",
+  "--ephemeral",
+] as const;
+
 /**
- * Everything that can be checked without contacting the host, so a project that cannot run
- * never causes a Runtime to be started on its behalf.
+ * Everything that can be checked without contacting the Host, so a Project that
+ * cannot run never causes a Runtime Host to be started on its behalf.
  */
 export function developmentPreflight(args: readonly string[]): string {
   if (
     new Set(args).size !== args.length ||
-    args.some(
-      (arg) => !["--no-studio", "--no-open", "--no-autostart"].includes(arg),
-    )
+    args.some((arg) => !(DEV_FLAGS as readonly string[]).includes(arg))
   )
     throw new Error(
-      "Usage: nylorun dev [--no-studio] [--no-open] [--no-autostart]",
+      "Usage: nylorun dev [--no-studio] [--no-open] [--no-autostart] [--ephemeral]",
     );
   const require = createRequire(join(process.cwd(), "package.json"));
   let tsx: string;
@@ -31,6 +37,7 @@ export function developmentPreflight(args: readonly string[]): string {
     }
   return tsx;
 }
+
 export async function develop(args: readonly string[]): Promise<number> {
   const tsx = developmentPreflight(args);
   const child = spawn(
@@ -42,12 +49,11 @@ export async function develop(args: readonly string[]): Promise<number> {
       fileURLToPath(new URL("./dev-entry.js", import.meta.url)),
       ...args,
     ],
-    // Deliver terminal shutdown once, through the supervisor, instead of twice through the terminal group.
     {
       stdio: "inherit",
       env: process.env,
       detached: process.platform !== "win32",
-    }
+    },
   );
   let stopping = false;
   const stop = (signal: NodeJS.Signals) => {
@@ -63,7 +69,7 @@ export async function develop(args: readonly string[]): Promise<number> {
     return await new Promise<number>((resolve, reject) => {
       child.once("error", reject);
       child.once("exit", (code, signal) =>
-        resolve(code ?? (signal === "SIGINT" ? 130 : 143))
+        resolve(code ?? (signal === "SIGINT" ? 130 : 143)),
       );
     });
   } finally {
