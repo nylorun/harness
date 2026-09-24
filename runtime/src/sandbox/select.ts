@@ -94,7 +94,7 @@ export function reportSelection(selection: SandboxSelection): SandboxSelectionRe
 
 /**
  * Probe backends the way a Tenant Runtime would at open.
- * Callers must pass an explicit probe root; no ambient env or tmpdir (A7).
+ * Callers must pass an explicit probe root; no ambient env or OS temp (A7).
  */
 export async function probeSandboxBackends(
   options: {
