@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planVersions } from "../release/version-policy.mjs";
+import {
+  isBreakingBump,
+  parseProtocolConstants,
+  planVersions,
+  protocolEquals,
+} from "../release/version-policy.mjs";
 
 const versions = {
   core: "0.1.0-beta.1",
@@ -193,4 +198,139 @@ test("core releases propagate to both hosts and SDK without coupling engine rele
   assert.equal(engine.packages.studio, undefined);
   assert.ok(engine.packages.runtime);
   assert.ok(engine.packages.cli);
+});
+
+const protocolV1 = {
+  version: 1,
+  protocol: { min: 1, max: 1, features: [] },
+};
+const protocolV2 = {
+  version: 2,
+  protocol: { min: 2, max: 2, features: ["runtime-tenants"] },
+};
+
+test("D1: protocol parse and equality helpers", () => {
+  const parsed = parseProtocolConstants(`
+export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_FEATURES = ["runtime-tenants"] as const;
+export const HOST_PROTOCOL: ProtocolRange = {
+  min: 2,
+  max: 2,
+  features: PROTOCOL_FEATURES,
+};
+`);
+  assert.deepEqual(parsed, protocolV2);
+  assert.equal(protocolEquals(protocolV2, protocolV2), true);
+  assert.equal(protocolEquals(protocolV1, protocolV2), false);
+  assert.equal(isBreakingBump("minor", "0.4.0-beta"), true);
+  assert.equal(isBreakingBump("patch", "0.4.0-beta"), false);
+  assert.equal(isBreakingBump("major", "1.0.0"), true);
+  assert.equal(isBreakingBump("minor", "1.0.0"), false);
+});
+
+test("D1: protocol change without breaking bumps for core/runtime/agents/cli fails", () => {
+  assert.throws(
+    () =>
+      planVersions(versions, pins, [intent("harness", "minor")], "beta", {
+        currentProtocol: protocolV2,
+        releasedProtocol: protocolV1,
+      }),
+    /PROTOCOL_VERSION or HOST_PROTOCOL changed.*core, runtime, agents, cli/,
+  );
+});
+
+test("D1: protocol change with only patch intent fails", () => {
+  assert.throws(
+    () =>
+      planVersions(
+        versions,
+        pins,
+        [
+          intent("core", "patch"),
+          intent("runtime", "patch"),
+          intent("agents", "patch"),
+          intent("cli", "patch"),
+        ],
+        "beta",
+        { currentProtocol: protocolV2, releasedProtocol: protocolV1 },
+      ),
+    /breaking bump/,
+  );
+});
+
+test("D1: protocol change with pre-1.0 minor bumps for core/runtime/agents/cli passes", () => {
+  const { plan } = planVersions(
+    versions,
+    pins,
+    [
+      intent("core", "minor"),
+      intent("runtime", "minor"),
+      intent("agents", "minor"),
+      intent("cli", "minor"),
+    ],
+    "beta",
+    { currentProtocol: protocolV2, releasedProtocol: protocolV1 },
+  );
+  assert.equal(plan.packages.core, "0.2.0-beta");
+  assert.equal(plan.packages.runtime, "0.2.0-beta");
+  assert.equal(plan.packages.agents, "0.2.0-beta");
+  assert.equal(plan.packages.cli, "0.2.0-beta");
+});
+
+test("D1: protocol change after 1.0 requires major bumps", () => {
+  const stable = {
+    core: "1.0.0",
+    cli: "1.0.0",
+    harness: "1.0.0",
+    agents: "1.0.0",
+    runtime: "1.0.0",
+    studio: "1.0.0",
+    "create-agent": "1.0.0",
+  };
+  const stablePins = {
+    core: "1.0.0",
+    cli: "1.0.0",
+    harness: "1.0.0",
+    agents: "1.0.0",
+    runtime: "1.0.0",
+    studio: "1.0.0",
+  };
+  assert.throws(
+    () =>
+      planVersions(
+        stable,
+        stablePins,
+        [
+          intent("core", "minor"),
+          intent("runtime", "minor"),
+          intent("agents", "minor"),
+          intent("cli", "minor"),
+        ],
+        "beta",
+        { currentProtocol: protocolV2, releasedProtocol: protocolV1 },
+      ),
+    /breaking bump/,
+  );
+  const { plan } = planVersions(
+    stable,
+    stablePins,
+    [
+      intent("core", "major"),
+      intent("runtime", "major"),
+      intent("agents", "major"),
+      intent("cli", "major"),
+    ],
+    "beta",
+    { currentProtocol: protocolV2, releasedProtocol: protocolV1 },
+  );
+  assert.equal(plan.packages.core, "2.0.0-beta");
+});
+
+test("D1: unchanged protocol does not require breaking bumps", () => {
+  const { plan } = planVersions(versions, pins, [intent("harness")], "beta", {
+    currentProtocol: protocolV2,
+    releasedProtocol: protocolV2,
+  });
+  assert.equal(plan.packages.harness, "0.10.1-beta");
+  assert.equal(plan.packages.core, undefined);
 });

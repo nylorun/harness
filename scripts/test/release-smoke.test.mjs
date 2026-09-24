@@ -16,11 +16,15 @@ test("public installation subprocesses cannot inherit publication credentials", 
     OPENAI_API_KEY: "provider-key",
     npm_config_userconfig: "/private/publishing.npmrc",
     NPM_CONFIG_GLOBALCONFIG: "/private/global.npmrc",
-  }, "/isolated/empty.npmrc", 4123);
+  }, "/isolated/empty.npmrc", 4123, {
+    NYLORUN_HOME: "/tmp/nylorun-host-fixture",
+    HOME: "/tmp/nylorun-home-fixture",
+  });
   const child = JSON.parse(execFileSync(process.execPath, ["-e", "console.log(JSON.stringify(process.env))"], { env, encoding: "utf8" }));
   assert.equal(child.PORT, "4123");
   assert.equal(child.NPM_CONFIG_USERCONFIG, "/isolated/empty.npmrc");
   assert.equal(child.NPM_CONFIG_GLOBALCONFIG, "/isolated/empty.npmrc.global");
+  assert.equal(child.NYLORUN_HOME, "/tmp/nylorun-host-fixture");
   assert.doesNotMatch(JSON.stringify(child), /publication-token|github-token|oidc-token|provider-key|publishing\.npmrc|https:\/\/example\.test/);
 });
 

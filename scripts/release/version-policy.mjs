@@ -1,5 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import semver from "semver";
-import { packages } from "../lib/repo.mjs";
+import { packages, root } from "../lib/repo.mjs";
 
 const impact = { none: 0, patch: 1, minor: 2, major: 3 };
 const fullName = (name) => `@nylorun/${name}`;
@@ -8,6 +11,112 @@ const core = (version) => {
   if (!parsed) throw new Error(`Invalid current version: ${version}`);
   return `${parsed.major}.${parsed.minor}.${parsed.patch}`;
 };
+
+/** Breaking bump for D1: minor while 0.x, major after 1.0. */
+export function isBreakingBump(type, version) {
+  if (!type) return false;
+  if (semver.major(core(version)) === 0)
+    return type === "minor" || type === "major";
+  return type === "major";
+}
+
+/**
+ * Parse PROTOCOL_VERSION and HOST_PROTOCOL from core compatibility source.
+ * Returns undefined when the source does not declare a protocol range yet.
+ */
+export function parseProtocolConstants(source) {
+  const versionMatch = source.match(
+    /export\s+const\s+PROTOCOL_VERSION\s*=\s*(\d+)\s*;/,
+  );
+  if (!versionMatch) return undefined;
+  const version = Number(versionMatch[1]);
+  const rangeMatch = source.match(
+    /export\s+const\s+HOST_PROTOCOL\s*:\s*ProtocolRange\s*=\s*(\{[\s\S]*?\})\s*;/,
+  );
+  let protocol;
+  if (rangeMatch) {
+    const block = rangeMatch[1];
+    const min = Number(block.match(/\bmin\s*:\s*(\d+)/)?.[1]);
+    const max = Number(block.match(/\bmax\s*:\s*(\d+)/)?.[1]);
+    const featuresMatch = block.match(/features\s*:\s*(\[[\s\S]*?\]|PROTOCOL_FEATURES)/);
+    let features = [];
+    if (featuresMatch?.[1] === "PROTOCOL_FEATURES") {
+      const list = source.match(
+        /export\s+const\s+PROTOCOL_FEATURES\s*=\s*\[([\s\S]*?)\]\s*as\s+const/,
+      );
+      features = list
+        ? [...list[1].matchAll(/"([^"]+)"/g)].map((match) => match[1])
+        : [];
+    } else if (featuresMatch) {
+      features = [...featuresMatch[1].matchAll(/"([^"]+)"/g)].map(
+        (match) => match[1],
+      );
+    }
+    if (Number.isInteger(min) && Number.isInteger(max))
+      protocol = { min, max, features };
+  }
+  return {
+    version,
+    protocol: protocol ?? { min: version, max: version, features: [] },
+  };
+}
+
+export function protocolEquals(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.version === b.version &&
+    a.protocol.min === b.protocol.min &&
+    a.protocol.max === b.protocol.max &&
+    JSON.stringify([...(a.protocol.features ?? [])].sort()) ===
+      JSON.stringify([...(b.protocol.features ?? [])].sort())
+  );
+}
+
+export function readCurrentProtocol(repo = root) {
+  try {
+    return parseProtocolConstants(
+      readFileSync(join(repo, "core/src/compatibility.ts"), "utf8"),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/** Last released core protocol from the `@nylorun/core@<version>` git tag. */
+export function readReleasedProtocol(coreVersion, repo = root) {
+  if (!coreVersion || !semver.valid(coreVersion)) return undefined;
+  try {
+    const source = execFileSync(
+      "git",
+      ["show", `@nylorun/core@${coreVersion}:core/src/compatibility.ts`],
+      { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    return parseProtocolConstants(source);
+  } catch {
+    return undefined;
+  }
+}
+
+function enforceProtocolReleaseRule(bumps, before, options = {}) {
+  const current =
+    options.currentProtocol === undefined
+      ? readCurrentProtocol(options.repo)
+      : options.currentProtocol;
+  const released =
+    options.releasedProtocol === undefined
+      ? readReleasedProtocol(before.core, options.repo)
+      : options.releasedProtocol;
+  if (!current || !released) return;
+  if (protocolEquals(current, released)) return;
+  const required = ["core", "runtime", "agents", "cli"];
+  const missing = required.filter(
+    (name) => !isBreakingBump(bumps.get(name), before[name]),
+  );
+  if (missing.length === 0) return;
+  throw new Error(
+    `PROTOCOL_VERSION or HOST_PROTOCOL changed since the last released core (${before.core}); ${missing.join(", ")} must each receive a breaking bump (minor while 0.x, major after 1.0).`,
+  );
+}
 
 /**
  * Pre-1.0 product branding always uses a `-beta` version suffix.
@@ -19,8 +128,18 @@ const suffixFor = (nextCore, channel) => {
   return channel === "beta" ? "-beta" : "";
 };
 
-/** Compute final versions once; Changesets applies this exact plan and writes notes. */
-export function planVersions(before, compatibility, pending, channel) {
+/**
+ * Compute final versions once; Changesets applies this exact plan and writes notes.
+ * options.currentProtocol / options.releasedProtocol override filesystem/git reads
+ * used by the D1 protocol release rule (WS-H 11).
+ */
+export function planVersions(
+  before,
+  compatibility,
+  pending,
+  channel,
+  options = {},
+) {
   if (!["beta", "latest"].includes(channel))
     throw new Error("Choose --channel beta or --channel latest.");
   for (const name of packages) core(before[name]);
@@ -51,6 +170,7 @@ export function planVersions(before, compatibility, pending, channel) {
       if (impact[type] > (impact[bumps.get(name)] ?? 0)) bumps.set(name, type);
     }
   }
+  enforceProtocolReleaseRule(bumps, before, options);
   const versions = {};
   const bump = (name, type) => {
     const next = semver.inc(core(before[name]), type);

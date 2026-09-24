@@ -32,25 +32,34 @@ async function waitForAgents(studioUrl, min = 1, timeoutMs = 30_000) {
   throw new Error(`Timed out waiting for ${min} agent(s) (${last}).`);
 }
 
-/** Stop the project-scoped Runtime daemon left up by `nylorun dev`. */
-async function stopRuntime(project) {
+/** Stop the Host left up by `nylorun dev` under the temporary Host root. */
+async function stopRuntime(project, env) {
   await new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      [join(root, "cli/dist/cli.js"), "down"],
-      { cwd: project, stdio: "ignore" }
+      [join(root, "cli/dist/cli.js"), "runtime", "down"],
+      { cwd: project, stdio: "ignore", env },
     );
     child.once("error", reject);
     child.once("exit", (code) =>
       code === 0 || code === 6
         ? resolve()
-        : reject(new Error(`nylorun down exited ${code}`))
+        : reject(new Error(`nylorun runtime down exited ${code}`)),
     );
   });
 }
 
-// Exercise the repository supervisor without reading or changing developer credentials/data.
+// Exercise the repository supervisor without reading or changing developer Host data.
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-root-smoke-"));
+const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-host-smoke-"));
+const home = await mkdtemp(join(tmpdir(), "nylorun-home-smoke-"));
+const hostEnv = {
+  ...process.env,
+  NYLORUN_HOME: hostRoot,
+  HOME: home,
+  USERPROFILE: home,
+  NYLORUN_DEV_MODEL: "fixture",
+};
 let app;
 try {
   await cp(
@@ -78,7 +87,7 @@ try {
   process.env.NYLORUN_DEV_MODEL = "fixture";
   app = await develop(
     { studio: true, open: false, port, studioPort },
-    { project: temporary, built: true },
+    { project: temporary, built: true, hostRoot, home },
   );
   const url = `http://127.0.0.1:${studioPort}`;
   assert.deepEqual(
@@ -95,20 +104,26 @@ try {
     {
       method: "PUT",
       headers: { "content-type": "application/json", origin: url },
-      body: JSON.stringify({ requestId: crypto.randomUUID(), agentId: "assistant", ownerUserId: "ignored" }),
+      body: JSON.stringify({
+        requestId: crypto.randomUUID(),
+        agentId: "assistant",
+        ownerUserId: "ignored",
+      }),
     },
   );
   assert.ok(session.ok, await session.text());
   await app.close();
-  // Persistent Runtime outlives `nylorun dev`; stop it before port checks.
-  await stopRuntime(temporary);
+  // Persistent Host outlives `nylorun dev`; stop it before port checks.
+  await stopRuntime(temporary, hostEnv);
   await availablePort(port);
   await availablePort(studioPort);
   console.log(
-    "Development smoke passed: real Runtime, supported agent, Studio session proxy, packaged frontend, and shutdown.",
+    "Development smoke passed: shared Host under temporary NYLORUN_HOME, Studio session proxy, packaged frontend, and shutdown.",
   );
 } finally {
   await app?.close();
-  await stopRuntime(temporary).catch(() => {});
+  await stopRuntime(temporary, hostEnv).catch(() => {});
   await rm(temporary, { recursive: true, force: true });
+  await rm(hostRoot, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true });
 }
