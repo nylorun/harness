@@ -1,3 +1,11 @@
+/**
+ * Re-exports Host environment builders from `@nylorun/runtime` (Integration I1).
+ * CLI spawn sets NYLORUN_HOME via `hostProcessEnvironment`.
+ */
+import {
+  baselineEnvironment as runtimeBaseline,
+  hostProcessEnvironment as runtimeHostProcess,
+} from "@nylorun/runtime";
 import type { HostConfigFile } from "./root.js";
 
 export interface HostProcessPaths {
@@ -6,23 +14,10 @@ export interface HostProcessPaths {
   root: string;
 }
 
-/**
- * TENANTS-CCR: local copy of runtime host environment builders until
- * Integration I1 replaces this with the WS-C export from
- * `@nylorun/runtime` (`host/environment.ts`). Keep in sync with §12.
- */
-// TENANTS-CCR: remove this file when WS-C export is wired at I1.
 export function baselineEnvironment(
   env: Readonly<Record<string, string | undefined>>,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) continue;
-    if (key === "PATH" || key === "LANG" || key === "TZ" || key.startsWith("LC_")) {
-      out[key] = value;
-    }
-  }
-  return out;
+  return runtimeBaseline(env);
 }
 
 export function hostProcessEnvironment(
@@ -30,17 +25,5 @@ export function hostProcessEnvironment(
   hostConfig: HostConfigFile,
   paths: HostProcessPaths,
 ): Record<string, string> {
-  const env = baselineEnvironment(baseline);
-  env.HOME = paths.home;
-  env.TMPDIR = paths.tmp;
-  env.NYLORUN_HOME = paths.root;
-  env.HOST = hostConfig.host;
-  env.PORT = String(hostConfig.port);
-  // NODE_OPTIONS is never passed (§12).
-  if (hostConfig.proxy?.httpsProxy) env.HTTPS_PROXY = hostConfig.proxy.httpsProxy;
-  if (hostConfig.proxy?.noProxy) env.NO_PROXY = hostConfig.proxy.noProxy;
-  if (hostConfig.proxy?.nodeExtraCaCerts) {
-    env.NODE_EXTRA_CA_CERTS = hostConfig.proxy.nodeExtraCaCerts;
-  }
-  return env;
+  return runtimeHostProcess(baselineEnvironment(baseline), hostConfig, paths);
 }

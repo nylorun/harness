@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Credential } from "@earendil-works/pi-ai";
 import { configureProvider, type PromptedModel } from "./configure.js";
 
-/** Wire shape of GET/PUT `/v1/host/model` — local copy so CLI stays off `@nylorun/core`. */
+/** Wire shape of GET/PUT `/v1/tenant/model` — local copy so CLI stays off `@nylorun/core`. */
 type HostModelView =
   | { readonly configured: false }
   | {
@@ -15,12 +15,26 @@ type HostModelView =
       readonly baseUrl?: string;
     };
 
+function tenantHeaders(serverKey: string): Record<string, string> {
+  const tenant = process.env.NYLORUN_TENANT?.trim();
+  if (!tenant) {
+    throw new Error(
+      "Set NYLORUN_TENANT (or pass tenant via Project link) before calling Tenant model routes",
+    );
+  }
+  return {
+    authorization: `Bearer ${serverKey}`,
+    "Nylorun-Tenant": tenant,
+    "Nylorun-Protocol": "2",
+  };
+}
+
 export async function getHostModel(
   runtimeUrl: string,
   serverKey: string,
 ): Promise<HostModelView> {
-  const response = await fetch(`${runtimeUrl}/v1/host/model`, {
-    headers: { authorization: `Bearer ${serverKey}` },
+  const response = await fetch(`${runtimeUrl}/v1/tenant/model`, {
+    headers: tenantHeaders(serverKey),
   });
   if (!response.ok)
     throw new Error(`Runtime model status returned ${response.status}`);
@@ -32,10 +46,10 @@ export async function putHostModel(
   serverKey: string,
   model: PromptedModel,
 ): Promise<HostModelView> {
-  const response = await fetch(`${runtimeUrl}/v1/host/model`, {
+  const response = await fetch(`${runtimeUrl}/v1/tenant/model`, {
     method: "PUT",
     headers: {
-      authorization: `Bearer ${serverKey}`,
+      ...tenantHeaders(serverKey),
       "content-type": "application/json",
     },
     body: JSON.stringify({

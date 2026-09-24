@@ -54,6 +54,7 @@ it("C7: hostProcessEnvironment sets Host HOME/TMPDIR and proxy, never NODE_OPTIO
   );
   expect(env.HOME).toBe(paths.home);
   expect(env.TMPDIR).toBe(paths.tmp);
+  expect(env.NYLORUN_HOME).toBe(paths.root);
   expect(env.HTTPS_PROXY).toBe("http://proxy:8080");
   expect(env.NO_PROXY).toBe("localhost");
   expect(env.NODE_EXTRA_CA_CERTS).toBe("/certs/ca.pem");

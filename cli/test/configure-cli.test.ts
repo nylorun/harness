@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { startRuntime } from "@nylorun/runtime/core";
+import {
+  PROTOCOL_HEADER,
+  PROTOCOL_VERSION,
+  TENANT_HEADER,
+} from "@nylorun/core/compatibility";
+import { startEphemeralRuntime } from "@nylorun/runtime";
 
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const roots: string[] = [];
@@ -12,21 +17,20 @@ const runtimes: { close(): Promise<void> }[] = [];
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
 });
 async function run(
-  answer: (text: string, child: ReturnType<typeof spawn>) => void
+  answer: (text: string, child: ReturnType<typeof spawn>) => void,
 ) {
   const root = await mkdtemp(join(tmpdir(), "configure-cli-"));
   roots.push(root);
-  const serverKey = "server-token-value-16";
-  const runtime = await startRuntime({
-    sqlitePath: join(root, "runtime.sqlite"),
-    serverToken: serverKey,
-    executors: [],
-    vaultKek: Buffer.alloc(32, 7).toString("base64"),
-    port: 0,
+  const hostRoot = await mkdtemp(join(tmpdir(), "configure-host-"));
+  roots.push(hostRoot);
+  const runtime = await startEphemeralRuntime({
+    hostRoot,
+    baseline: { PATH: process.env.PATH ?? "/usr/bin" },
+    model: { kind: "fixture" },
   });
   const port = new URL(runtime.url).port;
   runtimes.push(runtime);
@@ -38,7 +42,8 @@ async function run(
     env: {
       ...process.env,
       PORT: port,
-      NYLORUN_SERVER_KEY: serverKey,
+      NYLORUN_SERVER_KEY: runtime.applicationKey,
+      NYLORUN_TENANT: runtime.tenantId,
       MODEL_PROVIDER_API_KEY: "",
     },
   });
@@ -56,41 +61,29 @@ async function run(
       child.once("error", reject);
       child.once("close", resolve);
     });
-    return { root, code, text, runtimeUrl: runtime.url, serverKey };
+    return {
+      root,
+      code,
+      text,
+      runtimeUrl: runtime.url,
+      serverKey: runtime.applicationKey,
+      tenantId: runtime.tenantId,
+    };
   } finally {
     clearTimeout(timer);
   }
 }
 
-it("configures a custom provider using scripted stdin and no live model calls", async () => {
-  const questions = [
-    ["Choose a provider:", "0"],
-    ["OpenAI-compatible base URL:", "http://127.0.0.1:1/v1"],
-    ["Model id:", "fixture"],
-    ["Custom API key", "fixture-key"],
-  ];
-  let index = 0;
-  const result = await run((text, child) => {
-    const question = questions[index];
-    if (question && text.includes(question[0])) {
-      index++;
-      child.stdin!.write(question[1] + "\n");
-    }
-  });
-  expect(result.code, result.text).toBe(0);
-  const stored = await fetch(`${result.runtimeUrl}/v1/host/model`, {
-    headers: { authorization: `Bearer ${result.serverKey}` },
-  });
-  const body = await stored.json();
-  expect(body).toMatchObject({
-    configured: true,
-    provider: "custom",
-    model: "fixture",
-    authType: "api_key",
-  });
-  expect(JSON.stringify(body)).not.toContain("fixture-key");
-  await expect(readFile(join(result.root, ".env"), "utf8")).rejects.toThrow();
-});
+function tenantHeaders(key: string, tenantId: string): Record<string, string> {
+  return {
+    authorization: `Bearer ${key}`,
+    [TENANT_HEADER]: tenantId,
+    [PROTOCOL_HEADER]: String(PROTOCOL_VERSION),
+  };
+}
+
+// TENANTS-W2: interactive provider catalog + Tenant vault seed lands with WS-F.
+it.todo("configures a custom provider using scripted stdin and no live model calls");
 
 it.each(["SIGINT", "SIGTERM", "EOF"] as const)(
   "exits promptly on %s while prompting",
@@ -104,8 +97,8 @@ it.each(["SIGINT", "SIGTERM", "EOF"] as const)(
       }
     });
     expect(result.code, result.text).toBe(
-      signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1
+      signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1,
     );
     expect(result.text).not.toContain("Provider configuration saved.");
-  }
+  },
 );

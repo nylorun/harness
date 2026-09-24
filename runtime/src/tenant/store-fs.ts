@@ -17,6 +17,7 @@ import { hostPaths, tenantPaths } from "./paths.js";
 import { readEnvelopeFile, writeEnvelopeFile } from "./envelope.js";
 import { migrateTenantWithSnapshot } from "./migration.js";
 import { quarantine } from "./quarantine.js";
+import { bootstrapPrincipal } from "./principals.js";
 import {
   TENANT_SCHEMA_VERSION,
   migrateTenantDatabase as defaultMigrate,
@@ -38,10 +39,7 @@ export interface FsTenantStoreOptions {
   configFor: (tenantId: string) => TenantConfig;
   logger?: Logger;
   migration?: MigrationHooks;
-  /**
-   * // TENANTS-CCR: replace with WS-A `bootstrapPrincipal` once exported.
-   * Writes the application principal into a fresh Tenant database.
-   */
+  /** Writes the application principal into a fresh Tenant database. */
   writeBootstrap?: (
     db: DatabaseSync,
     bootstrap: BootstrapPrincipal,
@@ -52,28 +50,10 @@ export interface FsTenantStoreOptions {
 function defaultWriteBootstrap(
   db: DatabaseSync,
   bootstrap: BootstrapPrincipal,
-  now: Date,
+  _now: Date,
 ): void {
-  // TENANTS-CCR: minimal principals DDL until WS-A owns bootstrapPrincipal.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS principals (
-      id TEXT PRIMARY KEY,
-      role TEXT NOT NULL CHECK(role='application'),
-      token_hash TEXT NOT NULL UNIQUE,
-      idempotency_key TEXT,
-      created_at TEXT NOT NULL
-    );
-  `);
-  db.prepare(
-    `INSERT INTO principals (id, role, token_hash, idempotency_key, created_at)
-     VALUES (?, 'application', ?, ?, ?)`,
-  ).run(
-    bootstrap.principalId,
-    bootstrap.credentialHash,
-    bootstrap.idempotencyKey,
-    now.toISOString(),
-  );
-  db.exec(`PRAGMA user_version = ${TENANT_SCHEMA_VERSION}`);
+  defaultMigrate(db);
+  bootstrapPrincipal(db, bootstrap);
 }
 
 function assertLiveLock(lockPath: string, tenantId: string): void {
@@ -122,31 +102,9 @@ export function createFsTenantStore(
   const writeBootstrap = options.writeBootstrap ?? defaultWriteBootstrap;
   const migrationHooks: MigrationHooks = {
     schemaVersionOf:
-      options.migration?.schemaVersionOf ??
-      ((db) => {
-        try {
-          return defaultSchemaVersionOf(db);
-        } catch {
-          // Wave 0 stub — fall back to PRAGMA until WS-A lands.
-          const row = db.prepare("PRAGMA user_version").get() as
-            | { user_version?: number }
-            | undefined;
-          return Number(row?.user_version ?? 0);
-        }
-      }),
+      options.migration?.schemaVersionOf ?? defaultSchemaVersionOf,
     migrateTenantDatabase:
-      options.migration?.migrateTenantDatabase ??
-      ((db) => {
-        try {
-          return defaultMigrate(db);
-        } catch {
-          // TENANTS-CCR: no-op migrate when WS-A stub throws; keep user_version.
-          const from = (
-            db.prepare("PRAGMA user_version").get() as { user_version: number }
-          ).user_version;
-          return { from, to: from };
-        }
-      }),
+      options.migration?.migrateTenantDatabase ?? defaultMigrate,
     targetVersion: options.migration?.targetVersion ?? TENANT_SCHEMA_VERSION,
   };
 

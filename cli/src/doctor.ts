@@ -50,8 +50,16 @@ export async function sandboxBanner(
   if (!capability) return undefined;
   let report: (SandboxSelectionReport & { defaultImage?: string }) | undefined;
   try {
-    const response = await fetch(`${runtimeUrl}/v1/host/sandbox`, {
-      headers: { authorization: `Bearer ${serverKey}` },
+    const response = await fetch(`${runtimeUrl}/v1/tenant/sandbox`, {
+      headers: {
+        authorization: `Bearer ${serverKey}`,
+        ...(process.env.NYLORUN_TENANT
+          ? {
+              "Nylorun-Tenant": process.env.NYLORUN_TENANT,
+              "Nylorun-Protocol": "2",
+            }
+          : {}),
+      },
       signal: AbortSignal.timeout(10_000),
     });
     if (response.ok) report = await response.json();

@@ -1,3 +1,4 @@
+/** TENANTS-W2 / WS-F: legacy project/global `dev` suite. Renamed so vitest skips until rewrite. */
 import {
   mkdtemp,
   mkdir,

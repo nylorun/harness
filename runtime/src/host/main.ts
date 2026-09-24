@@ -3,27 +3,19 @@
  *
  * Reads only `NYLORUN_HOME` from the environment (falls back to `~/.nylorun`).
  * Absolute Host root is resolved once and passed down.
- *
- * Integration I1 wires `createTenantModule` + `openTenantRuntime`. Until then
- * this entry boots with an empty stub module so `/health` and `/ready` work.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-  AdminTenant,
-  AdminTenantStatus,
-  HostAggregate,
-  TenantEnvelope,
-} from "@nylorun/core/contracts";
 import { hostPaths } from "../tenant/paths.js";
-import type {
-  BootstrapPrincipal,
-  TenantModule,
-  TenantResolution,
-} from "../tenant/types.js";
+import { createTenantModule } from "../tenant/module.js";
+import { createFsTenantStore } from "../tenant/store-fs.js";
+import { openTenantRuntime } from "../tenant/runtime.js";
+import { bootstrapPrincipal } from "../tenant/principals.js";
+import { migrateTenantDatabase } from "../tenant/schema.js";
+import type { TenantConfig } from "../tenant/types.js";
 import type {
   HostConfigFile,
   HostCredentialsFile,
@@ -52,59 +44,6 @@ function coreVersion(): string {
   } catch {
     return "unknown";
   }
-}
-
-/**
- * Empty Tenant module until Integration I1 plugs WS-B's `createTenantModule`.
- * // TENANTS-I1: replace with createTenantModule({ hostRoot, store, openRuntime, configFor, logger })
- */
-function createStubTenantModule(): TenantModule {
-  let started = false;
-  return {
-    async start() {
-      started = true;
-    },
-    get started() {
-      return started;
-    },
-    resolve(_id: string): TenantResolution {
-      return { kind: "not-found" };
-    },
-    async create(
-      _input: { tenantId: string; name: string } & BootstrapPrincipal,
-    ): Promise<{ envelope: TenantEnvelope; created: boolean }> {
-      throw Object.assign(
-        new Error("Tenant module not wired (Integration I1)"),
-        { code: "not_wired" },
-      );
-    },
-    async list(): Promise<readonly AdminTenant[]> {
-      return [];
-    },
-    async status(_id: string): Promise<AdminTenantStatus | undefined> {
-      return undefined;
-    },
-    async delete(
-      _id: string,
-      _activeWork: "refuse" | "drain" | "cancel",
-    ): Promise<void> {
-      throw Object.assign(
-        new Error("Tenant module not wired (Integration I1)"),
-        { code: "not_wired" },
-      );
-    },
-    summarize(): HostAggregate {
-      return {
-        runningSessions: 0,
-        connectedExecutors: 0,
-        pendingActions: 0,
-        uncertainEffects: 0,
-      };
-    },
-    async close() {
-      started = false;
-    },
-  };
 }
 
 function loadJson<T>(path: string): T {
@@ -140,7 +79,6 @@ export async function main(): Promise<void> {
   const credentials = loadJson<HostCredentialsFile>(paths.credentials);
   const logger = createHostLogger();
   const baseline = baselineEnvironment(process.env);
-  // Document expected Host process env for supervisors; CLI spawn sets it explicitly.
   void hostProcessEnvironment(baseline, config, paths);
 
   const configFor = configForFactory({
@@ -149,9 +87,28 @@ export async function main(): Promise<void> {
     logger,
     baseline,
   });
-  void configFor; // used when I1 wires openTenantRuntime
+  const openRuntime = (tenantConfig: TenantConfig) =>
+    openTenantRuntime(tenantConfig);
 
-  const module = createStubTenantModule();
+  const store = createFsTenantStore({
+    hostRoot,
+    openRuntime,
+    configFor,
+    logger,
+    writeBootstrap: (db, bootstrap) => {
+      migrateTenantDatabase(db);
+      bootstrapPrincipal(db, bootstrap);
+    },
+  });
+
+  const module = createTenantModule({
+    hostRoot,
+    store,
+    openRuntime,
+    configFor,
+    logger,
+  });
+
   const options: CreateHostOptions = {
     hostRoot,
     module,

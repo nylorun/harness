@@ -37,17 +37,20 @@ function proxyEnv(
   return out;
 }
 
+export type HostProcessPathInputs = Pick<HostPaths, "root" | "home" | "tmp">;
+
 /** Environment for the Runtime Host process itself (CLI spawn / `runtime run`). */
 export function hostProcessEnvironment(
   baseline: Readonly<Record<string, string>>,
   hostConfig: HostConfigFile,
-  paths: HostPaths,
+  paths: HostProcessPathInputs,
 ): Record<string, string> {
   return {
     ...baseline,
     ...proxyEnv(hostConfig),
     HOME: paths.home,
     TMPDIR: paths.tmp,
+    NYLORUN_HOME: paths.root,
   };
 }
 

@@ -1,6 +1,7 @@
 import { projectAsset } from "@nylorun/runtime/node";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { EXAMPLES_ROOT } from "../shared/root.js";
 
 /** A real local stdio MCP connection, deliberately constrained to the bundled demo server. */
 export class LocalMcp {
@@ -26,7 +27,7 @@ export class LocalMcp {
     if (this.client) return this.client;
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [projectAsset("agents/mcp/server.mjs")],
+      args: [projectAsset("agents/mcp/server.mjs", EXAMPLES_ROOT)],
     });
     const client = new Client(
       { name: "nylorun-harness-examples", version: "0.1.0" },
