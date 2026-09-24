@@ -10,26 +10,12 @@ import {
   compareVersions,
   type ErrorCode,
 } from "@nylorun/core/compatibility";
+import { AdminClient, resolveAdminConnection } from "./client.js";
+import { AdminError } from "./errors.js";
 
 export { ERROR_CODES, PROTOCOL_FEATURES, compareVersions };
 export type { ErrorCode };
-
-export class AdminError extends Error {
-  readonly code: ErrorCode;
-  readonly status?: number;
-  readonly details?: unknown;
-  constructor(
-    code: ErrorCode,
-    message: string,
-    options?: { status?: number; details?: unknown },
-  ) {
-    super(message);
-    this.name = "AdminError";
-    this.code = code;
-    this.status = options?.status;
-    this.details = options?.details;
-  }
-}
+export { AdminError };
 
 export interface Admin {
   readonly url: string;
@@ -46,14 +32,12 @@ export interface Admin {
   }): Promise<{ tenant: TenantEnvelope; applicationKey: string }>;
 }
 
-/** Wave 0 stub; WS-B implements D§6. */
 export function createAdmin(options?: {
   url?: string;
   key?: string;
   home?: string;
 }): Admin {
-  void options;
-  throw new Error("not implemented");
+  return new AdminClient(resolveAdminConnection(options));
 }
 
 export type { AdminStatus, AdminTenant, AdminTenantStatus, TenantEnvelope };
