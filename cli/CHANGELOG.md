@@ -1,5 +1,18 @@
 # @nylorun/cli
 
+## 0.2.1-beta
+
+### Patch Changes
+
+- Pin agents to the tested release.
+- Pin runtime to the tested release.
+- Updated dependencies [1cd7dc7]
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+  - @nylorun/agents@0.5.0-beta
+  - @nylorun/runtime@0.9.0-beta
+
 ## 0.2.0-beta
 
 ### Minor Changes
