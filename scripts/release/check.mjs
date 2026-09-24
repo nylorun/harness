@@ -9,6 +9,7 @@ import {
 import { validatePlan, verifyReleaseCommit, releaseNotes } from "./model.mjs";
 import { packRelease, readArtifacts } from "./artifacts.mjs";
 import { assertRuntimePins } from "./pins.mjs";
+import { checkRuntimeBuilds } from "./runtime-build-validate.mjs";
 
 try {
   const args = process.argv.slice(2);
@@ -23,6 +24,10 @@ try {
   await validatePlan(plan, root);
   for (const [name, version] of Object.entries(plan.packages))
     await releaseNotes(root, name, version);
+  // G6: local build manifest/size + npm view dry-run for five platforms.
+  await checkRuntimeBuilds({
+    log: (line) => console.log(line),
+  });
   if (!built) await node("scripts/validate.mjs", ["check"]);
   const directory = join(root, ".tmp/release-artifacts");
   await packRelease(directory, plan);

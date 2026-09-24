@@ -9,6 +9,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { materializeNodeBinary } from "./local-build.mjs";
 import { npm, readJson } from "./repo.mjs";
 
 async function integrityOf(path) {
@@ -106,6 +107,9 @@ export async function startLocalRegistry({ builds }) {
         `Build directory version ${manifest.version} does not match ${build.version}.`,
       );
 
+    // Materialize Node before pack: local builds may still carry a symlink
+    // from older trees; npm pack omits absolute symlinks.
+    await materializeNodeBinary(build.dir).catch(() => {});
     const packed = await packBuild(build.dir, cache);
     let entry = packages.get(build.name);
     if (!entry) {

@@ -62,6 +62,85 @@ jobs:
       - run: npm run setup
       - run: npm run test:tooling
       - run: node scripts/acceptance/tenants.mjs
+  # G4: native Runtime build + install --from / up / status / down + launcher tests (D8).
+  runtime-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          - os: macos-13
+            platform: darwin-x64
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: windows-latest
+            platform: win32-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm ci
+      - run: npm run build --workspace @nylorun/core
+      - run: npm run build --workspace @nylorun/harness
+      - run: npm run build --workspace @nylorun/runtime
+      - name: Build local Runtime package
+        run: node scripts/release/runtime-builds.mjs --local
+      - name: Install, up, status, down
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLATFORM="${{ matrix.platform }}"
+          BUILD=".tmp/runtime-builds/${PLATFORM}"
+          HOME_DIR="${RUNNER_TEMP}/nylorun-runtime-build-home"
+          mkdir -p "$HOME_DIR"
+          export NYLORUN_HOME="$HOME_DIR"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            LAUNCHER="$BUILD/bin/nylorun-runtime.cmd"
+          else
+            LAUNCHER="$BUILD/bin/nylorun-runtime"
+            chmod +x "$LAUNCHER" || true
+          fi
+          VERSION=$(node -p "require('./runtime/package.json').version")
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json install "$VERSION" --from "$BUILD"
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json up
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json status
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json down --force
+      - name: Launcher unit tests
+        run: npm test --workspace @nylorun/runtime -- test/launcher
+  # J5: desktop contract smoke on the three desktop operating systems.
+  desktop-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm ci
+      - run: npm run build --workspace @nylorun/core
+      - run: npm run build --workspace @nylorun/harness
+      - run: npm run build --workspace @nylorun/agents
+      - run: npm run build --workspace @nylorun/admin
+      - run: npm run build --workspace @nylorun/runtime
+      - run: node --test scripts/test/desktop-contract.test.mjs
   supervisor:
     strategy:
       fail-fast: false
@@ -100,18 +179,22 @@ jobs:
       - run: npm run check --workspace @nylorun/create-agent
   ci:
     if: always()
-    needs: [check, test, supervisor, consumers]
+    needs: [check, test, runtime-build, desktop-contract, supervisor, consumers]
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI job to pass
         env:
           CHECK_RESULT: ${{ needs.check.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          RUNTIME_BUILD_RESULT: ${{ needs.runtime-build.result }}
+          DESKTOP_CONTRACT_RESULT: ${{ needs.desktop-contract.result }}
           SUPERVISOR_RESULT: ${{ needs.supervisor.result }}
           CONSUMERS_RESULT: ${{ needs.consumers.result }}
         shell: bash
         run: |
           [[ "$CHECK_RESULT" == success ]]
           [[ "$TEST_RESULT" == success ]]
+          [[ "$RUNTIME_BUILD_RESULT" == success ]]
+          [[ "$DESKTOP_CONTRACT_RESULT" == success ]]
           [[ "$SUPERVISOR_RESULT" == success ]]
           [[ "$CONSUMERS_RESULT" == success ]]

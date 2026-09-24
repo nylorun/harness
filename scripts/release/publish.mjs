@@ -10,6 +10,7 @@ import {
   releaseNotes,
 } from "./model.mjs";
 import { readArtifacts } from "./artifacts.mjs";
+import { readRuntimeBuildArtifacts } from "./runtime-build-artifacts.mjs";
 import { registry } from "./registry.mjs";
 
 
@@ -24,6 +25,12 @@ try {
   const artifacts = await readArtifacts(
     join(root, ".tmp/release-artifacts"),
     plan,
+  );
+  const runtimeVersion =
+    plan.packages.runtime ?? plan.compatibility.runtime;
+  const buildArtifacts = await readRuntimeBuildArtifacts(
+    join(root, ".tmp/release-artifacts/runtime-builds"),
+    runtimeVersion,
   );
   const notesByPackage = Object.fromEntries(
     await Promise.all(
@@ -63,10 +70,16 @@ try {
   }
   const messages = [];
   try {
-    await publishCandidates(plan, artifacts, registry, (message) => {
-      messages.push(message);
-      console.log(message);
-    });
+    await publishCandidates(
+      plan,
+      artifacts,
+      registry,
+      (message) => {
+        messages.push(message);
+        console.log(message);
+      },
+      { buildArtifacts },
+    );
     await publicCreatorSmoke(plan.packages["create-agent"]);
     const temporary = await mkdtemp(join(tmpdir(), "nylorun-release-notes-"));
     try {

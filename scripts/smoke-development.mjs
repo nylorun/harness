@@ -1,128 +1,209 @@
-import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdtemp, rm, cp, symlink, writeFile, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { root } from "./lib/repo.mjs";
-import { availablePort, develop } from "./lib/development.mjs";
-
 /**
- * Persistent Runtime answers /ready before the project runner finishes
- * registering agents. Poll Studio's proxied list until `min` agents appear
- * (not merely the first) so multi-agent projects do not race the assertion.
+ * G7 development smoke: packed create-agent starter against a local-registry
+ * Runtime build — `npm run dev`, separate `nylorun-studio`, then
+ * `npm run build` + `npm start` (`node dist/src/main.js`) with Project link env.
+ * No `nylorun serve`.
  */
-async function waitForAgents(studioUrl, min = 1, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let last = "no response";
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${studioUrl}/_studio/runtime/v1/agents`);
-      if (response.ok) {
-        const body = await response.json();
-        if (Array.isArray(body.agents) && body.agents.length >= min) return body;
-        last = `agents=${JSON.stringify(body.agents ?? null)}`;
-      } else {
-        last = `HTTP ${response.status}`;
-      }
-    } catch (error) {
-      last = error instanceof Error ? error.message : String(error);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Timed out waiting for ${min} agent(s) (${last}).`);
-}
+import assert from "node:assert/strict";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  localRuntimeBuild,
+  materializeNodeBinary,
+} from "./lib/local-build.mjs";
+import { startLocalRegistry } from "./lib/local-registry.mjs";
+import { ProcessGroup } from "./lib/processes.mjs";
+import { npmCli, root, run } from "./lib/repo.mjs";
 
-/** Stop the Host left up by `nylorun dev` under the temporary Host root. */
-async function stopRuntime(project, env) {
-  await new Promise((resolve, reject) => {
-    const child = spawn(
-      process.execPath,
-      [join(root, "cli/dist/cli.js"), "runtime", "down"],
-      { cwd: project, stdio: "ignore", env },
-    );
-    child.once("error", reject);
-    child.once("exit", (code) =>
-      code === 0 || code === 6
-        ? resolve()
-        : reject(new Error(`nylorun runtime down exited ${code}`)),
-    );
-  });
-}
+const temporary = await mkdtemp(join(tmpdir(), "nylorun-dev-smoke-"));
+const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-dev-host-"));
+const home = await mkdtemp(join(tmpdir(), "nylorun-dev-home-"));
+const group = new ProcessGroup();
+let registry;
 
-// Exercise the repository supervisor without reading or changing developer Host data.
-const temporary = await mkdtemp(join(tmpdir(), "nylorun-root-smoke-"));
-const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-host-smoke-"));
-const home = await mkdtemp(join(tmpdir(), "nylorun-home-smoke-"));
-const hostEnv = {
-  ...process.env,
-  NYLORUN_HOME: hostRoot,
-  HOME: home,
-  USERPROFILE: home,
-  NYLORUN_DEV_MODEL: "fixture",
-};
-let app;
+const readyLine = (l) =>
+  l.includes("Ready") || l.includes("Ctrl-C stops this Project only");
+const hostLine = (l) => /^\s*Host\s+http/.test(l);
+const studioOnLine = (l) => /^Studio on http/.test(l);
+
 try {
-  await cp(
-    join(root, "examples/package.json"),
-    join(temporary, "package.json"),
+  const built = await localRuntimeBuild({
+    out: join(root, ".tmp/runtime-builds"),
+    repo: root,
+  });
+  await materializeNodeBinary(built.dir);
+  registry = await startLocalRegistry({ builds: [built] });
+
+  const artifacts = join(temporary, "artifacts");
+  await mkdir(artifacts);
+  const names = [
+    "core",
+    "harness",
+    "agents",
+    "admin",
+    "runtime",
+    "studio",
+    "cli",
+    "create-agent",
+  ];
+  const tarballs = {};
+  for (const name of names) {
+    const packed = JSON.parse(
+      await run(
+        process.execPath,
+        [
+          npmCli(),
+          "pack",
+          "--ignore-scripts",
+          "--json",
+          "--pack-destination",
+          artifacts,
+        ],
+        { cwd: join(root, name), capture: true },
+      ),
+    );
+    tarballs[name] = join(artifacts, packed[0].filename);
+  }
+
+  const creator = join(temporary, "creator");
+  await mkdir(creator);
+  await run("tar", ["-xzf", tarballs["create-agent"], "-C", creator]);
+  const { starterFiles } = await import(
+    pathToFileURL(join(creator, "package/dist/scaffold.js")).href
   );
-  await mkdir(join(temporary, "agents"));
-  await cp(
-    join(root, "examples/agents/release"),
-    join(temporary, "agents/release"),
-    { recursive: true },
+  const pins = JSON.parse(
+    await readFile(join(creator, "package/compatibility.json"), "utf8"),
   );
+
+  const project = join(temporary, "app");
+  await mkdir(project);
+  const files = await starterFiles(pins, true);
+  for (const [path, content] of Object.entries(files)) {
+    await mkdir(dirname(join(project, path)), { recursive: true });
+    await writeFile(join(project, path), content);
+  }
+  const manifest = JSON.parse(files["package.json"]);
+  assert.equal(manifest.scripts.dev, "nylorun dev");
+  assert.equal(manifest.scripts.studio, "nylorun-studio");
+  assert.equal(manifest.scripts.start, "node dist/src/main.js");
+  assert.ok(!JSON.stringify(manifest.scripts).includes("serve"));
+
+  manifest.dependencies["@nylorun/agents"] = `file:${tarballs.agents}`;
+  manifest.dependencies["@nylorun/core"] = `file:${tarballs.core}`;
+  manifest.devDependencies ??= {};
+  manifest.devDependencies["@nylorun/cli"] = `file:${tarballs.cli}`;
+  manifest.devDependencies["@nylorun/admin"] = `file:${tarballs.admin}`;
+  manifest.devDependencies["@nylorun/studio"] = `file:${tarballs.studio}`;
   await writeFile(
-    join(temporary, "agents/index.ts"),
-    'export { agents } from "./release/index.js";\n',
+    join(project, "package.json"),
+    JSON.stringify(manifest, null, 2),
   );
-  await symlink(
-    join(root, "examples/node_modules"),
-    join(temporary, "node_modules"),
-    process.platform === "win32" ? "junction" : "dir",
+  await run(
+    process.execPath,
+    [npmCli(), "install", "--ignore-scripts", "--no-audit", "--no-fund"],
+    { cwd: project },
   );
-  const port = await availablePort();
-  let studioPort = await availablePort();
-  while (studioPort === port) studioPort = await availablePort();
-  process.env.NYLORUN_DEV_MODEL = "fixture";
-  app = await develop(
-    { studio: true, open: false, port, studioPort },
-    { project: temporary, built: true, hostRoot, home },
+
+  const env = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    NYLORUN_HOME: hostRoot,
+    NYLORUN_REGISTRY: registry.url,
+    NYLORUN_DEV_MODEL: "fixture",
+  };
+
+  const studioBin = join(project, "node_modules/@nylorun/studio/dist/cli.js");
+  const cliBin = join(project, "node_modules/@nylorun/cli/dist/cli.js");
+
+  const dev = group.start(
+    "dev",
+    process.execPath,
+    [cliBin, "dev", "--ephemeral"],
+    { cwd: project, env },
   );
-  const url = `http://127.0.0.1:${studioPort}`;
-  const config = await (await fetch(`${url}/nylo-studio.config.json`)).json();
-  assert.equal(config.runtimeUrl, "/_studio/runtime");
-  assert.equal(config.local, true);
-  assert.match(config.tenant?.id ?? "", /^tn_/);
-  assert.match(await (await fetch(url)).text(), /<div id="root">/);
-  // release/ ships assistant + sandbox analyst; wait for both, not the first.
-  const agents = await waitForAgents(url, 2);
-  assert.equal(agents.agents.length, 2);
-  // IPv4 and localhost are both valid same-origin entry points.
-  const session = await fetch(
-    `${url}/_studio/runtime/v1/sessions/smoke-local`,
-    {
-      method: "PUT",
-      headers: { "content-type": "application/json", origin: url },
-      body: JSON.stringify({
-        requestId: crypto.randomUUID(),
-        agentId: "assistant",
-        ownerUserId: "ignored",
-      }),
-    },
+  await dev.line(hostLine, 120_000);
+  await dev.line(readyLine, 90_000);
+  const studio = group.start(
+    "studio",
+    process.execPath,
+    [studioBin, "--no-open"],
+    { cwd: project, env },
   );
-  assert.ok(session.ok, await session.text());
-  await app.close();
-  // Persistent Host outlives `nylorun dev`; stop it before port checks.
-  await stopRuntime(temporary, hostEnv);
-  await availablePort(port);
-  await availablePort(studioPort);
+  const studioBanner = await studio.line(studioOnLine, 90_000);
+  const studioUrl = studioBanner.replace(/^Studio on\s+/, "").trim();
+  assert.match(await (await fetch(studioUrl)).text(), /<div id="root">/);
+  await studio.stop();
+  await dev.stop();
+
+  await rm(join(project, ".nylorun"), { recursive: true, force: true }).catch(
+    () => {},
+  );
+  const up = group.start(
+    "runtime-up",
+    process.execPath,
+    [cliBin, "runtime", "up"],
+    { cwd: project, env },
+  );
+  assert.equal(await up.exit, 0, "runtime up must succeed");
+
+  const attach = group.start(
+    "dev-attach",
+    process.execPath,
+    [cliBin, "dev"],
+    { cwd: project, env },
+  );
+  await attach.line(readyLine, 120_000);
+  await attach.stop();
+
+  await run(process.execPath, [npmCli(), "run", "build"], { cwd: project });
+
+  const link = JSON.parse(
+    await readFile(join(project, ".nylorun/link.json"), "utf8"),
+  );
+  const credentials = JSON.parse(
+    await readFile(join(project, ".nylorun/credentials.json"), "utf8"),
+  );
+  const startEnv = {
+    ...env,
+    NYLORUN_RUNTIME_URL: link.hostUrl,
+    NYLORUN_TENANT: link.tenantId,
+    NYLORUN_SERVER_KEY: credentials.applicationKey,
+  };
+  const started = group.start(
+    "start",
+    process.execPath,
+    [npmCli(), "start"],
+    { cwd: project, env: startEnv },
+  );
+  await new Promise((r) => setTimeout(r, 2500));
+  assert.equal(
+    await fetch(`${link.hostUrl}/ready`).then((r) => r.ok),
+    true,
+    "Host still ready while npm start runs",
+  );
+  await started.stop();
+
+  await run(
+    process.execPath,
+    [cliBin, "runtime", "down", "--force"],
+    { cwd: project, env },
+  );
+
   console.log(
-    "Development smoke passed: shared Host under temporary NYLORUN_HOME, Studio session proxy, packaged frontend, and shutdown.",
+    "Development smoke passed: starter via local-registry build, nylorun dev, nylorun-studio, npm start (node dist/src/main.js), no serve.",
   );
 } finally {
-  await app?.close();
-  await stopRuntime(temporary, hostEnv).catch(() => {});
+  await group.close();
+  await registry?.close?.();
   await rm(temporary, { recursive: true, force: true });
   await rm(hostRoot, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
