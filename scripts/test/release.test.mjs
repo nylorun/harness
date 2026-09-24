@@ -18,7 +18,7 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
     await writeJson(join(directory, "package.json"), {
       name: "fixture",
       private: true,
-      workspaces: ["core", "harness", "agents", "runtime", "studio", "cli", "create-agent"],
+      workspaces: ["core", "harness", "agents", "admin", "runtime", "studio", "cli", "create-agent"],
     });
     // @manypkg/get-packages@3 NpmTool only treats a directory as an npm
     // workspace root when package-lock.json is present.
@@ -29,7 +29,7 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
       packages: {
         "": {
           name: "fixture",
-          workspaces: ["core", "harness", "agents", "runtime", "studio", "cli", "create-agent"],
+          workspaces: ["core", "harness", "agents", "admin", "runtime", "studio", "cli", "create-agent"],
         },
       },
     });
@@ -43,6 +43,7 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
       cli: "0.1.0-beta.1",
       harness: "0.10.0-beta.1",
       agents: "0.1.0-beta.1",
+      admin: "0.1.0-beta.1",
       runtime: "0.1.0-beta.1",
       studio: "0.3.0-beta.1",
       "create-agent": "0.1.0-beta.1",
@@ -63,6 +64,7 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
       cli: "0.1.0-beta.1",
       harness: "0.10.0-beta.1",
       agents: "0.1.0-beta.1",
+      admin: "0.1.0-beta.1",
       runtime: "0.1.0-beta.1",
       studio: "0.3.0-beta.1",
     });
@@ -110,6 +112,7 @@ test("a Runtime beta release advances creator and preserves unrelated compatibil
       cli: "0.1.1-beta",
       harness: "0.10.0-beta.1",
       agents: "0.1.0-beta.1",
+      admin: "0.1.0-beta.1",
       runtime: "0.1.1-beta",
       studio: "0.3.0-beta.1",
     });
@@ -200,6 +203,7 @@ test("publication retries retain completed packages and never publish creator be
       cli: "0.1.0-beta.1",
       harness: "0.10.0-beta.1",
       agents: "0.1.0-beta.1",
+      admin: "0.1.0-beta.1",
       runtime: "0.1.1-beta",
       studio: "0.3.0-beta.1",
     },
@@ -214,6 +218,7 @@ test("publication retries retain completed packages and never publish creator be
     ["harness", { integrity: "harness-hash" }],
     ["studio", { integrity: "studio-hash" }],
     ["agents", { integrity: "agents-hash" }],
+    ["admin", { integrity: "admin-hash" }],
   ]);
   const calls = [];
   let failCreator = true;

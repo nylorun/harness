@@ -52,12 +52,23 @@ if (
     const controller = new AbortController();
     process.on("SIGINT", () => controller.abort());
     process.on("SIGTERM", () => controller.abort());
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-starter-host-"));
+    const home = await mkdtemp(join(tmpdir(), "nylorun-starter-home-"));
     const app = await develop(options, {
       project,
       signal: controller.signal,
       built: true,
+      hostRoot,
+      home,
     });
-    process.exitCode = await app.done;
+    try {
+      process.exitCode = await app.done;
+    } finally {
+      await rm(hostRoot, { recursive: true, force: true }).catch(() => {});
+      await rm(home, { recursive: true, force: true }).catch(() => {});
+    }
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

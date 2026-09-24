@@ -1,5 +1,3 @@
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { microsandboxBackend } from "../adapters/sandbox/microsandbox.js";
 import { virtualBackend } from "../adapters/sandbox/virtual.js";
 import type {
@@ -20,7 +18,7 @@ export interface SandboxSelection {
   readonly probes: readonly SandboxProbe[];
 }
 
-/** Serializable view of a selection for the CLI and `GET /v1/host/sandbox`. */
+/** Serializable view of a selection for the CLI and `GET /v1/tenant/sandbox`. */
 export interface SandboxSelectionReport {
   readonly preference: SandboxPreference;
   readonly backend: SandboxBackendName | null;
@@ -56,10 +54,15 @@ export async function selectSandboxBackend(
     const backend = backends.find((item) => item.name === preference);
     const probe = probeOf(preference);
     if (backend && probe?.available)
-      return { preference, backend, reason: `${preference} selected by NYLORUN_SANDBOX`, probes };
+      return {
+        preference,
+        backend,
+        reason: `${preference} selected by TenantConfig.sandbox.backend`,
+        probes,
+      };
     return {
       preference,
-      reason: `NYLORUN_SANDBOX=${preference} but ${preference} is unavailable: ${probe?.reason ?? "unknown backend"}. Fix it, or unset NYLORUN_SANDBOX to use the best available backend`,
+      reason: `sandbox.backend=${preference} but ${preference} is unavailable: ${probe?.reason ?? "unknown backend"}. Fix it, or set backend to auto to use the best available backend`,
       probes,
     };
   }
@@ -90,20 +93,28 @@ export function reportSelection(selection: SandboxSelection): SandboxSelectionRe
 }
 
 /**
- * Probe this machine the way a Runtime would at startup. Used by `nylorun doctor sandbox`.
- * Nothing is created or booted.
+ * Probe backends the way a Tenant Runtime would at open.
+ * Callers must pass an explicit probe root; no ambient env or OS temp (A7).
  */
 export async function probeSandboxBackends(
-  options: { readonly preference?: string } = {}
+  options: {
+    readonly preference?: string;
+    readonly root?: string;
+  } = {},
 ): Promise<SandboxSelectionReport> {
-  const preference = parseSandboxPreference(options.preference ?? process.env.NYLORUN_SANDBOX);
-  const backends = defaultSandboxBackends({ root: join(tmpdir(), "nylorun-sandbox-probe") });
+  if (!options.root) {
+    throw new Error(
+      "probeSandboxBackends requires an explicit root (Tenant or Host tmp path)",
+    );
+  }
+  const preference = parseSandboxPreference(options.preference ?? "auto");
+  const backends = defaultSandboxBackends({ root: options.root });
   if (!preference)
     return {
       preference: "auto",
       backend: null,
       isolation: null,
-      reason: "NYLORUN_SANDBOX must be auto, microsandbox or virtual",
+      reason: "sandbox.backend must be auto, microsandbox or virtual",
       probes: await Promise.all(backends.map((backend) => backend.probe())),
     };
   return reportSelection(await selectSandboxBackend(backends, preference));

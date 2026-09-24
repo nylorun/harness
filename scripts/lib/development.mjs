@@ -60,6 +60,12 @@ export async function develop(
     log = console.log,
     signal,
     built = false,
+    /** Temporary Host root (`NYLORUN_HOME`); never the real `~/.nylorun`. */
+    hostRoot,
+    /** Override HOME so Host/CLI resolution cannot touch `~/.nylorun`. */
+    home,
+    /** Use a private ephemeral Host removed when the Project runner exits. */
+    ephemeral = false,
   } = {}
 ) {
   let stopping = false;
@@ -100,13 +106,82 @@ export async function develop(
   }
   async function startRuntime() {
     if (stopping) return;
-    runtime = group.start(
-      "runtime",
-      process.execPath,
-      [join(repo, "cli/dist/cli.js"), "dev", "--no-studio"],
-      { cwd: project, env: { ...process.env, PORT: String(options.port) } }
-    );
-    await runtime.ready(`http://127.0.0.1:${options.port}/ready`);
+    const env = { ...process.env, PORT: String(options.port) };
+    if (hostRoot) env.NYLORUN_HOME = hostRoot;
+    // Keep Host files out of the real developer home during scripted runs.
+    if (home) {
+      env.HOME = home;
+      env.USERPROFILE = home;
+    }
+    if (!ephemeral && hostRoot) {
+      // Registry runtime lacks the Tenant Host entry; seed from workspace packs,
+      // then bind the requested port before `nylorun dev` attaches.
+      const { seedWorkspaceHostInstall, workspaceRuntimeVersion } =
+        await import("./workspace-host-install.mjs");
+      const version = await workspaceRuntimeVersion();
+      await seedWorkspaceHostInstall(hostRoot, version);
+      const upCode = await group.start(
+        "runtime-up",
+        process.execPath,
+        [
+          join(repo, "cli/dist/cli.js"),
+          "runtime",
+          "up",
+          "--port",
+          String(options.port),
+        ],
+        { cwd: project, env },
+      ).exit;
+      if (upCode !== 0)
+        throw new Error(`nylorun runtime up exited ${upCode}`);
+      const deadline = Date.now() + 30_000;
+      for (;;) {
+        try {
+          const response = await fetch(
+            `http://127.0.0.1:${options.port}/ready`,
+            { signal: AbortSignal.timeout(2000) },
+          );
+          if (response.ok) break;
+        } catch {
+          /* retry */
+        }
+        if (Date.now() >= deadline)
+          throw new Error(
+            `Host did not become ready on port ${options.port} after runtime up.`,
+          );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    const args = [join(repo, "cli/dist/cli.js"), "dev"];
+    if (ephemeral) args.push("--ephemeral");
+    runtime = group.start("runtime", process.execPath, args, {
+      cwd: project,
+      env,
+    });
+    if (ephemeral) {
+      const { readFile } = await import("node:fs/promises");
+      const deadline = Date.now() + 60_000;
+      let url;
+      while (Date.now() < deadline) {
+        try {
+          const link = JSON.parse(
+            await readFile(join(project, ".nylorun/link.json"), "utf8"),
+          );
+          url = link.hostUrl;
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+      if (!url) throw new Error("Ephemeral Project link was not written.");
+      await runtime.ready(`${url}/ready`);
+    } else if (hostRoot) {
+      // Wait until the Project runner is up (Host already answered /ready above).
+      await runtime.line((line) => line.includes("Ready"));
+    } else {
+      // Unit fixtures still speak PORT-based readiness.
+      await runtime.ready(`http://127.0.0.1:${options.port}/ready`);
+    }
   }
   async function startStudio(open) {
     if (stopping || !options.studio) return;
@@ -135,7 +210,8 @@ export async function develop(
       agents: ["core"],
       runtime: ["core", "harness"],
       studio: ["agents"],
-      cli: ["agents", "runtime"],
+      cli: ["agents", "admin"],
+      admin: ["core"],
     };
     for (const [name, deps] of Object.entries(dependencies))
       if (

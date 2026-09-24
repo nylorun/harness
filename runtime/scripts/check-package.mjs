@@ -25,7 +25,7 @@ for (const path of [
   "dist/index.d.ts",
   "dist/node/index.js",
   "dist/core/runtime.js",
-  "dist/core/main.js",
+  "dist/host/main.js",
   "dist/version.js",
   "README.md",
   "CHANGELOG.md",

@@ -7,12 +7,16 @@ import { projectSecrets } from "../model/settings.js";
 export function jsonlObserver(options: {
   readonly agentId: string;
   readonly sessionId: string;
-  readonly root?: string;
+  readonly root: string;
+  readonly env?: Readonly<Record<string, string | undefined>>;
 }): { (event: { readonly type: string }): void } {
-  const root = options.root ?? join(process.cwd(), ".data", "sessions");
-  const directory = join(root, safe(options.agentId), safe(options.sessionId));
+  const directory = join(
+    options.root,
+    safe(options.agentId),
+    safe(options.sessionId),
+  );
   const file = join(directory, "observe.jsonl");
-  const secrets = projectSecrets();
+  const secrets = projectSecrets(options.root, options.env ?? {});
   return (event) => {
     const line = `${JSON.stringify(scrub(event, secrets))}\n`;
     void mkdir(directory, { recursive: true })

@@ -1,7 +1,7 @@
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import { modelsFor } from "../src/model/models.js";
 import { ProjectCredentialStore } from "../src/model/auth-store.js";
 import { projectSecrets } from "../src/model/settings.js";
@@ -13,48 +13,32 @@ async function fixture() {
   return root;
 }
 afterEach(async () => {
-  vi.unstubAllEnvs();
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
 });
 
-it.each(["explicit", "native", "stored"])(
-  "resolves %s credentials in order",
-  async (source) => {
-    const root = await fixture();
-    const store = new ProjectCredentialStore(
-      join(root, ".nylorun", "auth.json")
-    );
-    await store.modify("openai", async () => ({
-      type: "api_key",
-      key: "stored-key",
-    }));
-    vi.stubEnv(
-      "MODEL_PROVIDER_API_KEY",
-      source === "explicit" ? "explicit-key" : ""
-    );
-    vi.stubEnv("OPENAI_API_KEY", source === "stored" ? "" : "native-key");
-    const registry = modelsFor({ provider: "openai", model: "unused" }, store);
-    expect((await registry.getAuth("openai"))?.auth.apiKey).toBe(
-      `${source}-key`
-    );
-  }
-);
-
-it("environment credentials bypass even malformed credential files", async () => {
+it("resolves credentials from the explicit store only", async () => {
   const root = await fixture();
-  await mkdir(join(root, ".nylorun"));
-  await writeFile(join(root, ".nylorun", "auth.json"), "invalid-json");
-  vi.stubEnv("MODEL_PROVIDER_API_KEY", "explicit-key");
-  const registry = modelsFor(
-    { provider: "openai", model: "unused" },
-    new ProjectCredentialStore(join(root, ".nylorun", "auth.json"))
-  );
-  expect((await registry.getAuth("openai"))?.auth.apiKey).toBe("explicit-key");
+  const store = new ProjectCredentialStore(join(root, ".nylorun", "auth.json"));
+  await store.modify("openai", async () => ({
+    type: "api_key",
+    key: "stored-key",
+  }));
+  const registry = modelsFor({ provider: "openai", model: "unused" }, store);
+  expect((await registry.getAuth("openai"))?.auth.apiKey).toBe("stored-key");
 });
 
-it("reads legacy OAuth state and includes new credentials in redaction", async () => {
+it("rejects ambient environment credential mode", () => {
+  const store = new ProjectCredentialStore("/tmp/unused-auth.json");
+  expect(() =>
+    modelsFor({ provider: "openai", model: "unused" }, store, {
+      environment: true,
+    }),
+  ).toThrow(/Ambient model environment is not supported/);
+});
+
+it("reads legacy OAuth state and includes credentials in redaction from an explicit env map", async () => {
   const root = await fixture();
   await mkdir(join(root, ".env"));
   const credential = {
@@ -65,11 +49,11 @@ it("reads legacy OAuth state and includes new credentials in redaction", async (
   };
   await writeFile(
     join(root, ".env", "auth.json"),
-    JSON.stringify({ fixture: credential })
+    JSON.stringify({ fixture: credential }),
   );
   const store = new ProjectCredentialStore(
     join(root, ".nylorun", "auth.json"),
-    join(root, ".env", "auth.json")
+    join(root, ".env", "auth.json"),
   );
   expect(await store.read("fixture")).toEqual(credential);
   await store.modify("fixture", async () => ({
@@ -77,13 +61,14 @@ it("reads legacy OAuth state and includes new credentials in redaction", async (
     type: "oauth",
     access: "new-secret",
   }));
-  vi.stubEnv("MODEL_PROVIDER_API_KEY", "explicit-secret");
-  expect(projectSecrets(root)).toEqual(
+  expect(
+    projectSecrets(root, { MODEL_PROVIDER_API_KEY: "explicit-secret" }),
+  ).toEqual(
     expect.arrayContaining([
       "explicit-secret",
       "new-secret",
       "refresh-secret",
       "access-secret",
-    ])
+    ]),
   );
 });

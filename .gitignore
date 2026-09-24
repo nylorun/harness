@@ -6,6 +6,8 @@ coverage/
 .tmp/
 docs/*
 !docs/responsibility-boundaries.md
+!docs/BUILDING_AGENTS.md
+!docs/building-a-desktop-client.md
 !docs/design/
 docs/design/*
 !docs/design/package-architecture.md

@@ -1,61 +1,90 @@
 # @nylorun/cli
 
-The local `nylorun` executable. Requires Node 24+.
+The local `nylorun` executable. Depends on `@nylorun/agents` and `@nylorun/admin`
+only among Nylorun packages — it runs the **launcher** inside a Runtime build as
+a process and never imports `@nylorun/runtime`. Requires Node 24+. Vocabulary:
+[runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
 
 ```sh
-nylorun up                  # start the local Runtime (alias for "nylorun runtime start")
-nylorun dev                 # watch agents/index.ts, open Studio
-nylorun dev --no-studio
-nylorun serve [entry]       # run the compiled build, default dist/agents/index.js
-nylorun configure
-nylorun studio
-nylorun runtime status
-nylorun down                # stop the Runtime, keeping SQLite and credentials
+nylorun runtime up                 # launcher: install pin if needed, start Host
+nylorun runtime down               # stop the Host; keep Tenants and host.json
+nylorun runtime status             # Host id, address, version, Tenant list
+nylorun runtime status --env       # export lines for the linked Project
+nylorun runtime logs [--follow]    # Host + Tenant logs
+nylorun runtime restart            # restart onto the CLI's pinned Runtime build
+nylorun runtime run                # attached foreground Host
+nylorun dev [entry]                # up → link/create Tenant → tsx watch entry
+nylorun dev --ephemeral            # temporary Host root + one Tenant
+nylorun configure                  # replace model credential on the linked Tenant
+nylorun tenant list|delete|status|reset
+nylorun doctor sandbox             # sandbox backend via Tenant API
 ```
 
-## The Runtime is a separate, persistent process
+Removed in this release: `nylorun serve`, `nylorun studio` (use `nylorun-studio`),
+and the in-process Project runner. Production `start` is
+`node dist/src/main.js` with `connectAgents` in the application.
 
-`nylorun up` starts `@nylorun/runtime/server` in the background and returns the
-terminal. `dev` and `serve` attach to it, registering the project's exported
-agents and connecting scoped executors through `PUT /v1/executors`. They start
-the Runtime themselves when nothing is listening, and they leave it running on
-exit, so a watch restart re-registers agents without losing sessions. Pass
-`--no-autostart` to fail instead, which is what CI should do. `--foreground`
-keeps `runtime start` attached for logs.
+## Runtime builds and the launcher
 
-## Scope
+`nylorun runtime …` resolves the newest installed Runtime build under the Host
+root, bootstraps from the registry when none exists, and invokes
+`nylorun-runtime` with `--json`. The Host runs on the build's bundled Node.
+See [building a desktop client](../docs/building-a-desktop-client.md) for the
+launcher contract.
 
-A project is the default scope: the Runtime's SQLite, credentials, log and pid
-live in `.nylorun/` beside the nearest `package.json`, created on first use and
-added to an existing `.gitignore`. `--global` (and running outside a project)
-uses `~/.nylorun` instead, relocatable with `NYLORUN_HOME`. Both default to
-`127.0.0.1:8787`; `--port` beats `NYLORUN_PORT`, then `PORT`, then the port
-recorded for a running Runtime. `--db` or `NYLORUN_SQLITE_PATH` moves the
-database. `nylorun runtime status --output json` prints the resolved scope for
-scripts, and `nylorun logs [-f]` tails the Runtime's own output.
+`dev` starts (or reuses) the Host via the launcher, creates a Tenant through
+`@nylorun/admin` when the Project has no link, writes format-1 link +
+credentials, and spawns `tsx watch <entry>` with
+`NYLORUN_RUNTIME_URL`, `NYLORUN_TENANT` and `NYLORUN_SERVER_KEY`. The ready
+banner hints `Studio: npm run studio`. Ctrl-C stops the child; the Host stays up.
 
-Runtime and executor credentials remain separate. On first `configure`, `dev` or
-`serve`, an interactive terminal saves the model provider credential into the
-Runtime vault; `configure` replaces it while the Runtime is already running.
+## Host root, Tenants and Project link
+
+The **Host root** is `NYLORUN_HOME` or `~/.nylorun` (resolved absolute once).
+It holds `host.json`, admin credentials, installed Runtime builds and every
+Tenant. Isolation is per **Tenant**, not per Project directory.
+
+A **Project** stores only:
+
+- `.nylorun/link.json` — `{ format, hostUrl, hostId, tenantId }`
+- `.nylorun/credentials.json` — application key and principal id (0600); no
+  executor tokens
+- `.nylorun/.gitignore` containing `*`
+
+```sh
+eval "$(npx nylorun runtime status --env)"
+# → NYLORUN_RUNTIME_URL, NYLORUN_SERVER_KEY, NYLORUN_TENANT
+```
+
+Port defaults to `8787` on loopback. On first Host setup, if that port is
+taken, the launcher picks a free loopback port and persists it. Explicit
+`--port` is strict.
 
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Success, including `down` when nothing was running |
-| 1 | Generic failure |
+| 1 | Generic failure / launcher operation failed |
 | 2 | Usage error |
 | 3 | `runtime status` or `logs`: not running |
-| 4 | Port held by another process or another scope |
-| 5 | The running Runtime does not match this CLI |
-| 6 | `--no-autostart` and nothing is listening |
-| 7 | The Runtime did not become healthy |
+| 4 | Port held by another process |
+| 5 | Protocol / feature incompatible with this CLI |
+| 7 | The Host did not become ready |
 | 130 / 143 | SIGINT / SIGTERM |
 
-`dev` loads `agents/index.ts` using project-installed `tsx` and watches changes.
-Studio and `tsx` are optional development dependencies; the CLI is a production
-dependency when the application's `start` script uses it.
+Install the CLI as a **devDependency**. Generated applications keep
+`@nylorun/agents` alone in production dependencies.
 
-Reusable provider configuration is imported from `@nylorun/runtime/configuration`;
-interactive prompts and process supervision belong here. Neither runtime nor
-harness depends on this package. See [package architecture](../docs/design/package-architecture.md).
+## Troubleshooting
+
+| Symptom | What to do |
+| --- | --- |
+| Quarantined Tenant | `nylorun tenant status` shows reason and `repair` |
+| `426` / exit 5 | Upgrade CLI / Runtime pin, or pin a matching older set |
+| Port conflict | Stop the other process or `nylorun runtime up --port <n>` |
+| Logs | `nylorun runtime logs --follow` |
+| No Runtime build | First `runtime up` / `dev` bootstraps; needs network once |
+
+See [package architecture](../docs/design/package-architecture.md) and
+[MIGRATION.md](../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta).

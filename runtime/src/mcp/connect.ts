@@ -23,16 +23,19 @@ export async function openMcpServer(input: {
   authorize?: (url: string) => Promise<AuthorizeResult>;
   pluginRoot?: string;
   pluginData: string;
+  childEnv?: Readonly<Record<string, string>>;
 }): Promise<LiveConnection> {
   if (input.server.type === "stdio") {
     const launch = prepareStdioLaunch(input.server, {
       pluginRoot: input.pluginRoot,
       pluginData: input.pluginData,
+      childEnv: input.childEnv,
     });
     const transport = new StdioClientTransport({
       command: launch.command,
       args: [...launch.args],
       cwd: launch.cwd,
+      // Full explicit env so HOME/TMPDIR from the Tenant override getDefaultEnvironment().
       env: { ...launch.env },
       stderr: "pipe",
     });

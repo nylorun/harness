@@ -2,8 +2,12 @@ import { projectAsset } from "@nylorun/runtime/node";
 import { join } from "node:path";
 import type { CapabilityDeclaration } from "@nylorun/agents/define";
 import { loadToolsFromDirectory } from "./load.js";
+import { EXAMPLES_ROOT } from "../root.js";
 
-export const TOOLS_CATALOG = projectAsset("agents/shared/tools/catalog");
+export const TOOLS_CATALOG = projectAsset(
+  "agents/shared/tools/catalog",
+  EXAMPLES_ROOT,
+);
 
 export type ToolsSource = { readonly directory: string };
 

@@ -83,9 +83,9 @@ export function ModelSettings() {
   const refresh = useCallback(async () => {
     const [modelResponse, catalogResponse, providersResponse] =
       await Promise.all([
-        runtime("/v1/host/model"),
-        runtime("/v1/host/models"),
-        runtime("/v1/host/providers"),
+        runtime("/v1/tenant/model"),
+        runtime("/v1/tenant/models"),
+        runtime("/v1/tenant/providers"),
       ]);
     if (!modelResponse.ok || !catalogResponse.ok || !providersResponse.ok)
       throw new Error("The Runtime did not return model settings.");
@@ -153,7 +153,7 @@ export function ModelSettings() {
     setPending(true);
     const key = apiKey;
     try {
-      const response = await runtime("/v1/host/model", {
+      const response = await runtime("/v1/tenant/model", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -195,7 +195,7 @@ export function ModelSettings() {
     setSaved("");
     setPending(true);
     try {
-      const response = await runtime("/v1/host/model/selection", {
+      const response = await runtime("/v1/tenant/model/selection", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

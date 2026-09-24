@@ -46,7 +46,7 @@ const emptyUsage = (): Usage => ({
 export function piModel(options: PiModelOptions = {}): RuntimeModelAdapter {
   return async (call, context) => {
     context.signal.throwIfAborted();
-    const root = options.root ?? process.cwd();
+    const root = options.root ?? "";
     const stored = options.readHostModel?.();
     if (!stored)
       throw new Error(

@@ -56,10 +56,11 @@ type Row = {
   credential: CredentialInfo;
 };
 
-const client = () =>
+const client = (tenantId: string) =>
   createClient({
     url: location.origin + "/_studio/runtime",
     key: "studio-proxy",
+    tenant: tenantId,
     fetch: (url, init) => fetch(url, init),
   });
 
@@ -82,7 +83,7 @@ function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-export function VaultModule() {
+export function VaultModule({ tenantId }: Readonly<{ tenantId: string }>) {
   const [vaults, setVaults] = useState<VaultInfo[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [selectedVaultId, setSelectedVaultId] = useState<string>("");
@@ -100,7 +101,7 @@ export function VaultModule() {
   const [confirmName, setConfirmName] = useState("");
 
   const refresh = useCallback(async () => {
-    const sdk = client();
+    const sdk = client(tenantId);
     const listed = await sdk.listVaults(OWNER);
     const nextVaults = listed.vaults;
     setVaults(nextVaults);
@@ -123,7 +124,7 @@ export function VaultModule() {
       }),
     );
     setRows(credentials.flat());
-  }, []);
+  }, [tenantId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,7 +175,7 @@ export function VaultModule() {
     setError("");
     setSaved("");
     setPending(true);
-    const sdk = client();
+    const sdk = client(tenantId);
     const secretValue = secret;
     try {
       if (panelMode === "add-vault") {
@@ -250,7 +251,7 @@ export function VaultModule() {
     setSaved("");
     setPending(true);
     try {
-      await client().deleteVault(selectedVault.id);
+      await client(tenantId).deleteVault(selectedVault.id);
       setSelectedVaultId("");
       setSaved(`Deleted vault “${label}”.`);
       await refresh();

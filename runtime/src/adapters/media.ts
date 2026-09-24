@@ -160,6 +160,6 @@ function safe(value: string): boolean {
   return value !== "." && value !== ".." && /^[a-zA-Z0-9._-]+$/u.test(value);
 }
 
-export function localMedia(options: { root?: string } = {}): MediaStore {
-  return new MediaStore(options.root ?? join(process.cwd(), ".data", "media"));
+export function localMedia(options: { root: string }): MediaStore {
+  return new MediaStore(options.root);
 }

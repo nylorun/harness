@@ -129,7 +129,12 @@ export class ProcessGroup {
               ? child.kill("SIGKILL")
               : process.kill(-child.pid, "SIGKILL");
           } catch {}
-          await exit;
+          // Never wait forever for close — a detached Host can outlive the
+          // launcher pipe and leave CI smokes wedged until a wall-clock abort.
+          await Promise.race([
+            exit,
+            new Promise((resolve) => setTimeout(resolve, 5000)),
+          ]);
         }
       },
     };

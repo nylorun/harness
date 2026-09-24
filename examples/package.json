@@ -9,9 +9,9 @@
   "scripts": {
     "configure": "nylorun configure",
     "dev": "nylorun dev",
-    "studio": "nylorun studio",
+    "studio": "nylorun-studio",
     "build": "node -e \"import('node:fs/promises').then(async ({rm,cp}) => { await rm('dist', { recursive: true, force: true }); await cp('agents', 'dist/agents', { recursive: true, filter: (source) => !source.endsWith('.ts') }); })\" && tsc -p tsconfig.build.json",
-    "start": "nylorun serve",
+    "start": "node dist/src/main.js",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "codex:preflight": "node scripts/codex-preflight.mjs"
@@ -19,7 +19,6 @@
   "dependencies": {
     "zod": "^4.6.5",
     "@nylorun/agents": "file:../agents",
-    "@nylorun/cli": "file:../cli",
     "@nylorun/harness": "file:../harness",
     "@nylorun/runtime": "file:../runtime",
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -27,10 +26,12 @@
     "@nylorun/core": "file:../core"
   },
   "devDependencies": {
+    "@nylorun/cli": "file:../cli",
     "@nylorun/studio": "file:../studio",
     "@types/node": "^22.18.0",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",
+    "@nylorun/admin": "file:../admin",
     "vitest": "^4.1.11"
   }
 }

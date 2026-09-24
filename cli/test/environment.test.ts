@@ -22,28 +22,28 @@ async function fixture() {
 afterEach(async () => {
   vi.unstubAllEnvs();
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
 });
 
-it("loads only .env, keeps process overrides, and permits missing files", async () => {
+it("returns a value map from .env without mutating process.env", async () => {
   const root = await fixture();
-  loadProjectEnvironment(root);
-  vi.stubEnv("MODEL", "host-model");
-  vi.stubEnv("MODEL_PROVIDER", undefined);
-  vi.stubEnv("MODEL_PROVIDER_API_KEY", undefined);
+  expect(loadProjectEnvironment(root)).toEqual({});
   await writeFile(
     join(root, ".env"),
-    "MODEL=local-model\nMODEL_PROVIDER=custom\n"
+    "MODEL=local-model\nMODEL_PROVIDER=custom\n",
   );
   await writeFile(
     join(root, ".env.local"),
-    "MODEL_PROVIDER_API_KEY=not-loaded\n"
+    "MODEL_PROVIDER_API_KEY=not-loaded\n",
   );
-  loadProjectEnvironment(root);
-  expect(process.env.MODEL).toBe("host-model");
-  expect(process.env.MODEL_PROVIDER).toBe("custom");
-  expect(process.env.MODEL_PROVIDER_API_KEY).toBeUndefined();
+  const before = { ...process.env };
+  const map = loadProjectEnvironment(root);
+  expect(map).toEqual({
+    MODEL: "local-model",
+    MODEL_PROVIDER: "custom",
+  });
+  expect(process.env).toEqual(before);
 });
 
 it("rejects a legacy directory without modifying it", async () => {
@@ -52,7 +52,7 @@ it("rejects a legacy directory without modifying it", async () => {
   await writeFile(join(root, ".env", "auth.json"), "private");
   expect(() => loadProjectEnvironment(root)).toThrow("migrated manually");
   expect(await readFile(join(root, ".env", "auth.json"), "utf8")).toBe(
-    "private"
+    "private",
   );
 });
 
@@ -63,7 +63,7 @@ it("preserves unrelated dotenv content and replaces complete multiline assignmen
   await writeFile(
     join(root, ".env"),
     unrelated +
-      'MODEL="old\nmodel" # selection\nMODEL=duplicate\nMODEL_PROVIDER_BASE_URL=old\n'
+      'MODEL="old\nmodel" # selection\nMODEL=duplicate\nMODEL_PROVIDER_BASE_URL=old\n',
   );
   await saveEnvironment(root, {
     MODEL: "new",
@@ -92,7 +92,7 @@ it.each([
   const root = await fixture();
   await saveEnvironment(root, { MODEL_PROVIDER_API_KEY: key });
   expect(
-    parseEnv(await readFile(join(root, ".env"), "utf8")).MODEL_PROVIDER_API_KEY
+    parseEnv(await readFile(join(root, ".env"), "utf8")).MODEL_PROVIDER_API_KEY,
   ).toBe(key);
 });
 
@@ -100,10 +100,10 @@ it("keeps existing settings on cancellation or unrepresentable input", async () 
   const root = await fixture();
   await writeFile(join(root, ".env"), "MODEL=original\n");
   await expect(
-    saveEnvironment(root, { MODEL: "new" }, AbortSignal.abort())
+    saveEnvironment(root, { MODEL: "new" }, AbortSignal.abort()),
   ).rejects.toThrow();
   await expect(
-    saveEnvironment(root, { MODEL_PROVIDER_API_KEY: "all'\"`quotes" })
+    saveEnvironment(root, { MODEL_PROVIDER_API_KEY: "all'\"`quotes" }),
   ).rejects.toThrow("quote delimiters");
   expect(await readFile(join(root, ".env"), "utf8")).toBe("MODEL=original\n");
 });

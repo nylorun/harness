@@ -53,9 +53,33 @@ try {
         : `
       import assert from 'node:assert/strict';
       import { fork } from 'node:child_process';
+      import { randomBytes } from 'node:crypto';
+      import { mkdir, writeFile } from 'node:fs/promises';
       import { createRequire } from 'node:module';
+      import { join } from 'node:path';
+      const hostRoot = join(process.cwd(), 'host-root');
+      await mkdir(join(hostRoot, 'home'), { recursive: true });
+      await mkdir(join(hostRoot, 'tmp'), { recursive: true });
+      await mkdir(join(hostRoot, 'tenants'), { recursive: true });
+      // host_ + 26 Crockford chars (matches HOST_ID_PATTERN).
+      const hostId = 'host_00000000000000000000000000';
+      await writeFile(join(hostRoot, 'host.json'), JSON.stringify({
+        hostId, host: '127.0.0.1', port: 0,
+      }));
+      await writeFile(join(hostRoot, 'host-credentials.json'), JSON.stringify({
+        adminKey: randomBytes(32).toString('hex'),
+      }));
       const child = fork(createRequire(import.meta.url).resolve('@nylorun/runtime/server'), [], {
-        env: {...process.env, PORT:'0', NYLORUN_SERVER_KEY:'isolated-server-secret', NYLORUN_DEV_MODEL:'fixture', NYLORUN_EXECUTORS_JSON:'[]', NYLORUN_SQLITE_PATH:'./isolated.sqlite'},
+        env: {
+          PATH: process.env.PATH,
+          LANG: process.env.LANG,
+          TZ: process.env.TZ,
+          HOME: join(hostRoot, 'home'),
+          USERPROFILE: join(hostRoot, 'home'),
+          TMPDIR: join(hostRoot, 'tmp'),
+          NYLORUN_HOME: hostRoot,
+          NYLORUN_DEV_MODEL: 'fixture',
+        },
         stdio:['ignore','ignore','inherit','ipc']
       });
       try {

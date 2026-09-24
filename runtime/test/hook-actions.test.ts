@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { Agent } from "@nylorun/core/define";
-import { startRuntime } from "../src/core/runtime.js";
+import { startTestTenant } from "./support/tenant.js";
+
+const APP = "server-token-value-aaaaaaaa";
 import { Store } from "../src/core/store.js";
 
 const server = {
-  authorization: "Bearer server-token-value",
+  authorization: `Bearer ${APP}`,
   "content-type": "application/json",
 };
 const executor = {
@@ -20,16 +22,14 @@ const hooked = Agent({ id: "hooked", name: "Hooked" })
   .use({ id: "two", before: { step: () => ({}) } })
   .build();
 
-async function start(sqlitePath: string, leaseMs?: number) {
-  return startRuntime({
-    sqlitePath,
-    serverToken: "server-token-value",
+async function start(leaseMs?: number) {
+  return startTestTenant({
+    applicationKey: APP,
     executors: [
       { token: "executor-token-value", agentId: "hooked", implementationVersion: "dev" },
     ],
-    model: async () => ({ output: [{ type: "text", text: "done" }] }),
+    modelProvider: async () => ({ output: [{ type: "text", text: "done" }] }),
     ...(leaseMs === undefined ? {} : { leaseMs }),
-    port: 0,
   });
 }
 
@@ -87,8 +87,9 @@ async function claim(url: string, actionId: string, requestId: string) {
 }
 
 it("sends one hook action per point and re-delivers it when a lease expires", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "hook-actions-"));
-  const runtime = await start(join(directory, "runtime.sqlite"), 150);
+  // 150ms is enough locally but flakes under CI load (consumers 24.15.0): the
+  // second claim's lease can expire before action_result is posted.
+  const runtime = await start(2_000);
   try {
     await openTurn(runtime.url);
     const [action, ...rest] = await pendingActions(runtime.url);
@@ -118,7 +119,10 @@ it("sends one hook action per point and re-delivers it when a lease expires", as
         outcome: { value: { results: { one: {}, two: {} } } },
       }),
     });
-    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      const body = await result.text();
+      expect.fail(`action_result ${result.status}: ${body.slice(0, 500)}`);
+    }
 
     let types: string[] = [];
     for (let attempt = 0; attempt < 150 && !types.includes("turn.completed"); attempt += 1) {
@@ -135,21 +139,27 @@ it("sends one hook action per point and re-delivers it when a lease expires", as
     expect(types).not.toContain("action.uncertain");
   } finally {
     await runtime.close();
-    await rm(directory, { recursive: true, force: true });
   }
 });
 
 it("ends turns and hook actions left by a schema 3 manifest on startup", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "hook-legacy-"));
-  const sqlitePath = join(directory, "runtime.sqlite");
-  const runtime = await start(sqlitePath);
+  const runtime = await startTestTenant({
+    applicationKey: APP,
+    retainRoot: true,
+    executors: [
+      { token: "executor-token-value", agentId: "hooked", implementationVersion: "dev" },
+    ],
+    modelProvider: async () => ({ output: [{ type: "text", text: "done" }] }),
+  });
+  const { root, tenantId } = runtime;
+  const sqlitePath = join(root, "tenants", tenantId, "tenant.sqlite");
   try {
     await openTurn(runtime.url);
     await pendingActions(runtime.url);
   } finally {
     await runtime.close();
   }
-  const store = new Store(sqlitePath);
+  const store = new Store(sqlitePath, tenantId);
   store.tx(() => {
     const session = store.get("sessions", "s1");
     session.manifest = { ...session.manifest, manifestSchemaVersion: 3 };
@@ -163,7 +173,15 @@ it("ends turns and hook actions left by a schema 3 manifest on startup", async (
   });
   store.db.close();
 
-  const restarted = await start(sqlitePath);
+  const restarted = await startTestTenant({
+    applicationKey: APP,
+    hostRoot: root,
+    tenantId,
+    executors: [
+      { token: "executor-token-value", agentId: "hooked", implementationVersion: "dev" },
+    ],
+    modelProvider: async () => ({ output: [{ type: "text", text: "done" }] }),
+  });
   try {
     const listed = await fetch(`${restarted.url}/v1/actions`, {
       headers: { authorization: executor.authorization },
@@ -173,12 +191,12 @@ it("ends turns and hook actions left by a schema 3 manifest on startup", async (
   } finally {
     await restarted.close();
   }
-  const after = new Store(sqlitePath);
+  const after = new Store(sqlitePath, tenantId);
   try {
     expect(after.get("actions", "legacy")).toMatchObject({ status: "cancelled" });
     expect(after.get("sessions", "s1")).toMatchObject({ status: "failed", activeTurnId: null });
   } finally {
     after.db.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });

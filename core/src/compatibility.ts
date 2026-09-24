@@ -1,3 +1,227 @@
 export { hashManifest } from "./utils/hash.js";
-export const PROTOCOL_VERSION = 1;
+
+export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_FEATURES = ["runtime-tenants", "admin-status"] as const;
+export type ProtocolFeature = (typeof PROTOCOL_FEATURES)[number];
+export interface ProtocolRange {
+  min: number;
+  max: number;
+  features: readonly string[];
+}
+export const HOST_PROTOCOL: ProtocolRange = {
+  min: 2,
+  max: 2,
+  features: PROTOCOL_FEATURES,
+};
 export const DEFINITION_SCHEMA_VERSION = 2;
+export const LAUNCHER_PROTOCOL = 1;
+
+export const TENANT_HEADER = "Nylorun-Tenant";
+export const PROTOCOL_HEADER = "Nylorun-Protocol";
+
+export const ERROR_CODES = [
+  "not_found",
+  "protocol_unsupported",
+  "host_rejected",
+  "origin_rejected",
+  "unsupported_media_type",
+  "tenant_conflict",
+  "active_work",
+  "connection_missing",
+  "incompatible_host",
+  "version_required",
+  "platform_unsupported",
+  "install_failed",
+  "integrity_mismatch",
+  "lock_timeout",
+  "foreign_port",
+  "host_unresponsive",
+  "host_start_failed",
+  "host_schema_newer",
+  "host_format_newer",
+  "downgrade_refused",
+  "upgrade_failed",
+] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** Crockford Base32 alphabet (lowercase); excludes i, l, o, u. */
+const CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz";
+export const TENANT_ID_PATTERN = /^tn_[0-9a-hjkmnp-tv-z]{26}$/;
+export const PRINCIPAL_ID_PATTERN = /^pr_[0-9a-hjkmnp-tv-z]{26}$/;
+
+export function isTenantId(value: unknown): value is string {
+  return typeof value === "string" && TENANT_ID_PATTERN.test(value);
+}
+
+export function isPrincipalId(value: unknown): value is string {
+  return typeof value === "string" && PRINCIPAL_ID_PATTERN.test(value);
+}
+
+function encodeTime(ms: number): string {
+  let value = Math.floor(ms);
+  if (!Number.isFinite(value) || value < 0) value = 0;
+  // ULID time component is 48 bits.
+  value = value % 2 ** 48;
+  let out = "";
+  for (let i = 0; i < 10; i++) {
+    out = CROCKFORD[value % 32]! + out;
+    value = Math.floor(value / 32);
+  }
+  return out;
+}
+
+function encodeRandom(): string {
+  const bytes = new Uint8Array(10);
+  globalThis.crypto.getRandomValues(bytes);
+  let out = "";
+  // 80 bits → 16 Crockford chars (5 bits each).
+  let buffer = 0;
+  let bits = 0;
+  for (const byte of bytes) {
+    buffer = (buffer << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      out += CROCKFORD[(buffer >> bits) & 31]!;
+    }
+  }
+  return out;
+}
+
+let lastTime = -1;
+let lastRandom = "";
+
+function newPrefixedId(prefix: "tn_" | "pr_", now?: number): string {
+  const ms = now ?? Date.now();
+  const time = encodeTime(ms);
+  let random = encodeRandom();
+  if (ms === lastTime && lastRandom !== "" && random <= lastRandom) {
+    random = incrementCrockford(lastRandom);
+  }
+  lastTime = ms;
+  lastRandom = random;
+  return `${prefix}${time}${random}`;
+}
+
+/**
+ * Lowercase Crockford ULID with `tn_` prefix; 48-bit time + 80-bit CSPRNG.
+ * Same-millisecond calls stay lexicographically monotonic by bumping the random
+ * component when the clock does not advance.
+ */
+export function newTenantId(now?: number): string {
+  return newPrefixedId("tn_", now);
+}
+
+/** Principal id: `pr_` + lowercase Crockford ULID (same generator as tenants). */
+export function newPrincipalId(now?: number): string {
+  return newPrefixedId("pr_", now);
+}
+
+type SemVerParts = {
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease: readonly string[];
+};
+
+function parseSemVer(version: string): SemVerParts | null {
+  const match =
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+      version,
+    );
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4] ? match[4].split(".") : [],
+  };
+}
+
+function compareIdentifiers(a: string, b: string): -1 | 0 | 1 {
+  const aNum = /^\d+$/.test(a);
+  const bNum = /^\d+$/.test(b);
+  if (aNum && bNum) {
+    const aValue = BigInt(a);
+    const bValue = BigInt(b);
+    if (aValue < bValue) return -1;
+    if (aValue > bValue) return 1;
+    return 0;
+  }
+  if (aNum) return -1;
+  if (bNum) return 1;
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+/**
+ * SemVer 2.0 precedence, including prereleases. Build metadata is ignored.
+ * Returns -1 when a < b, 0 when equal, 1 when a > b.
+ */
+export function compareVersions(a: string, b: string): -1 | 0 | 1 {
+  const left = parseSemVer(a);
+  const right = parseSemVer(b);
+  if (!left || !right) {
+    if (a === b) return 0;
+    return a < b ? -1 : 1;
+  }
+  if (left.major !== right.major)
+    return left.major < right.major ? -1 : 1;
+  if (left.minor !== right.minor)
+    return left.minor < right.minor ? -1 : 1;
+  if (left.patch !== right.patch)
+    return left.patch < right.patch ? -1 : 1;
+  if (left.prerelease.length === 0 && right.prerelease.length === 0) return 0;
+  if (left.prerelease.length === 0) return 1;
+  if (right.prerelease.length === 0) return -1;
+  const limit = Math.max(left.prerelease.length, right.prerelease.length);
+  for (let i = 0; i < limit; i++) {
+    const aId = left.prerelease[i];
+    const bId = right.prerelease[i];
+    if (aId === undefined) return -1;
+    if (bId === undefined) return 1;
+    const order = compareIdentifiers(aId, bId);
+    if (order !== 0) return order;
+  }
+  return 0;
+}
+
+function incrementCrockford(value: string): string {
+  const chars = [...value];
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const index = CROCKFORD.indexOf(chars[i]!);
+    if (index < 0) continue;
+    if (index < 31) {
+      chars[i] = CROCKFORD[index + 1]!;
+      return chars.join("");
+    }
+    chars[i] = CROCKFORD[0]!;
+  }
+  return encodeRandom();
+}
+
+export type Compatibility =
+  | { ok: true }
+  | { ok: false; reason: "version"; client: number; host: ProtocolRange }
+  | {
+      ok: false;
+      reason: "feature";
+      missing: readonly string[];
+      host: ProtocolRange;
+    };
+
+export function checkCompatibility(
+  client: { version: number; required: readonly string[] },
+  host: ProtocolRange,
+): Compatibility {
+  if (client.version < host.min || client.version > host.max) {
+    return { ok: false, reason: "version", client: client.version, host };
+  }
+  const advertised = new Set(host.features);
+  const missing = client.required.filter((feature) => !advertised.has(feature));
+  if (missing.length > 0) {
+    return { ok: false, reason: "feature", missing, host };
+  }
+  return { ok: true };
+}

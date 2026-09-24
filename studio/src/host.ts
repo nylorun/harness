@@ -10,19 +10,26 @@ import { spawn } from "node:child_process";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+export type StudioTenant = Readonly<{ id: string; name: string }>;
 export type StudioOptions = Readonly<{
   runtimeUrl?: string;
   serverKey?: string;
+  tenant?: StudioTenant;
   port?: number;
   open?: boolean;
 }>;
 export type StudioHost = Readonly<{
   address: string;
   readonly runtimeUrl: string;
+  readonly tenant: StudioTenant;
   open(): void;
   close(): Promise<void>;
 }>;
-export type StudioConfig = Readonly<{ runtimeUrl: string; local: true }>;
+export type StudioConfig = Readonly<{
+  runtimeUrl: string;
+  local: true;
+  tenant: StudioTenant;
+}>;
 
 const CONFIG_PATH = "/nylo-studio.config.json";
 const MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
@@ -225,6 +232,15 @@ export async function startStudio(
       : parseAgentServerUrl(options.runtimeUrl);
   if (!requestedAgentServerUrl || !options.serverKey)
     throw new Error("Studio requires runtimeUrl and a serverKey");
+  const tenant = options.tenant;
+  if (
+    !tenant ||
+    typeof tenant.id !== "string" ||
+    tenant.id.length === 0 ||
+    typeof tenant.name !== "string" ||
+    tenant.name.length === 0
+  )
+    throw new Error("Studio requires tenant: { id, name }");
   if (
     !["localhost", "127.0.0.1", "[::1]"].includes(
       new URL(requestedAgentServerUrl).hostname,
@@ -233,6 +249,7 @@ export async function startStudio(
     throw new Error("This Studio release connects only to a loopback Runtime");
   let origin = "";
   let agentServerUrl = requestedAgentServerUrl;
+  const studioTenant = Object.freeze({ id: tenant.id, name: tenant.name });
 
   const handle = (request: IncomingMessage, response: ServerResponse): void => {
     void (async () => {
@@ -255,11 +272,16 @@ export async function startStudio(
           origin: `http://${request.headers.host}`,
           runtimeUrl: agentServerUrl!,
           serverKey: options.serverKey!,
+          tenantId: studioTenant.id,
         });
         return;
       }
       if (url.pathname === CONFIG_PATH && request.method === "GET") {
-        json(response, 200, { runtimeUrl: "/_studio/runtime", local: true });
+        json(response, 200, {
+          runtimeUrl: "/_studio/runtime",
+          local: true,
+          tenant: { id: studioTenant.id, name: studioTenant.name },
+        });
         return;
       }
       if (request.method !== "GET" && request.method !== "HEAD") {
@@ -295,6 +317,9 @@ export async function startStudio(
     address,
     get runtimeUrl() {
       return agentServerUrl;
+    },
+    get tenant() {
+      return studioTenant;
     },
     open: () => browser(address),
     close: async () => {

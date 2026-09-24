@@ -13,6 +13,7 @@ import {
   type SessionCommand,
   type VaultInfo,
 } from "@nylorun/core/contracts";
+import { resolveConnection } from "./connection.js";
 import { Transport, id, segment, type Destination } from "./http.js";
 import { observeSSE } from "./sse.js";
 export interface AgentSource {
@@ -340,10 +341,35 @@ export class SessionClient {
     }
   }
 }
-export function createClient(destination: Destination = {}) {
-  return new AgentsClient(destination);
+/**
+ * Build a Tenant API client.
+ * Explicit connection fields keep today's sync Transport resolution (including
+ * environment fill-ins). With no connection fields, resolves via
+ * `resolveConnection` (environment → project link).
+ */
+export function createClient(destination: Destination): AgentsClient;
+export function createClient(destination?: undefined): Promise<AgentsClient>;
+export function createClient(
+  destination: Destination = {},
+): AgentsClient | Promise<AgentsClient> {
+  if (
+    destination.url !== undefined ||
+    destination.key !== undefined ||
+    destination.tenant !== undefined
+  ) {
+    return new AgentsClient(destination);
+  }
+  return resolveConnection().then(
+    (connection) =>
+      new AgentsClient({
+        url: connection.url,
+        key: connection.key,
+        tenant: connection.tenant,
+        ...(destination.fetch ? { fetch: destination.fetch } : {}),
+      }),
+  );
 }
 
-export { RuntimeError } from "./http.js";
-export type { Destination } from "./http.js";
+export { RuntimeError, IncompatibleRuntimeError } from "./http.js";
+export type { Destination, IncompatibleReason } from "./http.js";
 export type { LiveEvent } from "@nylorun/core/contracts";

@@ -17,12 +17,13 @@ export function publicCreatorArguments(version) {
   ];
 }
 
-export function publicCreatorEnvironment(environment, npmrc, port) {
+export function publicCreatorEnvironment(environment, npmrc, port, extras = {}) {
   // Installation scripts must not inherit publishing credentials or OIDC access.
   const clean = Object.fromEntries(
-    Object.entries(environment).filter(([key]) =>
-      !/token|secret|password|credential|api.?key/i.test(key) &&
-      !/^npm_config_(?:userconfig|globalconfig|.*auth.*)$/i.test(key),
+    Object.entries(environment).filter(
+      ([key]) =>
+        !/token|secret|password|credential|api.?key/i.test(key) &&
+        !/^npm_config_(?:userconfig|globalconfig|.*auth.*)$/i.test(key),
     ),
   );
   return {
@@ -31,16 +32,21 @@ export function publicCreatorEnvironment(environment, npmrc, port) {
     NPM_CONFIG_GLOBALCONFIG: npmrc + ".global",
     PORT: String(port),
     NYLORUN_DEV_MODEL: "fixture",
+    ...extras,
   };
 }
 
 /**
- * Persistent Runtime answers /ready before the project runner finishes
+ * Persistent Host answers /ready before the project runner finishes
  * registering seed agents. Poll discovery until `assistant` appears.
  */
-async function waitForSeedAgent(port, serverKey, timeoutMs = 30_000) {
+async function waitForSeedAgent(port, applicationKey, tenantId, timeoutMs = 30_000) {
   const url = `http://127.0.0.1:${port}/v1/agents`;
-  const headers = { authorization: `Bearer ${serverKey}` };
+  const headers = {
+    authorization: `Bearer ${applicationKey}`,
+    "Nylorun-Tenant": tenantId,
+    "Nylorun-Protocol": "2",
+  };
   const deadline = Date.now() + timeoutMs;
   let last = "no response";
   while (Date.now() < deadline) {
@@ -63,6 +69,8 @@ async function waitForSeedAgent(port, serverKey, timeoutMs = 30_000) {
 
 export async function publicCreatorSmoke(version) {
   const temporary = await mkdtemp(join(tmpdir(), "nylorun-published-"));
+  const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-published-host-"));
+  const home = await mkdtemp(join(tmpdir(), "nylorun-published-home-"));
   const group = new ProcessGroup();
   try {
     const port = await availablePort();
@@ -73,13 +81,34 @@ export async function publicCreatorSmoke(version) {
       "public-creator",
       process.execPath,
       [npmCli(), ...publicCreatorArguments(version)],
-      { cwd: temporary, env: publicCreatorEnvironment(process.env, npmrc, port) },
+      {
+        cwd: temporary,
+        env: publicCreatorEnvironment(process.env, npmrc, port, {
+          NYLORUN_HOME: hostRoot,
+          HOME: home,
+          USERPROFILE: home,
+        }),
+      },
     );
     await child.ready(`http://127.0.0.1:${port}/ready`, 120_000);
-    const { serverKey } = JSON.parse(await readFile(join(temporary, "application/.nylorun/local-credentials.json"), "utf8"));
-    await waitForSeedAgent(port, serverKey);
+    const link = JSON.parse(
+      await readFile(join(temporary, "application/.nylorun/link.json"), "utf8"),
+    );
+    const credentials = JSON.parse(
+      await readFile(
+        join(temporary, "application/.nylorun/credentials.json"),
+        "utf8",
+      ),
+    );
+    await waitForSeedAgent(
+      port,
+      credentials.applicationKey ?? credentials.serverKey,
+      link.tenantId,
+    );
   } finally {
     await group.close();
     await rm(temporary, { recursive: true, force: true });
+    await rm(hostRoot, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
   }
 }

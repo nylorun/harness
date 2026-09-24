@@ -43,8 +43,58 @@ jobs:
           path: .tmp/release-artifacts/
           include-hidden-files: true
           if-no-files-found: error
-  publish:
+  # D8 / D17: five platform builds on native runners (wiring only — publish consumes).
+  runtime-build:
+    if: github.ref == 'refs/heads/main'
     needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          - os: macos-13
+            platform: darwin-x64
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: windows-latest
+            platform: win32-x64
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_SHA: ${{ inputs.commit }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm ci
+      - run: npm run build --workspace @nylorun/core
+      - run: npm run build --workspace @nylorun/harness
+      - run: npm run build --workspace @nylorun/runtime
+      - name: Pack release Runtime build and write index shard
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: node scripts/release/pack-runtime-build-artifact.mjs
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: runtime-build-${{ matrix.platform }}
+          path: |
+            .tmp/release-artifacts/runtime-builds/*.tgz
+            .tmp/release-artifacts/runtime-builds/builds-${{ matrix.platform }}.json
+          if-no-files-found: error
+  publish:
+    needs: [validate, runtime-build]
     runs-on: ubuntu-latest
     environment: npm
     permissions:
@@ -69,6 +119,13 @@ jobs:
         with:
           name: release-packages
           path: .tmp/release-artifacts/
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: runtime-build-*
+          path: .tmp/release-artifacts/runtime-builds-download/
+          merge-multiple: true
+      - name: Merge Runtime build artifacts (D17 index)
+        run: node scripts/release/merge-runtime-build-artifacts.mjs
       - run: node scripts/release/publish.mjs
         env:
           # Optional first-publication fallback; npm prefers configured OIDC trust.

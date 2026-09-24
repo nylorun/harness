@@ -35,6 +35,7 @@ export async function starterFiles(
           .replaceAll("{{CLI_VERSION}}", compatibility.cli)
           .replaceAll("{{HARNESS_VERSION}}", compatibility.harness)
           .replaceAll("{{AGENTS_VERSION}}", compatibility.agents)
+          .replaceAll("{{ADMIN_VERSION}}", compatibility.admin)
           .replaceAll("{{RUNTIME_VERSION}}", compatibility.runtime)
           .replaceAll("{{STUDIO_VERSION}}", compatibility.studio);
     }
@@ -45,10 +46,8 @@ export async function starterFiles(
   if (!studio) {
     const manifest = JSON.parse(files["package.json"]!);
     delete manifest.devDependencies["@nylorun/studio"];
-    manifest.scripts.dev = "nylorun dev --no-studio";
     delete manifest.scripts.studio;
     files["package.json"] = JSON.stringify(manifest, null, 2) + "\n";
-
   }
   return Object.freeze(files);
 }

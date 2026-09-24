@@ -9,6 +9,7 @@ import {
   type Skill,
   type SkillDefinition,
 } from "./roster.js";
+import { EXAMPLES_ROOT } from "../shared/root.js";
 
 export { defineSkill };
 export type { Skill, SkillDefinition };
@@ -16,7 +17,10 @@ export type { Skill, SkillDefinition };
 export const SKILLS_USAGE =
   "The following skills provide specialized instructions. When a task matches a skill description, call load_skill with that name before proceeding.";
 
-export const SKILLS_CATALOG = projectAsset("agents/skills/catalog");
+export const SKILLS_CATALOG = projectAsset(
+  "agents/skills/catalog",
+  EXAMPLES_ROOT,
+);
 
 export type SkillsSource =
   | { readonly directory: string }

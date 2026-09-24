@@ -1,8 +1,6 @@
 import {
   createProvider,
-  defaultProviderAuthContext,
   type CredentialStore,
-  envApiKeyAuth,
   type Model,
 } from "@earendil-works/pi-ai";
 import {
@@ -17,36 +15,21 @@ export type Selection = Readonly<{
   custom?: Readonly<{ baseUrl: string }>;
 }>;
 
+/**
+ * Build the pi-ai model registry from explicit credentials only.
+ * Ambient process environment / provider env auth is never consulted (A7, A10).
+ */
 export function modelsFor(
   selection: Selection,
   credentials: CredentialStore,
   options: { environment?: boolean } = {},
 ) {
-  const environmentFirst: CredentialStore = {
-    async read(providerId, options) {
-      const explicit = process.env.MODEL_PROVIDER_API_KEY;
-      if (
-        explicit &&
-        (!selection.provider || selection.provider === providerId)
-      )
-        return { type: "api_key", key: explicit };
-      const provider = models
-        .getProviders()
-        .find((item) => item.id === providerId);
-      const ambient = await provider?.auth.apiKey?.resolve({
-        ctx: defaultProviderAuthContext(),
-        signal: options?.signal ?? new AbortController().signal,
-      });
-      if (ambient) return undefined;
-      return credentials.read(providerId, options);
-    },
-    list: (options) => credentials.list(options),
-    modify: (id, fn, options) => credentials.modify(id, fn, options),
-    delete: (id, options) => credentials.delete(id, options),
-  };
-  const models = builtinModels({
-    credentials: options.environment === false ? credentials : environmentFirst,
-  });
+  if (options.environment) {
+    throw new Error(
+      "Ambient model environment is not supported; pass credentials explicitly",
+    );
+  }
+  const models = builtinModels({ credentials });
   if (!selection.custom) return models;
   const model: Model<"openai-completions"> = {
     id: selection.model,
@@ -66,11 +49,21 @@ export function modelsFor(
       name: "Custom OpenAI-compatible",
       baseUrl: selection.custom.baseUrl,
       auth: {
-        apiKey: envApiKeyAuth("Custom API key", ["MODEL_PROVIDER_API_KEY"]),
+        apiKey: {
+          label: "Custom API key",
+          schemas: [],
+          async resolve() {
+            const credential = await credentials.read("custom");
+            if (!credential || credential.type !== "api_key") return undefined;
+            const key = (credential as { key?: string }).key;
+            if (!key) return undefined;
+            return { type: "api_key" as const, auth: { apiKey: key } };
+          },
+        } as never,
       },
       models: [model],
       api: { stream, streamSimple },
-    })
+    }),
   );
   return models;
 }

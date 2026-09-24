@@ -14,6 +14,13 @@ import { root, run, npm, readJson, verifyToolchain } from "./lib/repo.mjs";
 
 await verifyToolchain();
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-setup-smoke-"));
+const home = await mkdtemp(join(tmpdir(), "nylorun-setup-home-"));
+const previousHome = process.env.HOME;
+const previousProfile = process.env.USERPROFILE;
+const previousNylorun = process.env.NYLORUN_HOME;
+process.env.HOME = home;
+process.env.USERPROFILE = home;
+delete process.env.NYLORUN_HOME;
 try {
   const files = (
     await run("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
@@ -59,6 +66,19 @@ try {
       content,
       `Setup modified ${file}`,
     );
+  // G7: starter scripts are the new flow (no nylorun serve).
+  const starterPkg = await readJson(
+    join(temporary, "create-agent/starter/package.json"),
+  );
+  assert.equal(starterPkg.scripts.dev, "nylorun dev");
+  assert.equal(starterPkg.scripts.studio, "nylorun-studio");
+  assert.equal(starterPkg.scripts.start, "node dist/src/main.js");
+  assert.ok(
+    !Object.values(starterPkg.scripts).some((script) =>
+      String(script).includes("serve"),
+    ),
+    "starter must not call nylorun serve",
+  );
   console.log(
     "Clean-checkout setup passed; authored agents, tests, shell provenance, lockfiles, and local state are unchanged.",
   );
@@ -122,5 +142,12 @@ try {
     "Release preparation smoke passed: creator adoption, generated provenance, npm lockfile refresh, preserved authored/local files, and no automatic commit.",
   );
 } finally {
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
+  if (previousProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = previousProfile;
+  if (previousNylorun === undefined) delete process.env.NYLORUN_HOME;
+  else process.env.NYLORUN_HOME = previousNylorun;
   await rm(temporary, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true });
 }
