@@ -84,8 +84,9 @@ jobs:
         include:
           - os: macos-14
             platform: darwin-arm64
-          - os: macos-13
-            platform: darwin-x64
+          # darwin-x64 lives in runtime-build-darwin-x64 (optional): GitHub-hosted
+          # macos-13 capacity has been unavailable for hours on this PR and a
+          # forever-queued matrix leg blocks the required `ci` aggregator.
           - os: ubuntu-latest
             platform: linux-x64
           - os: ubuntu-24.04-arm
@@ -125,6 +126,46 @@ jobs:
             LAUNCHER="$BUILD/bin/nylorun-runtime"
             chmod +x "$LAUNCHER" || true
           fi
+          VERSION=$(node -p "require('./runtime/package.json').version")
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json install "$VERSION" --from "$BUILD"
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json up --version "$VERSION"
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json status
+          "$LAUNCHER" --home "$NYLORUN_HOME" --json down --force
+      - name: Launcher unit tests
+        run: npm test --workspace @nylorun/runtime -- test/launcher
+  # Best-effort D8 darwin-x64: only GitHub-hosted label is macos-13 (Intel), which
+  # often never leaves the queue. Do not gate the required `ci` job on this.
+  runtime-build-darwin-x64:
+    runs-on: macos-13
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm ci
+      - run: npm run build --workspace @nylorun/core
+      - run: npm run build --workspace @nylorun/harness
+      - run: npm run build --workspace @nylorun/runtime
+      - name: Build local Runtime package
+        run: node scripts/release/runtime-builds.mjs --local
+      - name: Install, up, status, down
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLATFORM=darwin-x64
+          BUILD=".tmp/runtime-builds/${PLATFORM}"
+          HOME_DIR="${RUNNER_TEMP}/nylorun-runtime-build-home"
+          mkdir -p "$HOME_DIR"
+          export NYLORUN_HOME="$HOME_DIR"
+          LAUNCHER="$BUILD/bin/nylorun-runtime"
+          chmod +x "$LAUNCHER" || true
           VERSION=$(node -p "require('./runtime/package.json').version")
           "$LAUNCHER" --home "$NYLORUN_HOME" --json install "$VERSION" --from "$BUILD"
           "$LAUNCHER" --home "$NYLORUN_HOME" --json up --version "$VERSION"
