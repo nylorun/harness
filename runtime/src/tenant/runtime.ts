@@ -1117,8 +1117,12 @@ export class TenantRuntime implements TenantHandle {
     _url?: URL,
   ): Promise<void> {
     const json = (value: unknown, status = 200) => {
-      response.writeHead(status, { "content-type": "application/json" });
-      response.end(JSON.stringify(value));
+      const payload = JSON.stringify(value);
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(payload),
+      });
+      response.end(payload);
     };
     try {
       const url = _url ?? new URL(request.url ?? "/", "http://runtime");
