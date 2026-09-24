@@ -1,20 +1,21 @@
 /**
- * G5 — Header rules (missing → 400 before FS; query/body cannot override).
+ * G5 — Header rules (missing → 400 before selection/FS; query/body cannot override).
  */
 import { expect, it, vi } from "vitest";
-import * as fs from "node:fs";
-import { PROTOCOL_HEADER, TENANT_HEADER } from "@nylorun/core/compatibility";
+import { TENANT_HEADER } from "@nylorun/core/compatibility";
+import * as paths from "../../src/tenant/paths.js";
 import {
   getJson,
   protocolHeaders,
   startSecurityHost,
 } from "./support.js";
 
-it("G5: missing Nylorun-Tenant returns 400 before filesystem access", async () => {
+it("G5: missing Nylorun-Tenant returns 400 before resolve or tenantPaths", async () => {
   const host = await startSecurityHost();
-  const realpathSpy = vi.spyOn(fs, "realpathSync");
-  const readSpy = vi.spyOn(fs, "readFileSync");
-  const callsBefore = realpathSpy.mock.calls.length + readSpy.mock.calls.length;
+  const resolve = vi.spyOn(host.module, "resolve");
+  // ESM `node:fs` exports are not configurable; spy the path helper Host/module use.
+  const tenantPathsSpy = vi.spyOn(paths, "tenantPaths");
+  const before = tenantPathsSpy.mock.calls.length;
 
   const { status, body } = await getJson(`${host.url}/v1/agents`, {
     headers: protocolHeaders({
@@ -26,18 +27,17 @@ it("G5: missing Nylorun-Tenant returns 400 before filesystem access", async () =
     status: "rejected",
     code: "invalid_request",
   });
-
-  const callsAfter = realpathSpy.mock.calls.length + readSpy.mock.calls.length;
-  expect(callsAfter).toBe(callsBefore);
-  realpathSpy.mockRestore();
-  readSpy.mockRestore();
+  expect(resolve).not.toHaveBeenCalled();
+  expect(tenantPathsSpy.mock.calls.length).toBe(before);
+  resolve.mockRestore();
+  tenantPathsSpy.mockRestore();
 });
 
-it("G5: malformed Nylorun-Tenant returns 400 before resolve/FS", async () => {
+it("G5: malformed Nylorun-Tenant returns 400 before resolve or tenantPaths", async () => {
   const host = await startSecurityHost();
   const resolve = vi.spyOn(host.module, "resolve");
-  const realpathSpy = vi.spyOn(fs, "realpathSync");
-  const before = realpathSpy.mock.calls.length;
+  const tenantPathsSpy = vi.spyOn(paths, "tenantPaths");
+  const before = tenantPathsSpy.mock.calls.length;
 
   const { status } = await getJson(`${host.url}/v1/agents`, {
     headers: protocolHeaders({
@@ -47,9 +47,9 @@ it("G5: malformed Nylorun-Tenant returns 400 before resolve/FS", async () => {
   });
   expect(status).toBe(400);
   expect(resolve).not.toHaveBeenCalled();
-  expect(realpathSpy.mock.calls.length).toBe(before);
+  expect(tenantPathsSpy.mock.calls.length).toBe(before);
   resolve.mockRestore();
-  realpathSpy.mockRestore();
+  tenantPathsSpy.mockRestore();
 });
 
 it("G5: Tenant header cannot be overridden by query or body", async () => {
@@ -59,10 +59,7 @@ it("G5: Tenant header cannot be overridden by query or body", async () => {
     `${host.url}/v1/tenant?${TENANT_HEADER}=${b.id}&tenant=${b.id}`,
     {
       method: "GET",
-      headers: {
-        ...a.headers(),
-        // body ignored on GET; also try POST-style confusion on a GET route
-      },
+      headers: a.headers(),
     },
   );
   expect(status).toBe(200);
@@ -81,12 +78,10 @@ it("G5: Tenant header cannot be overridden by query or body", async () => {
       sandbox: { backend: "virtual" },
     }),
   });
-  // Seed may apply or keep; either way it must be A's Tenant (not B).
   expect([200, 400]).toContain(post.status);
   const aStatus = await getJson(`${host.url}/v1/tenant`, {
     headers: a.headers(),
   });
   expect(aStatus.status).toBe(200);
   expect((aStatus.body as { tenant: { id: string } }).tenant.id).toBe(a.id);
-  void PROTOCOL_HEADER;
 });

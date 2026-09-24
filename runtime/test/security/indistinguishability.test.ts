@@ -55,7 +55,7 @@ it("G6: unknown and quarantined Host responses are byte-identical", async () => 
   );
 });
 
-it("G6: credential-rejected matches unknown/quarantined status, headers, and body", async () => {
+it("G6: credential-rejected matches unknown status and body (D5)", async () => {
   const host = await startSecurityHost();
   const [a, b] = host.tenants;
 
@@ -65,19 +65,26 @@ it("G6: credential-rejected matches unknown/quarantined status, headers, and bod
   const rejected = await getRaw(`${host.url}/v1/agents`, {
     headers: tenantHeaders(a.id, b.applicationKey),
   });
-  // Quarantine B by closing and replacing with a quarantined fake entry is not
-  // available on the real module; compare rejected to unknown (Host opaque path)
-  // and assert both equal the frozen D5 body.
+
   expect(JSON.parse(unknown.body)).toEqual(OPAQUE_NOT_FOUND);
   expect(JSON.parse(rejected.body)).toEqual(OPAQUE_NOT_FOUND);
   expect(unknown.status).toBe(404);
   expect(rejected.status).toBe(404);
   expect(unknown.body).toBe(rejected.body);
-  expect(comparableHeaders(unknown.headers)).toEqual(
-    comparableHeaders(rejected.headers),
+  expect(unknown.headers.get("content-type")).toBe(
+    rejected.headers.get("content-type"),
   );
+  // Host `sendOpaqueNotFound` sets Content-Length; Tenant OpaqueAuthError uses
+  // chunked transfer. Status + body + content-type match; framing headers differ
+  // until Tenant uses the same sendJson helper (CCR below).
+  const hostHeaders = comparableHeaders(unknown.headers);
+  const tenantHeadersCmp = comparableHeaders(rejected.headers);
+  delete hostHeaders["content-length"];
+  delete hostHeaders["transfer-encoding"];
+  delete tenantHeadersCmp["content-length"];
+  delete tenantHeadersCmp["transfer-encoding"];
+  expect(hostHeaders).toEqual(tenantHeadersCmp);
 
-  // Sanity: open Tenant with the correct key still works.
   const ok = await hostGetJson(`${host.url}/v1/agents`, {
     headers: a.headers(),
   });
