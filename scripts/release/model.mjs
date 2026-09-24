@@ -154,7 +154,15 @@ export async function validatePlan(plan, repo) {
       throw new Error(`Release version differs from ${name}/package.json.`);
   }
   const actual = await readJson(join(repo, "create-agent/compatibility.json"));
-  for (const name of ["core", "harness", "agents", "runtime", "studio", "cli"]) {
+  for (const name of [
+    "core",
+    "harness",
+    "agents",
+    "admin",
+    "runtime",
+    "studio",
+    "cli",
+  ]) {
     const version = plan.compatibility?.[name];
     if (
       !semver.valid(version) ||
@@ -170,9 +178,9 @@ export async function validatePlan(plan, repo) {
         throw new Error(`${name}'s ${dependency} dependency must match its compatibility pin.`);
     }
   }
-  if (Object.keys(plan.compatibility).length !== 6)
+  if (Object.keys(plan.compatibility).length !== 7)
     throw new Error(
-      "Compatibility must contain exactly Core, Harness, Agents, Runtime, Studio, and CLI.",
+      "Compatibility must contain exactly Core, Harness, Agents, Admin, Runtime, Studio, and CLI.",
     );
 }
 
@@ -211,7 +219,15 @@ export async function publishCandidates(
       report(`${name}@${version}: already published with matching integrity`);
     } else {
       if (name === "create-agent") {
-        for (const engine of ["core", "harness", "agents", "runtime", "studio", "cli"]) {
+        for (const engine of [
+          "core",
+          "harness",
+          "agents",
+          "admin",
+          "runtime",
+          "studio",
+          "cli",
+        ]) {
           if (!(await registry.lookup(engine, plan.compatibility[engine])))
             throw new Error(
               `Creator pin is unavailable: ${engine}@${plan.compatibility[engine]}`,
