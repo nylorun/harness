@@ -2,6 +2,11 @@ export {
   openTenantRuntime,
   type TenantOpenHooks,
 } from "./tenant/runtime.js";
+export {
+  startEphemeralRuntime,
+  type StartEphemeralRuntimeOptions,
+  type EphemeralRuntime,
+} from "./tenant/ephemeral.js";
 export type {
   TenantConfig,
   TenantHandle,
@@ -18,11 +23,3 @@ export {
   validateImageBytes,
 } from "./media.js";
 export type { RuntimeModelAdapter } from "./contracts.js";
-
-// TENANTS-CCR: temporary re-exports until A2 / dependents migrate
-export {
-  createRuntime,
-  startRuntime,
-  type RuntimeOptions,
-  type CoreRuntime,
-} from "./core/runtime.js";

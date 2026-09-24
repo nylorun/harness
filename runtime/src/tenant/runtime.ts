@@ -26,6 +26,8 @@ import {
   SessionCommandSchema,
   ActionClaimRequestSchema,
   ActionHeartbeatRequestSchema,
+  ResetTenantRequestSchema,
+  SeedTenantConfigRequestSchema,
   type Action,
   type CredentialSelection,
   type ExecutorScope,
@@ -64,6 +66,8 @@ import {
   applicationTokenHashes,
   findPrincipalByTokenHash,
 } from "./principals.js";
+import { resetTenant } from "./reset.js";
+import { buildTenantStatus, seedTenantConfig } from "./status.js";
 import type {
   TenantConfig,
   TenantHandle,
@@ -1669,6 +1673,63 @@ export class TenantRuntime implements TenantHandle {
     if (scope.kind !== "application") {
       this.vault.reject(path.join("/"));
       fail(403, "Application credential required");
+    }
+    if (path.length === 2 && method === "GET")
+      return buildTenantStatus({
+        envelope: this.envelope,
+        config: this.config,
+        store: this.store,
+        registry: this.registry,
+        vault: this.vault,
+        sandbox: this.sandbox,
+        closing: this.closing || this.closed,
+        modelConfigured: this.useVaultModel
+          ? this.vault.getHostModel().configured
+          : true,
+        executorStreams: this.executorStreams,
+      });
+    if (path[2] === "reset" && path.length === 3 && method === "POST") {
+      const body = ResetTenantRequestSchema.parse(await this.body(request));
+      await this.drain(body.activeWork);
+      await resetTenant(
+        {
+          store: this.store,
+          registry: this.registry,
+          sandbox: this.sandbox,
+          paths: this.config.paths,
+          clearSessionState: () => {
+            this.pending.clear();
+            for (const c of this.running.values()) c.abort();
+            this.running.clear();
+            for (const set of this.observers.values())
+              for (const r of set) r.end();
+            this.observers.clear();
+          },
+          clearExecutorStreams: () => {
+            for (const streams of this.executorStreams.values())
+              for (const r of streams) r.end();
+            this.executorStreams.clear();
+          },
+        },
+        body.scope,
+      );
+      // Reset leaves the Tenant open for new work.
+      this.closing = false;
+      return { ok: true };
+    }
+    if (
+      path[2] === "config" &&
+      path[3] === "seed" &&
+      path.length === 4 &&
+      method === "PUT"
+    ) {
+      const body = SeedTenantConfigRequestSchema.parse(
+        await this.body(request),
+      );
+      return seedTenantConfig(
+        { store: this.store, vault: this.vault },
+        body,
+      );
     }
     if (path[2] === "models" && path.length === 3 && method === "GET")
       return hostModelCatalog();

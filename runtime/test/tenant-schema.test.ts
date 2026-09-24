@@ -30,18 +30,19 @@ async function tempRoot(): Promise<string> {
   return root;
 }
 
-it("migrateTenantDatabase creates principals and sets user_version to 1", () => {
+it("migrateTenantDatabase creates principals and sets user_version", () => {
   const db = new DatabaseSync(":memory:");
   expect(schemaVersionOf(db)).toBe(0);
   const result = migrateTenantDatabase(db);
   expect(result).toEqual({ from: 0, to: TENANT_SCHEMA_VERSION });
-  expect(schemaVersionOf(db)).toBe(1);
+  expect(schemaVersionOf(db)).toBe(TENANT_SCHEMA_VERSION);
   const tables = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table'")
     .all()
     .map((row) => String((row as { name: string }).name));
   expect(tables).toContain("principals");
   expect(tables).toContain("executors");
+  expect(tables).toContain("tenant_settings");
   const columns = db.prepare("PRAGMA table_info(executors)").all() as {
     name: string;
   }[];
