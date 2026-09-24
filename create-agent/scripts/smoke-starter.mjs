@@ -436,24 +436,41 @@ try {
       env: missingEnv,
     },
   );
-  await missing.line(readyLine, 90_000);
+  // Require Host banner before Ready so we do not match a spurious "Ready"
+  // during install and then hit a half-booted (or stale) link.
+  const missingHostBanner = await missing.line(hostLine, 120_000);
+  await missing.line(readyLine, 60_000);
   const missingAuth = await readAuth(projects[1]);
   assert.match(
     missingAuth.link.hostUrl,
     /^https?:\/\//,
     "missing-config must write a Host link",
   );
-  const modelStatus = await fetch(
-    `${missingAuth.link.hostUrl}/v1/tenant/model`,
-    {
+  const bannerUrl = missingHostBanner.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
+  assert.equal(
+    missingAuth.link.hostUrl.replace(/\/$/, ""),
+    bannerUrl.replace(/\/$/, ""),
+    "Project link must match the Host banner for this missing-config run",
+  );
+  console.log(`missing-config: GET ${missingAuth.link.hostUrl}/v1/tenant/model`);
+  await missing.ready(`${missingAuth.link.hostUrl}/health`, 30_000);
+  // Belt-and-suspenders: some undici local hangs have ignored AbortSignal.
+  const modelStatus = await Promise.race([
+    fetch(`${missingAuth.link.hostUrl}/v1/tenant/model`, {
       headers: {
         authorization: `Bearer ${missingAuth.credentials.applicationKey}`,
         "Nylorun-Tenant": missingAuth.link.tenantId,
         "Nylorun-Protocol": "2",
       },
       signal: AbortSignal.timeout(15_000),
-    },
-  );
+    }),
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("missing-config model fetch wall timeout (15s)")),
+        15_000,
+      ),
+    ),
+  ]);
   // Read the body once — assert message args are eager, so do not call
   // .text() inside the assertion message and then .json() afterward.
   const modelText = await modelStatus.text();
@@ -468,6 +485,7 @@ try {
     false,
     "expected unconfigured model without fixture/provider env",
   );
+  console.log("missing-config: model configured=false ok");
   await missing.stop();
   await rm(missingHome, { recursive: true, force: true }).catch(() => {});
 
