@@ -1071,28 +1071,103 @@ try {
 
   // ── H2: concurrent Projects through one port; stop one leaves Host + other ──
   {
+    const { localRuntimeBuild, materializeNodeBinary } = await import(
+      "../lib/local-build.mjs"
+    );
     const hostRoot = join(temporary, "host-h2");
     const home = join(temporary, "home-h2");
     await mkdir(home);
     const port = await availablePort();
     const { hostId, adminKey } = await writeHostFiles(hostRoot, { port });
-    const versionDir = await installRuntimeTree(
-      hostRoot,
-      packed,
+    assertNotRealHome(hostRoot);
+
+    // `nylorun`dev` attach always launcher-ups; install a real Runtime build
+    // under NYLORUN_HOME so attach does not hit the public registry (404).
+    const built = await localRuntimeBuild({
+      out: join(root, ".tmp/runtime-builds"),
+      repo: root,
+    });
+    await materializeNodeBinary(built.dir);
+    const launcherBin =
+      process.platform === "win32"
+        ? join(built.dir, "bin", "nylorun-runtime.cmd")
+        : join(built.dir, "bin", "nylorun-runtime");
+    const runLauncher = async (args) => {
+      let command = launcherBin;
+      let argv = ["--home", hostRoot, "--json", ...args];
+      if (process.platform === "win32") {
+        const buildRoot = resolve(dirname(launcherBin), "..");
+        const nodeExe = join(buildRoot, "node", "bin", "node.exe");
+        const entry = join(
+          buildRoot,
+          "lib",
+          "node_modules",
+          "@nylorun",
+          "runtime",
+          "dist",
+          "launcher",
+          "main.js",
+        );
+        try {
+          await access(nodeExe);
+          await access(entry);
+          command = nodeExe;
+          argv = [entry, ...argv];
+        } catch {
+          command = process.env.ComSpec ?? "cmd.exe";
+          argv = [
+            "/d",
+            "/s",
+            "/c",
+            `"${launcherBin}" --home "${hostRoot}" --json ${args.map((a) => `"${a}"`).join(" ")}`,
+          ];
+        }
+      }
+      return new Promise((resolvePromise, reject) => {
+        const child = spawn(command, argv, {
+          env: { ...process.env, NYLORUN_HOME: hostRoot },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.on("data", (c) => {
+          stdout += c.toString("utf8");
+        });
+        child.stderr?.on("data", (c) => {
+          stderr += c.toString("utf8");
+        });
+        child.once("error", reject);
+        child.once("exit", (code) =>
+          resolvePromise({ code: code ?? 1, stdout, stderr }),
+        );
+      });
+    };
+
+    const installed = await runLauncher([
+      "install",
       runtimeVersion,
-    );
-    const require = createRequire(join(versionDir, "package.json"));
-    const entry = require.resolve("@nylorun/runtime/server");
-    // Start Host first so both Projects attach to the shared Host.
-    const hostChild = spawnHost(entry, hostRoot);
-    live.push(() => stopChild(hostChild));
-    const ready = await awaitHostReady(hostChild);
-    assert.ok(ready.url.includes(String(port)) || port > 0);
+      "--from",
+      built.dir,
+    ]);
+    assert.equal(installed.code, 0, installed.stderr || installed.stdout);
+    const up = await runLauncher([
+      "up",
+      "--version",
+      runtimeVersion,
+      "--port",
+      String(port),
+    ]);
+    assert.equal(up.code, 0, up.stderr || up.stdout);
     await waitReady(`http://127.0.0.1:${port}`);
+    live.push(async () => {
+      await runLauncher(["down", "--force"]);
+    });
 
     const makeProject = async (name) => {
       const project = join(temporary, `project-${name}`);
       await mkdir(join(project, "agents"), { recursive: true });
+      await mkdir(join(project, "src"), { recursive: true });
       await writeFile(
         join(project, "package.json"),
         JSON.stringify({
@@ -1105,7 +1180,6 @@ try {
             "@nylorun/cli": `file:${packed.cli}`,
             "@nylorun/core": `file:${packed.core}`,
             "@nylorun/harness": `file:${packed.harness}`,
-            "@nylorun/runtime": `file:${packed.runtime}`,
             tsx: "^4.20.0",
           },
         }),
@@ -1115,6 +1189,16 @@ try {
         `
 import { Agent } from "@nylorun/agents";
 export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
+`,
+      );
+      await writeFile(
+        join(project, "src/main.ts"),
+        `
+import { connectAgents } from "@nylorun/agents";
+import { agents } from "../agents/index.ts";
+const connection = connectAgents({ agents });
+await connection.ready;
+console.log("Ready 1 connected agent");
 `,
       );
       await npm(["install", "--ignore-scripts", "--no-audit", "--no-fund"], {
@@ -1160,10 +1244,7 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
     const startDev = (project) => {
       const child = spawn(
         process.execPath,
-        [
-          join(project, "node_modules/@nylorun/cli/dist/cli.js"),
-          "dev",
-        ],
+        [join(project, "node_modules/@nylorun/cli/dist/cli.js"), "dev"],
         {
           cwd: project,
           env: {
@@ -1171,7 +1252,6 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
             NYLORUN_HOME: hostRoot,
             HOME: home,
             USERPROFILE: home,
-            PORT: String(port),
             NYLORUN_DEV_MODEL: "fixture",
           },
           stdio: ["ignore", "pipe", "pipe"],
@@ -1181,7 +1261,7 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
     };
 
     const waitReadyLine = (child, timeoutMs = 60_000) =>
-      new Promise((resolve, reject) => {
+      new Promise((resolvePromise, reject) => {
         let buffer = "";
         const timer = setTimeout(
           () =>
@@ -1194,9 +1274,12 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
         );
         const onData = (chunk) => {
           buffer += chunk.toString("utf8");
-          if (/Ready\s+\d+ connected agent/i.test(buffer)) {
+          if (
+            /Ready\s+\d+ connected agent/i.test(buffer) ||
+            /Ctrl-C stops this Project only/i.test(buffer)
+          ) {
             cleanup();
-            resolve(buffer);
+            resolvePromise(buffer);
           }
         };
         const cleanup = () => {
@@ -1258,7 +1341,6 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
       200,
     );
     await stopChild(devB);
-    await stopChild(hostChild);
     pass(
       "H2",
       "concurrent Projects share one Host port; stopping one leaves Host and the other Tenant",

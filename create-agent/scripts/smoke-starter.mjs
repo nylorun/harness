@@ -265,24 +265,19 @@ try {
       "Updated order assistant",
     ),
   );
-  // tsx watch restarts the Project under a new ephemeral Host; wait for the link to move.
-  let afterEdit;
+  // tsx watch restarts the Project entry on the same ephemeral Host; wait for
+  // the renamed agent to re-register (link URL stays put).
+  let afterEdit = await readAuth(project);
+  let updated = false;
   for (let attempt = 0; attempt < 200; attempt++) {
     try {
       afterEdit = await readAuth(project);
-      if (afterEdit.link.hostUrl !== beforeEditUrl) break;
-    } catch {
-      /* link may be briefly missing during restart */
-    }
-    afterEdit = undefined;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert.ok(afterEdit, "source edit did not recreate the Project link");
-  const editUrl = afterEdit.link.hostUrl;
-  let updated = false;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try {
-      const response = await fetch(`${editUrl}/v1/agents`, {
+      assert.equal(
+        afterEdit.link.hostUrl,
+        beforeEditUrl,
+        "source edit must keep the same ephemeral Host URL",
+      );
+      const response = await fetch(`${beforeEditUrl}/v1/agents`, {
         headers: {
           authorization: `Bearer ${afterEdit.credentials.applicationKey}`,
           "Nylorun-Tenant": afterEdit.link.tenantId,
@@ -299,11 +294,12 @@ try {
         break;
       }
     } catch {
-      /* retry */
+      /* link/agents may be briefly unavailable during restart */
     }
     await new Promise((r) => setTimeout(r, 100));
   }
   assert.ok(updated, "source edit restarted registry");
+  const editUrl = afterEdit.link.hostUrl;
   await studio.stop();
   await dev.stop();
   await assert.rejects(fetch(`${editUrl}/health`));

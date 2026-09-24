@@ -23,12 +23,13 @@ export function nodeBinaryPath(
 }
 
 /**
- * Spawn the Host on the build's Node. Detached (except win32 process group),
- * stdout/stderr appended to runtime.log when logPath is set.
+ * Spawn the Host on the build's Node. Detached background Hosts survive after
+ * `up` exits (including Windows — without detached the Host dies with the
+ * launcher parent and createTenant sees ECONNREFUSED). stdout/stderr append to
+ * runtime.log when logPath is set.
  */
 export function spawnHostProcess(input: SpawnHostInput): ChildProcess {
-  const platform = input.platform ?? (process.platform as PlatformArch["platform"]);
-  const detached = input.detached && platform !== "win32";
+  const detached = input.detached;
 
   if (input.logPath) {
     const fd = openSync(input.logPath, "a", 0o600);
@@ -58,6 +59,7 @@ export function spawnHostProcess(input: SpawnHostInput): ChildProcess {
     env: input.environment,
     windowsHide: true,
     stdio: ["ignore", "inherit", "inherit"],
+    ...(detached ? { detached: true } : {}),
   });
 }
 
