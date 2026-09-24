@@ -14,7 +14,7 @@ export function emitEvent(sink: OutputSink, event: LauncherEvent): void {
   }
   switch (event.type) {
     case "progress": {
-      const parts = [event.phase];
+      const parts: string[] = [event.phase];
       if (event.message) parts.push(event.message);
       if (event.received !== undefined) {
         parts.push(

@@ -29,6 +29,8 @@ function capture() {
   };
 }
 
+const baselineEnv = { PATH: process.env.PATH };
+
 it("E1-7: --json emits NDJSON result and errors carry remedy; exit 0/1/2", async () => {
   const root = await temporaryRoot();
   roots.push(root);
@@ -48,6 +50,7 @@ it("E1-7: --json emits NDJSON result and errors carry remedy; exit 0/1/2", async
       home: root,
       registry: "http://127.0.0.1:9",
       ...current,
+      baselineEnv,
       sink: ok.sink,
     },
   );
@@ -67,6 +70,7 @@ it("E1-7: --json emits NDJSON result and errors carry remedy; exit 0/1/2", async
       home: root,
       registry: "http://127.0.0.1:9",
       ...current,
+      baselineEnv,
       sink: fail.sink,
     },
   );
@@ -85,6 +89,7 @@ it("E1-7: --json emits NDJSON result and errors carry remedy; exit 0/1/2", async
     home: root,
     registry: "http://127.0.0.1:9",
     ...current,
+    baselineEnv,
     sink: usage.sink,
   });
   expect(code2).toBe(2);
@@ -106,6 +111,7 @@ it("E1-7: status --json matches StatusResult shape", async () => {
     home: root,
     registry: "http://127.0.0.1:9",
     ...current,
+    baselineEnv,
     sink: cap.sink,
   });
   expect(code).toBe(0);

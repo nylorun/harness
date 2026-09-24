@@ -1,9 +1,16 @@
 import { resolve } from "node:path";
 import type { PlatformArch } from "./builds.js";
-import { LauncherError, UsageError } from "./errors.js";
+import { UsageError } from "./errors.js";
 import { install } from "./install.js";
+import { down, restart, run, up, type LifecycleContext } from "./lifecycle.js";
 import { logs } from "./logs.js";
-import { emitError, emitEvent, emitResult, exitCodeFor, type OutputSink } from "./output.js";
+import {
+  emitError,
+  emitEvent,
+  emitResult,
+  exitCodeFor,
+  type OutputSink,
+} from "./output.js";
 import { ensureHostLayout, hostPaths } from "./paths.js";
 import { status } from "./status.js";
 
@@ -11,10 +18,12 @@ export const launcherUsage = `Usage: nylorun-runtime [--home <dir>] [--json] <co
 
 Commands:
   install <version> [--from <dir>]
+  up [--version <v>] [--port <n>]
+  down [--wait [--timeout <s>]] [--force]
+  restart [--version <v>] [--allow-downgrade] [--wait | --force]
+  run [--version <v>] [--port <n>]
   status
-  logs [--lines <n>] [--follow] [--tenant <id> | --all]
-
-Lifecycle commands (up, down, restart, run) land in a later release.`;
+  logs [--lines <n>] [--follow] [--tenant <id> | --all]`;
 
 export interface LauncherRuntimeOptions {
   home: string;
@@ -22,9 +31,15 @@ export interface LauncherRuntimeOptions {
   platform: PlatformArch["platform"];
   arch: PlatformArch["arch"];
   sink: OutputSink;
+  /** Allowlisted ambient baseline from main.ts. */
+  baselineEnv: Readonly<Record<string, string | undefined>>;
   fetchImpl?: typeof fetch;
   /** Abort signal for logs --follow (tests). */
   signal?: AbortSignal;
+  /** Optional lifecycle overrides for tests. */
+  lifecycle?: Partial<
+    Pick<LifecycleContext, "spawnHost" | "onSignal" | "lock" | "fetchImpl">
+  >;
 }
 
 interface Flags {
@@ -40,8 +55,6 @@ function usage(message: string): never {
 }
 
 function parseGlobal(args: readonly string[]): Flags {
-  const booleans = new Set<string>();
-  const values = new Map<string, string>();
   const rest: string[] = [];
   let json = false;
   let home: string | undefined;
@@ -62,7 +75,7 @@ function parseGlobal(args: readonly string[]): Flags {
     }
     rest.push(arg);
   }
-  return { rest, booleans, values, json, home };
+  return { rest, booleans: new Set(), values: new Map(), json, home };
 }
 
 function parseCommandFlags(
@@ -95,6 +108,32 @@ function parseCommandFlags(
     usage(`Unknown flag ${arg}.`);
   }
   return { rest, booleans, values, json: false };
+}
+
+function parsePort(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    usage("--port must be an integer between 0 and 65535.");
+  }
+  return port;
+}
+
+function lifecycleContext(
+  paths: ReturnType<typeof hostPaths>,
+  options: LauncherRuntimeOptions,
+  sink: OutputSink,
+): LifecycleContext {
+  return {
+    paths,
+    platform: options.platform,
+    arch: options.arch,
+    registry: options.registry,
+    baselineEnv: options.baselineEnv,
+    emit: (event) => emitEvent(sink, event),
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    ...(options.lifecycle ?? {}),
+  };
 }
 
 /**
@@ -156,8 +195,7 @@ export async function runLauncher(
       if (flags.booleans.has("--all") && flags.values.has("--tenant")) {
         usage("Use either --tenant or --all, not both.");
       }
-      const linesRaw =
-        flags.values.get("--lines") ?? flags.values.get("-n");
+      const linesRaw = flags.values.get("--lines") ?? flags.values.get("-n");
       let lines: number | undefined;
       if (linesRaw !== undefined) {
         lines = Number(linesRaw);
@@ -178,17 +216,99 @@ export async function runLauncher(
       return 0;
     }
 
-    if (
-      verb === "up" ||
-      verb === "down" ||
-      verb === "restart" ||
-      verb === "run"
-    ) {
-      throw new LauncherError(
-        "install_failed",
-        `Command "${verb}" is not available in this launcher build yet.`,
-        "Upgrade to a Runtime build that includes lifecycle commands.",
-      );
+    if (verb === "up") {
+      const flags = parseCommandFlags(rest, {
+        values: ["--version", "--port", "--from"],
+      });
+      if (flags.rest.length) usage("up takes no positional arguments.");
+      const port = parsePort(flags.values.get("--port"));
+      const result = await up(lifecycleContext(paths, options, sink), {
+        ...(flags.values.has("--version")
+          ? { version: flags.values.get("--version") }
+          : {}),
+        ...(port !== undefined ? { port } : {}),
+        ...(flags.values.has("--from")
+          ? { from: resolve(flags.values.get("--from")!) }
+          : {}),
+      });
+      emitResult(sink, { ...result });
+      return 0;
+    }
+
+    if (verb === "down") {
+      const flags = parseCommandFlags(rest, {
+        booleans: ["--wait", "--force"],
+        values: ["--timeout"],
+      });
+      if (flags.rest.length) usage("down takes no positional arguments.");
+      let timeoutMs: number | undefined;
+      if (flags.values.has("--timeout")) {
+        const seconds = Number(flags.values.get("--timeout"));
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          usage("--timeout must be a positive number of seconds.");
+        }
+        timeoutMs = seconds * 1000;
+      }
+      const result = await down(lifecycleContext(paths, options, sink), {
+        wait: flags.booleans.has("--wait"),
+        force: flags.booleans.has("--force"),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      });
+      emitResult(sink, { ...result });
+      return 0;
+    }
+
+    if (verb === "restart") {
+      const flags = parseCommandFlags(rest, {
+        booleans: ["--allow-downgrade", "--wait", "--force"],
+        values: ["--version", "--timeout", "--from", "--port"],
+      });
+      if (flags.rest.length) usage("restart takes no positional arguments.");
+      let timeoutMs: number | undefined;
+      if (flags.values.has("--timeout")) {
+        const seconds = Number(flags.values.get("--timeout"));
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          usage("--timeout must be a positive number of seconds.");
+        }
+        timeoutMs = seconds * 1000;
+      }
+      const port = parsePort(flags.values.get("--port"));
+      const result = await restart(lifecycleContext(paths, options, sink), {
+        ...(flags.values.has("--version")
+          ? { version: flags.values.get("--version") }
+          : {}),
+        allowDowngrade: flags.booleans.has("--allow-downgrade"),
+        wait: flags.booleans.has("--wait"),
+        force: flags.booleans.has("--force"),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(flags.values.has("--from")
+          ? { from: resolve(flags.values.get("--from")!) }
+          : {}),
+        ...(port !== undefined ? { port } : {}),
+      });
+      emitResult(sink, { ...result });
+      return 0;
+    }
+
+    if (verb === "run") {
+      const flags = parseCommandFlags(rest, {
+        values: ["--version", "--port", "--from"],
+      });
+      if (flags.rest.length) usage("run takes no positional arguments.");
+      const port = parsePort(flags.values.get("--port"));
+      const ctx = lifecycleContext(paths, options, sink);
+      const result = await run(ctx, {
+        ...(flags.values.has("--version")
+          ? { version: flags.values.get("--version") }
+          : {}),
+        ...(port !== undefined ? { port } : {}),
+        ...(flags.values.has("--from")
+          ? { from: resolve(flags.values.get("--from")!) }
+          : {}),
+        onReady: (ready) => emitResult(sink, { ...ready }),
+      });
+      void result;
+      return 0;
     }
 
     usage(`Unknown command ${verb}.`);
