@@ -1163,8 +1163,6 @@ export const agents = [Agent({ id: "shared-agent", name: "${name}" })];
         [
           join(project, "node_modules/@nylorun/cli/dist/cli.js"),
           "dev",
-          "--no-studio",
-          "--no-autostart",
         ],
         {
           cwd: project,

@@ -81,11 +81,17 @@ export async function main(): Promise<void> {
   const baseline = baselineEnvironment(process.env);
   void hostProcessEnvironment(baseline, config, paths);
 
+  // Credential-free release/dev fixture (create-agent / CI smokes). Requires
+  // ephemeral mode so fixture models are allowed (Tenants D10).
+  const useFixture = process.env.NYLORUN_DEV_MODEL?.trim() === "fixture";
   const configFor = configForFactory({
     hostRoot,
     hostConfig: config,
     logger,
     baseline,
+    ...(useFixture
+      ? { mode: "ephemeral" as const, model: { kind: "fixture" as const } }
+      : {}),
   });
   const openRuntime = (tenantConfig: TenantConfig) =>
     openTenantRuntime(tenantConfig);

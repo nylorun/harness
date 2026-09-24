@@ -204,7 +204,11 @@ export async function bootstrapDesktop({
     }
     if (install.exitCode !== 0 || !install.result) {
       throw new Error(
-        `bootstrap install failed (exit ${install.exitCode}): ${install.stderr || install.stdout || "no result event"}`,
+        `bootstrap install failed (exit ${install.exitCode}): ${
+          install.stderr ||
+          install.stdout ||
+          `no result event (events=${install.events.length})`
+        }`,
       );
     }
     return install.result;

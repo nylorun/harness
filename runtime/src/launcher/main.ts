@@ -44,6 +44,10 @@ function baselineFromEnv(
       out[key] = env[key];
     }
   }
+  // Release/dev smokes set NYLORUN_DEV_MODEL=fixture; pass through so the Host
+  // can open Tenants with the credential-free fixture provider.
+  const devModel = env.NYLORUN_DEV_MODEL?.trim();
+  if (devModel) out.NYLORUN_DEV_MODEL = devModel;
   return out;
 }
 
@@ -70,12 +74,16 @@ export async function main(
 }
 
 const entry = process.argv[1];
+// Windows argv paths use backslashes; normalize before suffix checks so
+// `node.exe …\launcher\main.js` still counts as the CLI entry (desktop
+// contract / .cmd shim both invoke this file that way).
+const normalizedEntry = entry?.replaceAll("\\", "/");
 const isEntry =
-  entry !== undefined &&
-  (entry.endsWith("launcher/main.ts") ||
-    entry.endsWith("launcher/main.js") ||
-    entry.endsWith("nylorun-runtime") ||
-    entry.endsWith("nylorun-runtime.cmd"));
+  normalizedEntry !== undefined &&
+  (normalizedEntry.endsWith("launcher/main.ts") ||
+    normalizedEntry.endsWith("launcher/main.js") ||
+    normalizedEntry.endsWith("nylorun-runtime") ||
+    normalizedEntry.endsWith("nylorun-runtime.cmd"));
 
 if (isEntry) {
   main().then((code) => {

@@ -321,6 +321,8 @@ async function upLocked(
     home: ctx.paths.home,
     tmp: ctx.paths.tmp,
   });
+  const devModel = ctx.baselineEnv.NYLORUN_DEV_MODEL?.trim();
+  if (devModel) environment.NYLORUN_DEV_MODEL = devModel;
 
   const spawnFn = ctx.spawnHost ?? spawnHostProcess;
   const url = hostUrl(config);
