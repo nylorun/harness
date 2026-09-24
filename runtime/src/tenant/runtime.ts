@@ -1329,7 +1329,6 @@ export class TenantRuntime implements TenantHandle {
             agentId: record.agentId,
             implementationVersion: record.implementationVersion,
             rotated,
-            // TENANTS-CCR: RegisterExecutorsResponseSchema lacks replacedBy; wire still returns it (A6).
             ...(replacedByDifferent
               ? { replacedBy: "different-credential" as const }
               : {}),

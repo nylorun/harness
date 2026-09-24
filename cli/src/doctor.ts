@@ -1,4 +1,5 @@
-import { release } from "node:os";
+import { release, tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   probeSandboxBackends,
   type SandboxSelectionReport,
@@ -12,7 +13,10 @@ const LABEL: Record<string, string> = {
 
 /** `nylorun doctor sandbox`: what this machine offers and what a Runtime here would pick. */
 export async function doctorSandbox(options: { json: boolean }): Promise<void> {
-  const report = await probeSandboxBackends();
+  // TENANTS-I1: probe root is CLI-local until WS-F/E pass Host/Tenant tmp.
+  const report = await probeSandboxBackends({
+    root: join(tmpdir(), "nylorun-doctor-sandbox"),
+  });
   if (options.json) {
     console.log(JSON.stringify({ platform: platform(), ...report }, null, 2));
     return;

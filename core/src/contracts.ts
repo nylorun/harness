@@ -613,6 +613,7 @@ export const RegisterExecutorsResponseSchema = z.object({
       agentId: z.string(),
       implementationVersion: z.string(),
       rotated: z.boolean(),
+      replacedBy: z.literal("different-credential").optional(),
     })
   ),
 });
