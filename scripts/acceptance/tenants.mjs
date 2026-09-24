@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn, fork } from "node:child_process";
 import {
+  access,
   cp,
   mkdir,
   mkdtemp,
@@ -18,7 +19,7 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir, homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { root, npm, run, readJson } from "../lib/repo.mjs";
 import { availablePort } from "../lib/development.mjs";
@@ -370,6 +371,7 @@ try {
     "core",
     "harness",
     "agents",
+    "admin",
     "runtime",
     "cli",
   ]);
@@ -736,7 +738,7 @@ try {
 
     // Compatible CLI: different package version, same protocol.
     const okCli = join(temporary, "cli-ok");
-    await installConsumer(okCli, packed, ["core", "agents", "runtime", "cli"]);
+    await installConsumer(okCli, packed, ["core", "agents", "admin", "runtime", "cli"]);
     const okPkg = join(okCli, "node_modules/@nylorun/cli/package.json");
     const okManifest = await readJson(okPkg);
     okManifest.version = "9.9.9-acceptance";
@@ -759,7 +761,7 @@ try {
 
     // Outside-range CLI: patch PROTOCOL_VERSION and refuse before mutation.
     const badCli = join(temporary, "cli-bad");
-    await installConsumer(badCli, packed, ["core", "agents", "runtime", "cli"]);
+    await installConsumer(badCli, packed, ["core", "agents", "admin", "runtime", "cli"]);
     const badCore = join(
       badCli,
       "node_modules/@nylorun/core/dist/compatibility.js",
@@ -818,100 +820,117 @@ try {
     );
   }
 
-  // ── H7: concurrent runtime up / offline start / failed install ──
+  // ── H7: concurrent launcher install --from; offline Host; failed version ──
   {
+    const { localRuntimeBuild, materializeNodeBinary } = await import(
+      "../lib/local-build.mjs"
+    );
     const hostRoot = join(temporary, "host-h7");
     await writeHostFiles(hostRoot, { port: await availablePort() });
-    const consumer = join(temporary, "cli-h7");
-    await installConsumer(consumer, packed, [
-      "core",
-      "agents",
-      "runtime",
-      "cli",
-      "harness",
-    ]);
-    const installUrl = pathToFileURL(
-      join(consumer, "node_modules/@nylorun/cli/dist/host/install.js"),
-    ).href;
-    const rootUrl = pathToFileURL(
-      join(consumer, "node_modules/@nylorun/cli/dist/host/root.js"),
-    ).href;
-    const { ensureInstalled, verifyInstalled } = await import(installUrl);
-    const { hostPaths, ensureHostLayout } = await import(rootUrl);
-    const paths = hostPaths(hostRoot);
-    await ensureHostLayout(paths);
-
-    let installs = 0;
-    const installer = async ({ stagingDir, version }) => {
-      installs += 1;
-      await new Promise((r) => setTimeout(r, 80));
-      await mkdir(stagingDir, { recursive: true });
-      await writeFile(
-        join(stagingDir, "package.json"),
-        JSON.stringify({ private: true }),
-      );
-      await npm(
-        [
-          "install",
-          "--omit=dev",
-          "--ignore-scripts",
-          "--no-audit",
-          "--no-fund",
-          packed.core,
-          packed.harness,
-          packed.runtime,
-        ],
-        { cwd: stagingDir, capture: true },
-      );
-      const pkgPath = join(
-        stagingDir,
-        "node_modules/@nylorun/runtime/package.json",
-      );
-      const pkg = await readJson(pkgPath);
-      pkg.version = version;
-      await writeFile(pkgPath, JSON.stringify(pkg, null, 2));
-    };
-
-    const version = runtimeVersion;
-    const [a, b] = await Promise.all([
-      ensureInstalled(paths, { version, installer, pollMs: 20 }),
-      ensureInstalled(paths, { version, installer, pollMs: 20 }),
-    ]);
-    assert.equal(installs, 1);
-    assert.equal(a.versionDir, b.versionDir);
-    verifyInstalled(a.versionDir, version);
-
-    // Verified install starts with npm_config_offline=true.
-    const child = spawnHost(a.entry, hostRoot, {
-      npm_config_offline: "true",
+    assertNotRealHome(hostRoot);
+    const built = await localRuntimeBuild({
+      out: join(root, ".tmp/runtime-builds"),
+      repo: root,
     });
-    live.push(() => stopChild(child));
-    const ready = await awaitHostReady(child);
-    await waitReady(ready.url);
-    assert.equal(
-      (await fetch(`${ready.url}/health`)).status,
-      200,
+    await materializeNodeBinary(built.dir);
+    const launcher =
+      process.platform === "win32"
+        ? join(built.dir, "bin", "nylorun-runtime.cmd")
+        : join(built.dir, "bin", "nylorun-runtime");
+    const runLauncher = async (args) => {
+      // Prefer build node + launcher entry on Windows so .cmd spawn does not
+      // hit EINVAL / shell-mangled NDJSON (same approach as desktop contract).
+      let command = launcher;
+      let argv = ["--home", hostRoot, "--json", ...args];
+      if (process.platform === "win32") {
+        const buildRoot = resolve(dirname(launcher), "..");
+        const nodeExe = join(buildRoot, "node", "bin", "node.exe");
+        const entry = join(
+          buildRoot,
+          "lib",
+          "node_modules",
+          "@nylorun",
+          "runtime",
+          "dist",
+          "launcher",
+          "main.js",
+        );
+        try {
+          await access(nodeExe);
+          await access(entry);
+          command = nodeExe;
+          argv = [entry, ...argv];
+        } catch {
+          command = process.env.ComSpec ?? "cmd.exe";
+          argv = [
+            "/d",
+            "/s",
+            "/c",
+            `"${launcher}" --home "${hostRoot}" --json ${args.map((a) => `"${a}"`).join(" ")}`,
+          ];
+        }
+      }
+      return new Promise((resolvePromise, reject) => {
+        const child = spawn(command, argv, {
+          env: { ...process.env, NYLORUN_HOME: hostRoot },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.on("data", (c) => {
+          stdout += c.toString("utf8");
+        });
+        child.stderr?.on("data", (c) => {
+          stderr += c.toString("utf8");
+        });
+        child.once("error", reject);
+        child.once("exit", (code) =>
+          resolvePromise({ code: code ?? 1, stdout, stderr }),
+        );
+      });
+    };
+    const [a, b] = await Promise.all([
+      runLauncher(["install", runtimeVersion, "--from", built.dir]),
+      runLauncher(["install", runtimeVersion, "--from", built.dir]),
+    ]);
+    assert.equal(a.code, 0, a.stderr || a.stdout);
+    assert.equal(b.code, 0, b.stderr || b.stdout);
+    const installed = await readdir(join(hostRoot, "runtime"));
+    assert.ok(
+      installed.includes(runtimeVersion),
+      `expected ${runtimeVersion} under runtime/, got ${installed.join(",")}`,
     );
 
-    // Unavailable version leaves the running Host and verified install untouched.
-    await assert.rejects(
-      () =>
-        ensureInstalled(paths, {
-          version: "0.0.0-does-not-exist",
-          installer: async () => {
-            throw new Error("registry unavailable");
-          },
-        }),
-      /registry unavailable|failed|CliError|install/,
-    );
-    assert.ok(
-      (await readdir(join(hostRoot, "runtime"))).includes(version),
-    );
-    assert.equal((await fetch(`${ready.url}/ready`)).status, 200);
-    await stopChild(child);
+    const up = await runLauncher(["up", "--version", runtimeVersion]);
+    assert.equal(up.code, 0, up.stderr || up.stdout);
+    const upEvent = up.stdout
+      .split(/\r?\n/)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return undefined;
+        }
+      })
+      .find((event) => event?.type === "result");
+    assert.ok(upEvent?.url, up.stdout);
+    await waitReady(upEvent.url);
+    assert.equal((await fetch(`${upEvent.url}/health`)).status, 200);
+
+    const failed = await runLauncher([
+      "install",
+      "0.0.0-does-not-exist",
+      "--from",
+      join(temporary, "missing-build"),
+    ]);
+    assert.notEqual(failed.code, 0);
+    assert.ok((await readdir(join(hostRoot, "runtime"))).includes(runtimeVersion));
+    assert.equal((await fetch(`${upEvent.url}/ready`)).status, 200);
+    await runLauncher(["down", "--force"]);
     pass(
       "H7",
-      "concurrent install once; verified install starts offline; failed version leaves Host untouched",
+      "concurrent install --from; Host starts; failed version leaves Host untouched",
     );
   }
 
@@ -923,6 +942,7 @@ try {
     await installConsumer(project, packed, [
       "core",
       "agents",
+      "admin",
       "runtime",
       "cli",
       "harness",
@@ -1081,6 +1101,7 @@ try {
           private: true,
           dependencies: {
             "@nylorun/agents": `file:${packed.agents}`,
+            "@nylorun/admin": `file:${packed.admin}`,
             "@nylorun/cli": `file:${packed.cli}`,
             "@nylorun/core": `file:${packed.core}`,
             "@nylorun/harness": `file:${packed.harness}`,

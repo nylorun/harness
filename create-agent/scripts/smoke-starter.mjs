@@ -21,10 +21,16 @@ import { chromium } from "playwright-core";
 import { root, npmCli, run } from "../../scripts/lib/repo.mjs";
 import { ProcessGroup } from "../../scripts/lib/processes.mjs";
 import { availablePort } from "../../scripts/lib/development.mjs";
+import {
+  localRuntimeBuild,
+  materializeNodeBinary,
+} from "../../scripts/lib/local-build.mjs";
+import { startLocalRegistry } from "../../scripts/lib/local-registry.mjs";
 
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-release-"));
 const group = new ProcessGroup();
 let browser;
+let registry;
 const projects = [];
 const tarballs = process.env.NYLORUN_STACK_TARBALLS
   ? JSON.parse(await readFile(process.env.NYLORUN_STACK_TARBALLS, "utf8"))
@@ -46,6 +52,13 @@ const studioOnLine = (l) => /^Studio on http/.test(l);
 const hostLine = (l) => /^\s*Host\s+http/.test(l);
 
 try {
+  const built = await localRuntimeBuild({
+    out: join(root, ".tmp/runtime-builds"),
+    repo: root,
+  });
+  await materializeNodeBinary(built.dir);
+  registry = await startLocalRegistry({ builds: [built] });
+
   const artifacts = join(temporary, "artifacts");
   await mkdir(artifacts);
   for (const name of names) {
@@ -127,12 +140,15 @@ try {
 
   const project = projects[0];
   const home = await mkdtemp(join(tmpdir(), "nylorun-release-home-"));
+  const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-release-host-"));
   // Fixture models are only allowed on ephemeral Hosts; release smoke uses
   // `--ephemeral` so NYLORUN_DEV_MODEL=fixture can drive Studio and SDK turns.
   const env = {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
+    NYLORUN_HOME: hostRoot,
+    NYLORUN_REGISTRY: registry.url,
     NYLORUN_DEV_MODEL: "fixture",
   };
   const readAuth = async (cwd) => {
@@ -415,5 +431,6 @@ try {
 } finally {
   await browser?.close();
   await group.close();
+  await registry?.close?.();
   await rm(temporary, { recursive: true, force: true });
 }

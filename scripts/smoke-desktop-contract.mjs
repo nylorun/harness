@@ -25,7 +25,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { Agent, connectAgents, createClient, RuntimeError } from "@nylorun/agents";
@@ -185,6 +185,9 @@ export async function bootstrapDesktop({
     }
     await extractTarball(tarballPath, staging);
     await rm(tarballPath, { force: true });
+    // npm pack can drop absolute Node symlinks; ensure node.exe|node exists
+    // before invoking the extracted launcher on Windows runners.
+    await materializeNodeBinary(staging, platform);
 
     const extractedLauncher = join(staging, "bin", launcherBinName(platform));
     await access(extractedLauncher);
@@ -236,19 +239,45 @@ export async function runLauncherProcess(launcherPath, home, args, extraEnv = {}
     NYLORUN_HOME: home,
     ...extraEnv,
   };
-  // Node on Windows rejects spawning `.cmd` without a shell (EINVAL / CVE-2024-27980).
-  const windowsCmd =
-    process.platform === "win32" &&
-    /\.cmd$/i.test(launcherPath);
-  const child = spawn(
-    launcherPath,
-    ["--home", home, "--json", ...args],
-    {
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-      ...(windowsCmd ? { shell: true } : {}),
-    },
-  );
+  // Node on Windows rejects spawning `.cmd` without a shell (EINVAL /
+  // CVE-2024-27980). Prefer the build's node.exe + launcher entry so stdout
+  // stays clean NDJSON (shell:true wraps/scrubs output on runners).
+  let command = launcherPath;
+  let argv = ["--home", home, "--json", ...args];
+  if (process.platform === "win32" && /\.cmd$/i.test(launcherPath)) {
+    const buildRoot = resolve(dirname(launcherPath), "..");
+    const nodeExe = join(buildRoot, "node", "bin", "node.exe");
+    const entry = join(
+      buildRoot,
+      "lib",
+      "node_modules",
+      "@nylorun",
+      "runtime",
+      "dist",
+      "launcher",
+      "main.js",
+    );
+    try {
+      await access(nodeExe);
+      await access(entry);
+      command = nodeExe;
+      argv = [entry, ...argv];
+    } catch {
+      // Fall back to cmd.exe /c for non-standard layouts (e.g. fixtures).
+      command = process.env.ComSpec ?? "cmd.exe";
+      argv = [
+        "/d",
+        "/s",
+        "/c",
+        `"${launcherPath}" --home "${home}" --json ${args.map((a) => `"${a}"`).join(" ")}`,
+      ];
+    }
+  }
+  const child = spawn(command, argv, {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (chunk) => {

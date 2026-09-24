@@ -35,6 +35,10 @@ afterEach(async () => {
       /* ignore */
     }
   }
+  // Give Windows a beat to release node.exe file locks before rmdir.
+  if (process.platform === "win32" && roots.length > 0) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
   await Promise.all(roots.splice(0).map(removeRoot));
 });
 
@@ -238,7 +242,9 @@ it("E2-12: run emits ready then stops on signal", async () => {
 
 it("E2-14: forceKillHost and nodeBinaryPath cover Windows vs POSIX shapes", () => {
   expect(nodeBinaryPath("/build", "win32")).toMatch(/node\.exe$/);
-  expect(nodeBinaryPath("/build", "linux")).toMatch(/bin\/node$/);
+  // join() uses the host OS separator even when the target platform is linux,
+  // so accept either slash on a Windows runner asserting a linux layout.
+  expect(nodeBinaryPath("/build", "linux")).toMatch(/bin[/\\]node$/);
   // POSIX path: killing a nonexistent PID must not throw.
   expect(() => forceKillHost(999_999_997, "linux")).not.toThrow();
 });
