@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import {
-  AdminHostStatusSchema,
+  AdminStatusSchema,
   CreateTenantRequestSchema,
 } from "@nylorun/core/contracts";
 import { PROTOCOL_VERSION } from "@nylorun/core/compatibility";
@@ -110,8 +110,9 @@ it("C4/C5: admin create, list, status, delete and host status", async () => {
     headers: adminHeaders(),
   });
   expect(host.status).toBe(200);
-  const parsed = AdminHostStatusSchema.parse(host.body);
-  expect(parsed.hostId).toBe(config.hostId);
+  const parsed = AdminStatusSchema.parse(host.body);
+  expect(parsed.service).toBe("nylorun-runtime");
+  expect(parsed.host?.hostId).toBe(config.hostId);
   expect(parsed.version).toBeTruthy();
   expect(parsed.protocol.min).toBe(PROTOCOL_VERSION);
   expect(parsed.tenants).toHaveLength(1);
@@ -153,7 +154,7 @@ it("C5: GET /v1/admin/host uses only list() and summarize()", async () => {
   const host = await getJson(`${url}/v1/admin/host`, {
     headers: adminHeaders(),
   });
-  const parsed = AdminHostStatusSchema.parse(host.body);
+  const parsed = AdminStatusSchema.parse(host.body);
   expect(parsed.aggregate.runningSessions).toBe(2);
   expect(parsed.aggregate.connectedExecutors).toBe(1);
   expect(parsed.aggregate.pendingActions).toBe(3);

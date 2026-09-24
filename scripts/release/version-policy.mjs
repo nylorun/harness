@@ -145,13 +145,13 @@ export function planVersions(
   for (const name of packages) core(before[name]);
   if (
     !compatibility ||
-    Object.keys(compatibility).length !== 6 ||
-    ["core", "harness", "agents", "runtime", "studio", "cli"].some(
+    Object.keys(compatibility).length !== 7 ||
+    ["core", "harness", "agents", "admin", "runtime", "studio", "cli"].some(
       (name) => !semver.valid(compatibility[name]),
     )
   )
     throw new Error(
-      "Compatibility must contain exactly six valid package pins.",
+      "Compatibility must contain exactly seven valid package pins.",
     );
   const changesets = [...pending];
   const bumps = new Map();
