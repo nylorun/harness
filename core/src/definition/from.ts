@@ -17,6 +17,7 @@ import { schemaFromJSON } from "./schema-json.js";
 import { copyJsonObject, deepFreeze } from "../utils/immutable.js";
 import type { BoundMiddleware } from "./bound.js";
 import { HOOK_POINTS, hasHook, hookListIssue } from "./hooks.js";
+import { delegateFromManifest, delegateOf } from "./delegate.js";
 
 /** A tool that exists for one execution and is not part of the hashed manifest. */
 export interface SessionToolRef {
@@ -60,7 +61,9 @@ export function agentFrom<Info = unknown>(
             capability.id,
             advertised.map(
               (tool) =>
-                implementations[capability.id]?.tools?.[tool.name] ?? tool
+                (delegateOf(tool)
+                  ? tool
+                  : implementations[capability.id]?.tools?.[tool.name]) ?? tool
             )
           );
         if (capability.instructions)
@@ -82,7 +85,7 @@ export function agentFrom<Info = unknown>(
         tools:
           capability.tools !== undefined
             ? tools.map((tool) => {
-                const live = impl.tools?.[tool.name];
+                const live = delegateOf(tool) ? tool : impl.tools?.[tool.name];
                 if (!live)
                   throw new HarnessError(
                     "agent.build-failed",
@@ -191,6 +194,13 @@ function resolveTools(
   if (!capability.tools?.length) return [];
   return capability.tools.flatMap((declared) => {
     const live = tools?.[declared.name];
+    // The engine runs agents used as tools; an authored delegate keeps its local child.
+    if (declared.agent)
+      return [
+        live && delegateOf(live)?.manifest.id === declared.agent.id
+          ? live
+          : delegateFromManifest(declared.agent, declared),
+      ];
     if (live) return [live];
     if (
       (declared.name === "load_skill" || declared.name === "read_skill_resource") &&
@@ -492,5 +502,8 @@ function normalizeTool(tool: ToolManifest): ToolManifest {
     ...(tool.outputSchema === undefined
       ? {}
       : { outputSchema: tool.outputSchema }),
+    ...(tool.agent === undefined
+      ? {}
+      : { agent: normalizeManifest(tool.agent as unknown as JsonObject) }),
   });
 }

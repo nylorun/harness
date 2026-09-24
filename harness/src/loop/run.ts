@@ -10,6 +10,7 @@ import type { ToolResult } from "@nylorun/core/define";
 import { createId } from "../utils/ids.js";
 import { copyJson } from "@nylorun/core/define";
 import { dispatchPlan } from "./dispatch.js";
+import type { ExecuteInternals } from "./delegation.js";
 import { createInvocation, type Invocation } from "./invocation.js";
 import { openExecution, validateRunOptions } from "./options.js";
 import { applyResume } from "./resume.js";
@@ -27,6 +28,7 @@ import type { TurnOutputContract } from "@nylorun/core/define";
 export async function execute(
   agent: AgentDefinition,
   options: RunOptions<any>,
+  internals: ExecuteInternals = {},
 ): Promise<RunResult<JsonValue>> {
   validateRunOptions(options);
   const opened = openExecution(agent, options);
@@ -48,7 +50,7 @@ export async function execute(
       "There is no matching paused operation for this input",
     );
   }
-  const invocation = createInvocation({ agent, options, state, definitions });
+  const invocation = createInvocation({ agent, options, state, definitions, internals });
   const { signal, observe, record } = invocation;
   const finish = (result: FinishInput) => finishInvocation(invocation, result);
 

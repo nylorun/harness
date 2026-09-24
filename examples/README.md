@@ -48,7 +48,7 @@ The creator owns the shell files listed in `.scaffold-manifest.json`, including 
 | **Interactions**    | `Ask me what to name the note, then save it.`                                                   | Studio asks a question, then asks for approval before `write_note`.                                                                                                 |
 | **Local MCP**       | `Use the MCP tool to add 12 and 30.`                                                            | The bundled stdio MCP server is discovered, called, and closed cleanly when the server stops.                                                                       |
 | **Code Mode**       | `Calculate 100 / 4, convert that many celsius to fahrenheit, and include the current UTC time.` | One `run_code` call. The program uses `await tools.*` and returns one object (25 °C → 77 °F plus `iso`).                                                            |
-| **Subagents**       | `Ask the tool-use specialist to calculate 19 * 7.`                                              | A `delegate` call runs the child agent; the parent reports the specialist's answer. The other specialists are `instructions` (format-only) and `skills` (SKILL.md). |
+| **Subagents**       | `Ask the tool-use specialist to calculate 19 * 7.`                                              | A `tool-use` call runs that agent with a fresh context; the parent reports its answer. Studio shows the delegation and the child's own tool calls. The other agents are `instructions` (format-only) and `skills` (SKILL.md). |
 | **Coding Agent**    | `Add a goodbye function next to hello and show the file.`                                       | After Codex preflight and approval, `codex exec` runs in a temporary workspace.                                                                                     |
 
 Guardrails covers four policy surfaces. After the publish-deny prompt above:
@@ -126,7 +126,7 @@ Capability modules stay small:
 - [guardrails](./agents/guardrails/capability.ts) maps OpenAI-style input, output, tool-input, and tool-output checks onto middleware timing.
 - [skills](./agents/skills/capability.ts) is one `.use(await skills())` call: a SKILL.md catalog plus `load_skill`.
 - [codex](./agents/coding-agent/capability.ts) wraps a host runtime. For an isolated machine, use `.use(sandbox())` as in [analyst](./agents/release/analyst.ts).
-- [subagents](./agents/subagents/capability.ts) runs another `BuiltAgent` through a delegate tool.
+- [subagents](./agents/subagents/agent.ts) puts three example agents in `tools`; each runs with a fresh context and returns only its answer.
 
 Add or remove skills on an agent with one capability. Author `name/SKILL.md` (frontmatter `name` + `description`) under [agents/skills/catalog](./agents/skills/catalog), then:
 

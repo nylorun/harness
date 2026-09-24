@@ -9,6 +9,8 @@ import type { SkillRecord } from "../types/middleware.js";
 import { bindAgent } from "./bind-agent.js";
 import { createManifest } from "./manifest.js";
 import { createSkillTools } from "./skill-tools.js";
+import { DELEGATE_NAME_PATTERN, delegateOf, delegatesOf } from "./delegate.js";
+import { canonical } from "../utils/canonical.js";
 
 type BuildResult<Agent> =
   | {
@@ -144,6 +146,8 @@ export function assembleAgent(
       else toolOwners.set(entry.name, item.id);
     }
 
+  diagnostics.push(...delegationDiagnostics(skilled.items));
+
   if (diagnostics.length)
     return Object.freeze({
       ok: false,
@@ -163,6 +167,64 @@ export function assembleAgent(
   });
   const agent = bindAgent(frozenMiddleware, manifest, identity, dynamics);
   return Object.freeze({ ok: true, agent, manifest });
+}
+
+/** v1 delegation is one level deep and non-interactive; anything else fails the build by name. */
+function delegationDiagnostics(items: readonly BoundMiddleware[]): BuildDiagnostic[] {
+  const found: BuildDiagnostic[] = [];
+  const sandboxes = new Set<string>();
+  for (const item of items) if (item.sandbox) sandboxes.add(canonical(item.sandbox));
+  for (const item of items)
+    for (const tool of item.tools ?? []) {
+      const delegate = delegateOf(tool);
+      if (!delegate) continue;
+      const child = delegate.manifest;
+      const extra = { toolName: tool.name };
+      if (!DELEGATE_NAME_PATTERN.test(child.id))
+        found.push(
+          diagnostic(
+            "delegation.invalid-name",
+            `Agent '${child.id}' is used as a tool, so its id must be 1-64 letters, digits, '_' or '-'`,
+            extra
+          )
+        );
+      if (!child.description?.trim())
+        found.push(
+          diagnostic(
+            "delegation.description-required",
+            `Agent '${child.id}' is used as a tool by capability '${item.id}' and needs a description: the parent's model reads it to decide when to delegate`,
+            extra
+          )
+        );
+      const nested = delegatesOf(child)[0];
+      if (nested)
+        found.push(
+          diagnostic(
+            "delegation.nested",
+            `'${child.id}' delegates to '${nested.manifest.id}'; nested delegation is not supported yet`,
+            extra
+          )
+        );
+      for (const childTool of delegate.agent?.getBinding().tools ?? [])
+        if (childTool.approval)
+          found.push(
+            diagnostic(
+              "delegation.approval-unsupported",
+              `'${childTool.name}' in '${child.id}' needs approval; agents used as tools can't ask for it yet, so keep it on the parent`,
+              extra
+            )
+          );
+      for (const capability of child.capabilities)
+        if (capability.sandbox) sandboxes.add(canonical(capability.sandbox));
+    }
+  if (sandboxes.size > 1)
+    found.push(
+      diagnostic(
+        "sandbox.mismatch",
+        "An agent and the agents it uses as tools share one sandbox, so every sandbox they declare must be identical"
+      )
+    );
+  return found;
 }
 
 const SKILL_TOOL_NAMES = new Set(["load_skill", "read_skill_resource"]);

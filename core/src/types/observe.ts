@@ -7,6 +7,7 @@ import type {
 import type { JsonObject, JsonValue } from "./shared.js";
 import type { InputEvent, TranscriptEntry } from "./transcript.js";
 import type {
+  AgentRef,
   RequiredInteraction,
   ToolDescriptor,
   ToolResult,
@@ -163,6 +164,28 @@ export type ObserveEvent =
       readonly middlewareId: string;
       readonly slot: string;
       readonly attributes: { readonly token?: JsonValue };
+    }
+  | {
+      readonly type: "delegation.started";
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly callId: string;
+      readonly invocationId: string;
+      readonly toolName: string;
+      readonly agent: AgentRef;
+      readonly attributes: { readonly task: string };
+    }
+  | {
+      readonly type: "delegation.completed";
+      readonly turnId: string;
+      readonly stepId: string;
+      readonly callId: string;
+      readonly invocationId: string;
+      readonly toolName: string;
+      readonly agent: AgentRef;
+      /** The agent's own end state: completed, failed, cancelled or paused. */
+      readonly status: string;
+      readonly attributes: ToolResult;
     }
   | {
       readonly type: "turn.completed";

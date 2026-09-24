@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/resizable";
 import {
   actionLabel,
+  agentOf,
+  eventLabel,
   mergeStudioEvents,
   type StudioEvent,
 } from "@/event-presentation";
@@ -341,11 +343,38 @@ function SessionWorkspace({
                     </pre>
                   </article>
                 );
+              if (
+                ["delegation.started", "delegation.completed"].includes(
+                  event.type,
+                )
+              )
+                return (
+                  <details
+                    key={event.eventId}
+                    className="rounded-lg border border-dashed p-3"
+                    open={event.type === "delegation.completed"}
+                  >
+                    <summary className="cursor-pointer text-sm font-medium">
+                      {eventLabel(event)} · {agentOf(payload)?.id}
+                    </summary>
+                    <pre className="mt-2 overflow-auto whitespace-pre-wrap text-xs">
+                      {pretty(
+                        event.type === "delegation.started"
+                          ? payload.task
+                          : payload.outcome,
+                      )}
+                    </pre>
+                  </details>
+                );
               if (["action.pending", "action.completed"].includes(event.type))
                 return (
                   <details
                     key={event.eventId}
-                    className="rounded-lg border p-3"
+                    className={
+                      agentOf(payload)
+                        ? "ml-6 rounded-lg border p-3"
+                        : "rounded-lg border p-3"
+                    }
                     open={event.type === "action.completed"}
                   >
                     <summary className="cursor-pointer text-sm font-medium">

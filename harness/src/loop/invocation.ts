@@ -1,5 +1,6 @@
 import type { AgentDefinition } from "../definition/agent-definition.js";
-import type { BoundToolDefinition } from "@nylorun/core/define";
+import type { AgentRef, BoundToolDefinition } from "@nylorun/core/define";
+import type { DelegationHost, ExecuteInternals } from "./delegation.js";
 import type { ExecutionState, RunOptions } from "../types/execution.js";
 import type { ObserveEvent } from "@nylorun/core/define";
 import type { JsonValue } from "@nylorun/core/define";
@@ -13,6 +14,10 @@ export interface Invocation {
   readonly options: RunOptions<any>;
   readonly signal: AbortSignal;
   readonly definitions: Map<string, BoundToolDefinition>;
+  /** Builds agents used as tools; absent means in-process children. */
+  readonly delegation?: DelegationHost;
+  /** Set when this invocation is itself an agent used as a tool. */
+  readonly delegated?: AgentRef;
   state: ExecutionState;
   /** Mutable durable session memory for this invocation. */
   sessionBag: Record<string, JsonValue>;
@@ -26,12 +31,15 @@ export function createInvocation(input: {
   readonly options: RunOptions<any>;
   readonly state: ExecutionState;
   readonly definitions: Map<string, BoundToolDefinition>;
+  readonly internals?: ExecuteInternals;
 }): Invocation {
   const invocation = {
     agent: input.agent,
     options: input.options,
     signal: input.options.signal ?? new AbortController().signal,
     definitions: input.definitions,
+    ...(input.internals?.delegation ? { delegation: input.internals.delegation } : {}),
+    ...(input.internals?.delegated ? { delegated: input.internals.delegated } : {}),
     state: input.state,
     sessionBag: { ...((input.state.state ?? {}) as Record<string, JsonValue>) },
   } as Invocation;

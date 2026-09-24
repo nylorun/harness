@@ -9,6 +9,11 @@ export interface ToolManifest {
   readonly description?: string;
   readonly inputSchema: JsonObject;
   readonly outputSchema?: JsonObject;
+  /**
+   * Present when this tool is another agent. The engine runs it with a fresh context and
+   * returns its final output; its input is always `{ task: string }`. One level deep.
+   */
+  readonly agent?: AgentManifest;
 }
 
 export interface SkillManifest {

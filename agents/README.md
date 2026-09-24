@@ -110,6 +110,31 @@ The model gets `bash`, `read`, `write`, `edit`, `grep` and `glob` on a Linux mac
 
 The `dev` preset allows package registries and code hosts. Private networks, loopback, the host and cloud metadata endpoints are always blocked. Options from the full design that are not in this version (`setup`, `files`, `secrets`, `mount`, `onStart`, `scope`, ...) throw a `SandboxError` that says so. See [the sandbox design](../docs/design/sandboxes.md).
 
+Put an agent in another agent's `tools` to let the model delegate to it:
+
+```ts
+import { Agent } from "@nylorun/agents";
+import { z } from "zod";
+
+const researcher = Agent({
+  id: "researcher",
+  description: "Investigates an order's history. Returns a short summary with the ids it relied on.",
+  instructions: "Investigate one question about one order. Be exhaustive, then be brief.",
+  tools: [searchOrders, readTicket],
+  outputSchema: z.object({ summary: z.string(), evidence: z.array(z.string()) }),
+});
+
+const support = Agent({
+  id: "support",
+  instructions: "For anything needing more than two lookups, delegate to researcher with a complete, self-contained task.",
+  tools: [lookupOrder, refundOrder, researcher],
+});
+```
+
+The tool is named after the agent's `id` and takes `{ task: string }`; the agent's `description` (required) is what the parent's model reads to decide when to delegate. The child starts with a fresh context: it sees its own instructions and the task, nothing of the parent's conversation, and only its final text (or `outputSchema` result) comes back. It keeps its own tools, hooks, skills and MCP servers, served by the executor you already run for the parent (`connectAgents({ agents: [support] })` serves both), shares the session's sandbox, and starts with empty `ctx.state`. Tools can read `ctx.agent` (`{ id, path, delegationId }`). Several delegation calls in one model response run in parallel. An empty answer, a failure (with the child's last text marked as evidence) or a cancelled child reaches the parent's model as a failed tool result, never as success. The Runtime emits `delegation.started` and `delegation.completed`; `session.history({ agent })` filters by `delegationId` (one child invocation) or by path such as `support/researcher` (every concurrent child that shares that path).
+
+Delegate when the parent should keep the answer. When a specialist should own the rest of the conversation, switch capabilities with a `before("step")` patch instead. This version is one level deep and non-interactive: a delegated agent cannot use agents as tools, its tools cannot declare `approval` (keep those on the parent), and `ctx.ask`, `ctx.approve`, `ctx.sleep` or `ctx.waitFor` inside it fail with `delegation.interaction-unsupported`. Delegation is not an approval boundary; approvals live on tools.
+
 Use `session.observe({ cursor, signal })` for resumable canonical events, `session.inspect()` for waiting/uncertain state, and `approve`, `respond`, or `cancel` with an explicit stable idempotency key. Retry the same semantic command with the same key. `ownerUserId` must come from trusted server authentication. Application credentials are not browser credentials; browser applications need an authorized backend. Definition authoring is browser-bundleable.
 
 The Runtime destination is explicit, or defaults from `NYLORUN_RUNTIME_URL`. Application and executor keys default from `NYLORUN_SERVER_KEY` and `NYLORUN_EXECUTOR_KEY`. Implementation version defaults from `NYLORUN_IMPLEMENTATION_VERSION`, then `dev`. A host must provision executor scope for the agent id. Agents do not hash the manifest, and an in-flight action stays claimable after the registered digest changes. Model selection and model credentials belong to the Runtime.

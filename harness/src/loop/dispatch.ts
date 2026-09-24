@@ -9,10 +9,28 @@ import { createSessionStateBag } from "./initial-state.js";
 import type { Invocation } from "./invocation.js";
 import { toolResult } from "./tool-result.js";
 import { isWaitSignal, WaitSignal } from "./waits.js";
+import { INTERACTION_UNSUPPORTED, runDelegation } from "./delegation.js";
+import { execute } from "./run.js";
 
 export async function dispatchPlan(invocation: Invocation): Promise<"paused" | undefined> {
   const { signal, definitions, options, observe, record } = invocation;
   let plan = invocation.state.plan!;
+  if (invocation.delegated && plan.calls.some((call) => call.status === "interaction")) {
+    // Agents used as tools can't pause; the model sees why and can continue without the call.
+    plan = {
+      ...plan,
+      calls: plan.calls.map((call) =>
+        call.status === "interaction"
+          ? copyJson({
+              ...call,
+              status: "settled" as const,
+              result: unsupported(call.callId, call.toolName),
+            })
+          : call,
+      ),
+    };
+    invocation.state = { ...invocation.state, plan };
+  }
   if (
     plan.calls.some((call) => call.status === "interaction" && call.interactionPhase === "before")
   ) {
@@ -73,6 +91,26 @@ export async function dispatchPlan(invocation: Invocation): Promise<"paused" | u
         try {
           signal.throwIfAborted();
 
+          if (definition.delegate) {
+            const result = toolResult(
+              call,
+              definition,
+              await runDelegation(
+                invocation,
+                execute,
+                { ...eventIds, args: call.args },
+                definition.delegate,
+              ),
+            );
+            observe({
+              type: "tool.completed",
+              ...eventIds,
+              outcome: result.kind,
+              attributes: result,
+            });
+            return copyJson({ ...call, status: "settled" as const, result });
+          }
+
           if (definition.approval && !call.resume) {
             const decision = await definition.approval(call.args as never);
             const prompt =
@@ -114,6 +152,10 @@ export async function dispatchPlan(invocation: Invocation): Promise<"paused" | u
             ...(redelivering || call.status === "active" ? { redelivery: true } : {}),
             state: stateApi,
             session: { id: invocation.state.executionId },
+            agent: invocation.delegated ?? {
+              id: invocation.agent.id,
+              path: invocation.agent.id,
+            },
             progress(message: string, data?: import("@nylorun/core/define").JsonObject) {
               observe({
                 type: "tool.progress",
@@ -171,6 +213,15 @@ export async function dispatchPlan(invocation: Invocation): Promise<"paused" | u
           outcome = normalizeOutcome(raw);
           if (!outcome || typeof outcome !== "object")
             throw new HarnessError("tool.invalid-tool-result", "Tool returned an invalid outcome");
+          if (
+            invocation.delegated &&
+            (outcome.kind === "interaction-required" || outcome.kind === "deferred")
+          )
+            outcome = {
+              kind: "failed",
+              code: "delegation.interaction-unsupported",
+              message: INTERACTION_UNSUPPORTED,
+            };
           if (outcome.kind === "interaction-required") {
             if (
               !["approval", "response"].includes(outcome.interaction.kind) ||
@@ -213,6 +264,16 @@ export async function dispatchPlan(invocation: Invocation): Promise<"paused" | u
           return copyJson({ ...call, status: "settled" as const, result });
         } catch (cause) {
           if (cause instanceof HostSuspension) throw cause;
+          if (isWaitSignal(cause) && invocation.delegated) {
+            const result = unsupported(call.callId, call.toolName);
+            observe({
+              type: "tool.completed",
+              ...eventIds,
+              outcome: result.kind,
+              attributes: result,
+            });
+            return copyJson({ ...call, status: "settled" as const, result });
+          }
           if (isWaitSignal(cause)) {
             if (cause.outcome.kind === "interaction-required") {
               return copyJson({
@@ -320,6 +381,16 @@ export async function dispatchPlan(invocation: Invocation): Promise<"paused" | u
     ],
   };
   await record();
+}
+
+function unsupported(callId: string, toolName: string): ToolResult {
+  return {
+    callId,
+    toolName,
+    kind: "failed",
+    code: "delegation.interaction-unsupported",
+    message: INTERACTION_UNSUPPORTED,
+  };
 }
 
 function normalizeOutcome(raw: ToolRunResult): ToolOutcome {

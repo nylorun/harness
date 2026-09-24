@@ -3,6 +3,7 @@ import type {
   BuiltAgent,
   JsonValue,
 } from "@nylorun/core/define";
+import { delegateOf } from "@nylorun/core/define";
 import {
   LiveEventSchema,
   SessionItemsResponseSchema,
@@ -24,20 +25,29 @@ export interface AgentSource {
 const middlewareClosure =
   "Hosted definitions support declarative capabilities and before/after hooks, not middleware closures";
 
-function pluginRootsOf(agent: AgentSource): Record<string, string> | undefined {
+/** The agent's declarations, then those of each agent it uses as a tool, keyed `<child>/<capability>`. */
+function declarationsOf(agent: AgentSource) {
   const built = agent.build?.() ?? agent;
-  const declarations = built.getBinding?.().declarations ?? [];
-  const roots: Record<string, string> = {};
-  for (const item of declarations) {
-    if (item.pluginRoot) roots[item.id] = item.pluginRoot;
+  const binding = built.getBinding?.();
+  const found = (binding?.declarations ?? []).map((item) => ({ key: item.id, item }));
+  for (const tool of binding?.tools ?? []) {
+    const child = delegateOf(tool)?.agent;
+    for (const item of child?.getBinding().declarations ?? [])
+      found.push({ key: `${child!.id}/${item.id}`, item });
   }
+  return found;
+}
+
+function pluginRootsOf(agent: AgentSource): Record<string, string> | undefined {
+  const roots: Record<string, string> = {};
+  for (const { key, item } of declarationsOf(agent))
+    if (item.pluginRoot) roots[key] = item.pluginRoot;
   return Object.keys(roots).length === 0 ? undefined : roots;
 }
 
 /** Closures stay on the live binding. The published manifest cannot name them. */
 export function assertNoMiddlewareClosures(agent: AgentSource): void {
-  const built = agent.build?.() ?? agent;
-  if (built.getBinding?.().declarations.some((item) => item.hasMiddleware))
+  if (declarationsOf(agent).some(({ item }) => item.hasMiddleware))
     throw new Error(middlewareClosure);
 }
 export interface SessionView {
@@ -302,12 +312,17 @@ export class SessionClient {
       options.signal
     );
   }
-  async history(options: { cursor?: string; signal?: AbortSignal } = {}) {
+  /** `agent` narrows to one agent used as a tool: its delegationId or its path. */
+  async history(
+    options: { cursor?: string; agent?: string; signal?: AbortSignal } = {}
+  ) {
+    const query = new URLSearchParams();
+    if (options.cursor) query.set("cursor", options.cursor);
+    if (options.agent) query.set("agent", options.agent);
+    const search = query.toString();
     return SessionItemsResponseSchema.parse(
       await this.transport.json(
-        `${this.path}/items${
-          options.cursor ? `?cursor=${encodeURIComponent(options.cursor)}` : ""
-        }`,
+        `${this.path}/items${search ? `?${search}` : ""}`,
         "GET",
         undefined,
         options.signal

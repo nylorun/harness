@@ -1,6 +1,6 @@
 import type { BoundMiddleware } from "./bound.js";
 import type {
-  CapabilityDeclaration,
+  CapabilityInput,
   StepMiddleware,
 } from "../types/middleware.js";
 import type { BuildDiagnostic, JsonObject } from "../types/shared.js";
@@ -10,7 +10,7 @@ import type {
   ToolSchemaSource,
   SchemaOutput,
 } from "../types/tool.js";
-import type { BuiltAgent } from "../types/agent.js";
+import type { AgentTool, BuiltAgent } from "../types/agent.js";
 import type { AgentManifest } from "../types/manifest.js";
 import type {
   AfterHook,
@@ -33,8 +33,8 @@ export interface AgentOptions<
   readonly description?: string;
   readonly metadata?: JsonObject;
   readonly instructions?: string | readonly string[];
-  /** Top-level tools (H2). Composed as capability id `"agent"`. */
-  readonly tools?: readonly ToolDefinition<any, any, any>[];
+  /** Top-level tools (H2), and agents used as tools. Composed as capability id `"agent"`. */
+  readonly tools?: readonly (ToolDefinition<any, any, any> | AgentTool)[];
   // model is intentionally absent — Runtime owns model resolution via onModelCall.
 }
 
@@ -145,9 +145,9 @@ export class AgentBuilder<
 
   use(middleware: StepMiddleware<Info>): AgentBuilder<Info, Schema>;
   use(id: string, middleware: StepMiddleware<Info>): AgentBuilder<Info, Schema>;
-  use(declaration: CapabilityDeclaration<Info>): AgentBuilder<Info, Schema>;
+  use(declaration: CapabilityInput<Info>): AgentBuilder<Info, Schema>;
   use(
-    idOrMiddleware: string | StepMiddleware<Info> | CapabilityDeclaration<Info>,
+    idOrMiddleware: string | StepMiddleware<Info> | CapabilityInput<Info>,
     middleware?: StepMiddleware<Info>
   ): AgentBuilder<Info, Schema> {
     let compiled: ReturnType<typeof compileDeclaration>;

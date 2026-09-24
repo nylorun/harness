@@ -193,9 +193,11 @@ export class Store {
       .get() as { n: number };
     return Number(row.n);
   }
+  /** `agent` keeps only events of one agent used as a tool, by delegationId or path. */
   history(
     sessionId: string,
     cursor?: string,
+    agent?: string,
   ): { items: LiveEvent[]; cursor: string | null } {
     let sequence = 0;
     if (cursor) {
@@ -213,7 +215,8 @@ export class Store {
         "SELECT body FROM events WHERE session_id=? AND sequence>? ORDER BY sequence",
       )
       .all(sessionId, sequence)
-      .map((r) => JSON.parse(String(r.body)) as LiveEvent);
+      .map((r) => JSON.parse(String(r.body)) as LiveEvent)
+      .filter((event) => agent === undefined || belongsTo(event, agent));
     const last = this.db
       .prepare(
         "SELECT body FROM events WHERE session_id=? ORDER BY sequence DESC LIMIT 1",
@@ -224,6 +227,12 @@ export class Store {
       cursor: last ? JSON.parse(String(last.body)).cursor : null,
     };
   }
+}
+
+function belongsTo(event: LiveEvent, agent: string): boolean {
+  const ref = (event.payload as { agent?: { path?: unknown; delegationId?: unknown } } | null)
+    ?.agent;
+  return ref?.delegationId === agent || ref?.path === agent;
 }
 
 function migrateVaultScope(db: DatabaseSync): void {

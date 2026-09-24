@@ -1,6 +1,6 @@
 import type { BoundMiddleware } from "./bound.js";
 import type {
-  CapabilityDeclaration,
+  CapabilityInput,
   CapabilityItems,
   MiddlewareContributions,
   StepMiddleware,
@@ -8,6 +8,9 @@ import type {
 import type { AfterHooks, BeforeHooks } from "../types/dynamics.js";
 import { hooksFrom } from "./hooks.js";
 import type { ModelDirective } from "../types/model.js";
+import type { ToolDefinition } from "../types/tool.js";
+import type { AgentTool } from "../types/agent.js";
+import { delegateTool, isAgentItem } from "./delegate.js";
 
 export interface CompiledCapability {
   readonly bound: BoundMiddleware;
@@ -17,9 +20,9 @@ export interface CompiledCapability {
 }
 
 export function compileDeclaration<State>(
-  declaration: CapabilityDeclaration<State>
+  declaration: CapabilityInput<State>
 ): CompiledCapability {
-  const tools = copyItems(declaration.tools, declaration.id);
+  const tools = asTools(copyItems(declaration.tools, declaration.id));
   const instructions = copyItems(declaration.instructions, declaration.id);
   const model = declaration.model;
   const hooks = hooksFrom(declaration.before, declaration.after);
@@ -131,5 +134,24 @@ function copyItems<Item>(
   return Object.freeze({
     slot: value.slot,
     items: Object.freeze([...value.items]),
+  });
+}
+
+/** Agents placed in `tools` become the tools that delegate to them. */
+function asTools(
+  value:
+    | Readonly<{ readonly slot: string; readonly items: readonly (ToolDefinition<any, any, any> | AgentTool)[] }>
+    | undefined
+):
+  | Readonly<{ readonly slot: string; readonly items: readonly ToolDefinition<any, any, any>[] }>
+  | undefined {
+  if (value === undefined) return undefined;
+  if (!value.items.some(isAgentItem))
+    return value as Readonly<{ slot: string; items: readonly ToolDefinition<any, any, any>[] }>;
+  return Object.freeze({
+    slot: value.slot,
+    items: Object.freeze(
+      value.items.map((item) => (isAgentItem(item) ? delegateTool(item) : (item as ToolDefinition)))
+    ),
   });
 }

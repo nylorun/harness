@@ -14,6 +14,7 @@ export async function createToolUse(
   const agent = Agent({
     id: "tool-use",
     name: "Tool Use",
+    description: "Calculates, reports the current time, and converts units with tools. Returns the result.",
     instructions: exampleInstructions,
   })
     .use(modelSelection(deps.provider, deps.model))
