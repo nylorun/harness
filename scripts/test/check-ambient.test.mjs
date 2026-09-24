@@ -109,17 +109,19 @@ test("formatAmbientReport lists every violation", () => {
 });
 
 test("allows ambient reads in launcher/main.ts", () => {
-  const root = writeTree({
+  const runtimeSrc = fixture({
     "launcher/main.ts": `process.env.NYLORUN_HOME;\nprocess.cwd();\n`,
+    "launcher/paths.ts": `export const bad = process.env.PATH;\n`,
   });
   try {
-    const result = checkAmbient(root);
-    assert.equal(result.ok, true);
-    assert.equal(
+    const result = checkAmbient({ runtimeSrc });
+    assert.equal(result.ok, false);
+    assert.equal(result.violations.length, 1);
+    assert.match(result.violations[0], /^launcher\/paths\.ts:/);
+    assert.ok(
       !result.violations.some((line) => line.startsWith("launcher/main.ts:")),
-      true,
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(runtimeSrc, { recursive: true, force: true });
   }
 });
