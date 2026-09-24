@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type {
   Credential,
   CredentialInfo,
@@ -10,8 +10,8 @@ export class ProjectCredentialStore implements CredentialStore {
   #chain = Promise.resolve();
 
   constructor(
-    private readonly file = join(process.cwd(), ".nylorun", "auth.json"),
-    private readonly legacyFile?: string
+    private readonly file: string,
+    private readonly legacyFile?: string,
   ) {}
 
   async read(providerId: string): Promise<Credential | undefined> {

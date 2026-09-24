@@ -41,6 +41,8 @@ export function prepareStdioLaunch(
   options: {
     readonly pluginRoot?: string;
     readonly pluginData: string;
+    /** Allowlisted base env (Tenant HOME/TMPDIR/PATH). Manifest env overlays it (A9). */
+    readonly childEnv?: Readonly<Record<string, string>>;
   },
 ): StdioLaunch {
   const pluginData = options.pluginData;
@@ -61,7 +63,9 @@ export function prepareStdioLaunch(
   const cwd = server.cwd
     ? resolveContainedCwd(server.cwd, pluginRoot, pluginData)
     : (pluginRoot ?? pluginData);
-  const env: Record<string, string> = {};
+  // childEnv under manifest env; HOME/TMPDIR from childEnv override Host defaults
+  // that StdioClientTransport merges via getDefaultEnvironment() (R2).
+  const env: Record<string, string> = { ...(options.childEnv ?? {}) };
   for (const [key, value] of Object.entries(server.env ?? {}))
     env[key] = expand(value, pluginRoot, pluginData);
   if (pluginRoot) env.PLUGIN_ROOT = pluginRoot;

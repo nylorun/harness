@@ -10,14 +10,16 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Agent, hashManifest } from "@nylorun/core/define";
-import { startRuntime } from "../src/core/runtime.js";
+import { startTestTenant } from "./support/tenant.js";
+
+const APP = "server-token-value-aaaaaaaa";
 import type { ModelProvider } from "../src/core/provider.js";
 
 const KEK = Buffer.alloc(32, 9).toString("base64");
 const TOKEN = "ada-mcp-plaintext-token-7f3c9a2e";
 const SECRET = "parent-secret-value";
 const serverHeaders = {
-  authorization: "Bearer server-token-value",
+  authorization: `Bearer ${APP}`,
   "content-type": "application/json",
 };
 const executorHeaders = { authorization: "Bearer executor-token-value" };
@@ -132,10 +134,9 @@ async function readBody(req: IncomingMessage): Promise<{ method?: string } | und
   return JSON.parse(raw) as { method?: string };
 }
 
-async function boot(directory: string, model?: ModelProvider) {
-  return startRuntime({
-    sqlitePath: join(directory, "runtime.sqlite"),
-    serverToken: "server-token-value",
+async function boot(_directory: string, model?: ModelProvider) {
+  return startTestTenant({
+    applicationKey: APP,
     executors: [
       {
         token: "executor-token-value",
@@ -144,8 +145,7 @@ async function boot(directory: string, model?: ModelProvider) {
       },
     ],
     vaultKek: KEK,
-    model,
-    port: 0,
+    ...(model ? { modelProvider: model } : {}),
   });
 }
 
@@ -434,14 +434,21 @@ it("pins the discovery snapshot and lets a new session discover again", async ()
 });
 
 it("does not send a failed MCP call again after it is uncertain", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "mcp-uncertain-"));
   const remote = await probe({ name: "github", tool: "get_issue" });
   remote.failCalls = true;
-  const runtime = await boot(directory, async () => ({
-    output: [
-      { type: "tool-call", id: "call-1", name: "github__get_issue", args: { number: 1 } },
+  const runtime = await startTestTenant({
+    applicationKey: APP,
+    retainRoot: true,
+    executors: [
+      { token: "executor-token-value", agentId: "bot", implementationVersion: "dev" },
     ],
-  }));
+    vaultKek: KEK,
+    modelProvider: async () => ({
+      output: [
+        { type: "tool-call", id: "call-1", name: "github__get_issue", args: { number: 1 } },
+      ],
+    }),
+  });
   try {
     const agent = Agent({ id: "bot", name: "Bot" })
       .use({
@@ -458,24 +465,34 @@ it("does not send a failed MCP call again after it is uncertain", async () => {
     expect(session.status).toBe("uncertain");
     expect(remote.requests.filter((item) => item.method === "tools/call")).toHaveLength(1);
     await runtime.close();
-    const db = new DatabaseSync(join(directory, "runtime.sqlite"));
+    const dbPath = join(runtime.root, "tenants", runtime.tenantId, "tenant.sqlite");
+    const db = new DatabaseSync(dbPath);
     const row = db.prepare(`SELECT body FROM sessions WHERE id=?`).get("s1") as { body: string };
     const stored = JSON.parse(row.body);
     stored.status = "runnable";
     db.prepare(`UPDATE sessions SET body=? WHERE id=?`).run(JSON.stringify(stored), "s1");
     db.close();
-    const again = await boot(directory, async () => {
-      throw new Error("model must not run again");
+    const again = await startTestTenant({
+      applicationKey: APP,
+      hostRoot: runtime.root,
+      tenantId: runtime.tenantId,
+      executors: [
+        { token: "executor-token-value", agentId: "bot", implementationVersion: "dev" },
+      ],
+      vaultKek: KEK,
+      modelProvider: async () => {
+        throw new Error("model must not run again");
+      },
     });
     try {
       await until(again, "s1", ["uncertain", "failed", "completed"]);
       expect(remote.requests.filter((item) => item.method === "tools/call")).toHaveLength(1);
     } finally {
       await again.close();
+      await rm(runtime.root, { recursive: true, force: true });
     }
   } finally {
     await remote.close();
-    await rm(directory, { recursive: true, force: true });
   }
 });
 

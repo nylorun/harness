@@ -27,7 +27,9 @@ export class McpPool {
 
   constructor(
     private readonly options: {
-      readonly dataDir: string;
+      /** Absolute Tenant `plugin-data` directory. */
+      readonly pluginData: string;
+      readonly childEnv: Readonly<Record<string, string>>;
       readonly authorize: (
         sessionId: string,
         request: { url: string; serverName: string },
@@ -196,7 +198,11 @@ export class McpPool {
       const connection = await openMcpServer({
         server: declared.server,
         pluginRoot: input.pluginRoots[pluginKey(declared)],
-        pluginData: join(this.options.dataDir, "plugin-data", ...pluginKey(declared).split("/")),
+        pluginData: join(
+          this.options.pluginData,
+          ...pluginKey(declared).split("/"),
+        ),
+        childEnv: this.options.childEnv,
         authorize:
           declared.server.type === "stdio"
             ? undefined

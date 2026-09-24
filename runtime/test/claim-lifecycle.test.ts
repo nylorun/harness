@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { z } from "zod";
 import { Agent, tool } from "@nylorun/core/define";
-import { startRuntime } from "../src/core/runtime.js";
+import { startTestTenant } from "./support/tenant.js";
+
+const APP = "server-token-value-aaaaaaaa";
 
 it("lets an agent executor finish an older action and fails a schema-breaking result", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "claim-lifecycle-"));
   const agent = Agent({ id: "issue", name: "Issue" })
     .use({
       id: "notes",
@@ -23,9 +24,8 @@ it("lets an agent executor finish an older action and fails a schema-breaking re
       ],
     })
     .build();
-  const runtime = await startRuntime({
-    sqlitePath: join(directory, "runtime.sqlite"),
-    serverToken: "server-token-value",
+  const runtime = await startTestTenant({
+    applicationKey: APP,
     executors: [
       {
         token: "executor-token-value",
@@ -34,7 +34,7 @@ it("lets an agent executor finish an older action and fails a schema-breaking re
         implementationVersion: "dev",
       },
     ],
-    model: async (effect) => {
+    modelProvider: async (effect) => {
       const call = effect.input as { prompt?: { kind?: string }[] };
       if (call.prompt?.at(-1)?.kind === "tool-result")
         return { output: [{ type: "text", text: "done" }] };
@@ -48,11 +48,10 @@ it("lets an agent executor finish an older action and fails a schema-breaking re
           },
         ],
       };
-    },
-    port: 0,
+    }
   });
   const server = {
-    authorization: "Bearer server-token-value",
+    authorization: `Bearer ${APP}`,
     "content-type": "application/json",
   };
   const executor = {
@@ -162,7 +161,6 @@ it("lets an agent executor finish an older action and fails a schema-breaking re
     });
   } finally {
     await runtime.close();
-    await rm(directory, { recursive: true, force: true });
   }
 });
 
@@ -183,9 +181,8 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
       ],
     })
     .build();
-  const runtime = await startRuntime({
-    sqlitePath: join(directory, "runtime.sqlite"),
-    serverToken: "server-token-value",
+  const runtime = await startTestTenant({
+    applicationKey: APP,
     executors: [
       {
         token: "executor-token-value",
@@ -193,7 +190,7 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
         implementationVersion: "dev",
       },
     ],
-    model: async (effect) => {
+    modelProvider: async (effect) => {
       const call = effect.input as { prompt?: { kind?: string }[] };
       if (call.prompt?.at(-1)?.kind === "tool-result")
         return { output: [{ type: "text", text: "done" }] };
@@ -207,11 +204,10 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
           },
         ],
       };
-    },
-    port: 0,
+    }
   });
   const server = {
-    authorization: "Bearer server-token-value",
+    authorization: `Bearer ${APP}`,
     "content-type": "application/json",
   };
   const executor = {
@@ -318,6 +314,5 @@ it("accepts a completed tool outcome envelope that matches the output schema", a
     });
   } finally {
     await runtime.close();
-    await rm(directory, { recursive: true, force: true });
   }
 });
