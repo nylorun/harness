@@ -65,7 +65,7 @@ export async function startStubHost(
       res.end(
         JSON.stringify({
           status: "ok",
-          service: "nylorun-runtime-host",
+          service: "nylorun-runtime",
           version,
           protocol,
           coreVersion: "0.4.0-beta",
@@ -80,7 +80,7 @@ export async function startStubHost(
       res.end(
         JSON.stringify({
           status: "ready",
-          service: "nylorun-runtime-host",
+          service: "nylorun-runtime",
           checks: { listener: true, discovery: true },
         }),
       );

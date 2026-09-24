@@ -59,7 +59,7 @@ async function listenStubOn(
       res.end(
         JSON.stringify({
           status: "ok",
-          service: "nylorun-runtime-host",
+          service: "nylorun-runtime",
           version: "0.9.0-beta",
           protocol: { min: 2, max: 2, features: ["runtime-tenants"] },
           coreVersion: "0.4.0-beta",
@@ -74,7 +74,7 @@ async function listenStubOn(
       res.end(
         JSON.stringify({
           status: "ready",
-          service: "nylorun-runtime-host",
+          service: "nylorun-runtime",
           checks: { listener: true, discovery: true },
         }),
       );

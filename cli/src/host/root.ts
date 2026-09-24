@@ -308,7 +308,7 @@ export async function probeHostHealth(
       return { reachable: true, foreign: true };
     }
     // Accept legacy "oss-runtime" and the Host service name.
-    if (body.service !== "oss-runtime" && body.service !== "nylorun-runtime-host") {
+    if (body.service !== "oss-runtime" && body.service !== "nylorun-runtime") {
       return { reachable: true, foreign: true };
     }
     const protocol = body.protocol as
