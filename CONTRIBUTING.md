@@ -33,11 +33,14 @@ Setup installs both lockfiles and builds packages. The seven packages compile wi
 regenerate examples, or change local credentials/data. Package consumer Node
 support remains separate from the pinned contributor toolchain.
 
-Studio opens at `http://127.0.0.1:4161`; Runtime listens on port 8787.
-The first run starts the Runtime and stores the model provider in its vault under
-gitignored `examples/.nylorun/`. The Runtime outlives `npm run dev`; stop it with
-`npx nylorun down` and inspect it with `npx nylorun runtime status`. `npm run configure` replaces that credential while the
-Runtime is running. Advanced examples retain their own historical data paths.
+Studio opens at `http://127.0.0.1:4161`; the Runtime Host listens on port 8787
+(or the port in `host.json`). The first run starts the Host, creates or reuses a
+Tenant via a Project link under gitignored `examples/.nylorun/`, and stores the
+model provider in that Tenant's vault. The Host outlives `npm run dev`; stop it
+with `npx nylorun runtime down` and inspect it with
+`npx nylorun runtime status`. `npm run configure` replaces that credential while
+the Host is running. Advanced examples retain their own historical data paths.
+Vocabulary: [runtime/src/CONTEXT.md](./runtime/src/CONTEXT.md).
 
 ## Development
 
@@ -47,8 +50,9 @@ Runtime is running. Advanced examples retain their own historical data paths.
 | `npm run dev -- --no-open` | Keep the browser closed |
 | `npm run dev -- --no-studio` | Run only the agent server |
 | `npm run dev -- --no-autostart` | Fail instead of starting a Runtime (use in CI) |
-| `npx nylorun up` / `npx nylorun down` | Start or stop the local Runtime directly |
-| `npx nylorun runtime status` | Report the active scope, port and pid |
+| `npx nylorun runtime up` / `npx nylorun runtime down` | Start or stop the Runtime Host |
+| `npx nylorun runtime status` | Report Host id, address, protocol and Tenants |
+| `eval "$(npx nylorun runtime status --env)"` | Export URL, key and Tenant for the linked Project (draft) |
 | `npm run dev -- --port 4200 --studio-port 4201` | Choose different ports |
 | `npm run dev:starter` | Preview a fresh starter against local packages |
 | `npm run build` | Build all seven packages |
@@ -99,7 +103,9 @@ See [RELEASING.md](./RELEASING.md) for administrators and
 | Toolchain mismatch | Use Node 24 and npm 11; setup prints the detected versions |
 | Missing/stale package build | Stop development and run `npm run setup` |
 | Occupied port | The CLI exits 4 and names the port; stop the other service or pass `--port` |
-| Model setup error | Run `npx nylorun up`, then `npm run configure`, or replace the vault credential from Studio |
+| Protocol `426` | Upgrade CLI (`nylorun runtime restart`) or pin `@nylorun/cli` within the Host protocol range |
+| Quarantined Tenant | `nylorun tenant status` shows reason and `repair` (locked KEK, migration, …) |
+| Model setup error | Run `npx nylorun runtime up`, then `npm run configure`, or replace the vault credential from Studio |
 | Generated-file conflict | Move the intended change into the template/recipe, then sync |
 | Interrupted release preparation | Inspect the diff; do not blindly rerun or discard it |
 

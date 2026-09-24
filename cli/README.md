@@ -1,44 +1,63 @@
 # @nylorun/cli
 
+> **DRAFT (WS-I Wave 1).** Host lifecycle (Wave 1) and Project link / `tenant`
+> commands (Wave 2) are described from the Runtime Tenants plan. Finalize in
+> Wave 3. Vocabulary: [runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
+
 The local `nylorun` executable. Requires Node 24+.
 
 ```sh
-nylorun up                  # start the local Runtime (alias for "nylorun runtime start")
-nylorun dev                 # watch agents/index.ts, open Studio
-nylorun dev --no-studio
-nylorun serve [entry]       # run the compiled build, default dist/agents/index.js
-nylorun configure
+nylorun runtime up                 # start the Runtime Host (detached)
+nylorun runtime down               # stop the Host; keep Tenants and host.json
+nylorun runtime status             # Host id, address, protocol, Tenant list
+nylorun runtime status --env       # export lines for the linked Project
+nylorun runtime logs [--follow]    # Host + Tenant logs
+nylorun runtime restart            # install CLI's exact runtime, then restart
+nylorun runtime run                # attached foreground Host
+nylorun dev                        # link/create Tenant, watch agents, Studio
+nylorun dev --ephemeral            # private temp Host + one Tenant
+nylorun serve [entry]              # compiled build (default dist/agents/index.js)
+nylorun configure                  # replace model credential on the linked Tenant
 nylorun studio
-nylorun runtime status
-nylorun down                # stop the Runtime, keeping SQLite and credentials
+nylorun tenant current|list|use|status|reset|delete
 ```
 
-## The Runtime is a separate, persistent process
+## The Runtime Host is a separate, persistent process
 
-`nylorun up` starts `@nylorun/runtime/server` in the background and returns the
-terminal. `dev` and `serve` attach to it, registering the project's exported
-agents and connecting scoped executors through `PUT /v1/executors`. They start
-the Runtime themselves when nothing is listening, and they leave it running on
-exit, so a watch restart re-registers agents without losing sessions. Pass
-`--no-autostart` to fail instead, which is what CI should do. `--foreground`
-keeps `runtime start` attached for logs.
+`nylorun runtime up` installs a verified `@nylorun/runtime` under the Host root
+and starts `@nylorun/runtime/server` in the background. `dev` and `serve` attach
+to it: they create or reuse a **Project link**, register agents, and connect
+executors through `PUT /v1/executors`. They start the Host when nothing is
+listening, and leave it running on exit. Pass `--no-autostart` to fail instead
+(CI). `runtime run` keeps the Host attached for logs.
 
-## Scope
+## Host root, Tenants and Project link
 
-A project is the default scope: the Runtime's SQLite, credentials, log and pid
-live in `.nylorun/` beside the nearest `package.json`, created on first use and
-added to an existing `.gitignore`. `--global` (and running outside a project)
-uses `~/.nylorun` instead, relocatable with `NYLORUN_HOME`. Both default to
-`127.0.0.1:8787`; `--port` beats `NYLORUN_PORT`, then `PORT`, then the port
-recorded for a running Runtime. `--db` or `NYLORUN_SQLITE_PATH` moves the
-database. `nylorun runtime status --output json` prints the resolved scope for
-scripts, and `nylorun logs [-f]` tails the Runtime's own output.
+The **Host root** is `NYLORUN_HOME` or `~/.nylorun` (resolved absolute once).
+It holds `host.json`, admin credentials, installed runtimes and every Tenant.
+There is no project/global "scope": isolation is per **Tenant**.
 
-Runtime and executor credentials remain separate. On first `configure`, `dev` or
-`serve`, an interactive terminal saves the model provider credential into the
-Runtime vault; `configure` replaces it while the Runtime is already running.
+A **Project** stores only:
 
-## Exit codes
+- `.nylorun/link.json` — `{ hostUrl, hostId, tenantId }`
+- `.nylorun/credentials.json` — application key, principal id, executor tokens (0600)
+- `.nylorun/.gitignore` containing `*`
+
+First `dev` without a link creates a Tenant (id and secrets generated locally;
+only hashes are sent), writes link + credentials after success, and prints a
+banner with Host address and Tenant name/id.
+
+```sh
+# After a Project is linked (Wave 2):
+eval "$(npx nylorun runtime status --env)"
+# → NYLORUN_RUNTIME_URL, NYLORUN_SERVER_KEY, NYLORUN_TENANT
+```
+
+`--global`, `--db`, and `NYLORUN_SQLITE_PATH` are removed. Port defaults to
+`8787` on loopback (or a free port persisted on first automatic setup);
+`--port` is strict.
+
+## Exit codes (draft)
 
 | Code | Meaning |
 | --- | --- |
@@ -46,16 +65,15 @@ Runtime vault; `configure` replaces it while the Runtime is already running.
 | 1 | Generic failure |
 | 2 | Usage error |
 | 3 | `runtime status` or `logs`: not running |
-| 4 | Port held by another process or another scope |
-| 5 | The running Runtime does not match this CLI |
+| 4 | Port held by another process |
+| 5 | Protocol / feature incompatible with this CLI |
 | 6 | `--no-autostart` and nothing is listening |
-| 7 | The Runtime did not become healthy |
+| 7 | The Host did not become ready |
 | 130 / 143 | SIGINT / SIGTERM |
 
 `dev` loads `agents/index.ts` using project-installed `tsx` and watches changes.
 Studio and `tsx` are optional development dependencies; the CLI is a production
 dependency when the application's `start` script uses it.
 
-Reusable provider configuration is imported from `@nylorun/runtime/configuration`;
-interactive prompts and process supervision belong here. Neither runtime nor
-harness depends on this package. See [package architecture](../docs/design/package-architecture.md).
+See [package architecture](../docs/design/package-architecture.md) and
+[MIGRATION.md](../MIGRATION.md#runtime-tenants-breaking-beta).

@@ -1,6 +1,13 @@
 # @nylorun/agents
 
-One application install provides definition authoring, a session client, and a connected customer executor. This beta is currently built locally; no packages were published in this pass. Use the workspace or install packed SDK and core artifacts together until publishing is enabled.
+> **DRAFT (WS-I Wave 1).** Tenant selection and protocol negotiation land with
+> Runtime Tenants. Finalize in Wave 3. Vocabulary:
+> [runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
+
+One application install provides definition authoring, a session client, and a
+connected customer executor. This beta is currently built locally; no packages
+were published in this pass. Use the workspace or install packed SDK and core
+artifacts together until publishing is enabled.
 
 ```ts
 import { Agent, createClient, connectAgents, tool } from "@nylorun/agents";
@@ -21,10 +28,11 @@ const assistant = Agent({
   ],
 });
 
-// Run these application operations on your trusted backend.
+// Trusted backend: name the Tenant explicitly (or via NYLORUN_TENANT).
 const client = createClient({
   url: process.env.NYLORUN_RUNTIME_URL,
   key: process.env.NYLORUN_SERVER_KEY,
+  tenant: process.env.NYLORUN_TENANT,
 });
 await client.saveAgent(assistant, { implementationVersion: "app-1" });
 const session = await client.createSession({
@@ -34,13 +42,14 @@ const session = await client.createSession({
 await session.input("Look up item 123", { idempotencyKey: requestId });
 const history = await session.history();
 
-// Customer executor process: credential is separately scoped by the Runtime.
+// Customer executor: same Host URL + Tenant; executor principal is separate.
 const connection = connectAgents({
   agents: [assistant],
   implementationVersion: "app-1",
   runtime: {
     url: process.env.NYLORUN_RUNTIME_URL,
     key: process.env.NYLORUN_EXECUTOR_KEY,
+    tenant: process.env.NYLORUN_TENANT,
   },
   onError: console.error,
 });
@@ -48,6 +57,13 @@ await connection.ready;
 // On shutdown:
 await connection.close();
 ```
+
+Every request sets `Nylorun-Tenant` and `Nylorun-Protocol`. A `tenant` field in a
+body or query is never read from caller input. Before the first authenticated
+request, `Transport` fetches `/health` once, checks protocol compatibility, and
+throws `IncompatibleRuntimeError` when the Host range or required features do
+not match. Omit `tenant` only when `NYLORUN_TENANT` is set; otherwise the client
+throws before any request: `Set tenant explicitly or via NYLORUN_TENANT`.
 
 Load Agent Skills from a local catalog folder with `skills(path)`:
 
@@ -137,7 +153,14 @@ Delegate when the parent should keep the answer. When a specialist should own th
 
 Use `session.observe({ cursor, signal })` for resumable canonical events, `session.inspect()` for waiting/uncertain state, and `approve`, `respond`, or `cancel` with an explicit stable idempotency key. Retry the same semantic command with the same key. `ownerUserId` must come from trusted server authentication. Application credentials are not browser credentials; browser applications need an authorized backend. Definition authoring is browser-bundleable.
 
-The Runtime destination is explicit, or defaults from `NYLORUN_RUNTIME_URL`. Application and executor keys default from `NYLORUN_SERVER_KEY` and `NYLORUN_EXECUTOR_KEY`. Implementation version defaults from `NYLORUN_IMPLEMENTATION_VERSION`, then `dev`. A host must provision executor scope for the agent id. Agents do not hash the manifest, and an in-flight action stays claimable after the registered digest changes. Model selection and model credentials belong to the Runtime.
+The Runtime Host destination is explicit, or defaults from `NYLORUN_RUNTIME_URL`.
+Application and executor keys default from `NYLORUN_SERVER_KEY` and
+`NYLORUN_EXECUTOR_KEY`. Tenant id defaults from `NYLORUN_TENANT` when omitted.
+Implementation version defaults from `NYLORUN_IMPLEMENTATION_VERSION`, then
+`dev`. The Tenant must provision an executor principal for the agent id. Agents
+do not hash the manifest, and an in-flight action stays claimable after the
+registered digest changes. Model selection and model credentials belong to the
+Tenant.
 
 `connectAgents({ agents })` opens authenticated fetch SSE before discovering actions, rediscovers after reconnection, and claims pending actions for a connected agent id. It renews leases while executing, then retries HTTP result delivery with the same recorded outcome and idempotency key. Reconnect delay is bounded at 30 seconds. Notifications confer no execution authority. There is no periodic action-discovery polling. Close aborts the stream, HTTP requests and lease timers and signals running functions; JavaScript cannot forcibly terminate a function that ignores its signal. The host makes expired in-flight actions uncertain instead of automatically repeating external effects.
 
