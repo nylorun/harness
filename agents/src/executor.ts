@@ -5,7 +5,7 @@ import {
   type Action,
 } from "@nylorun/core/contracts";
 import type { BuiltAgent } from "@nylorun/core/define";
-import { assertNoMiddlewareClosures, type AgentSource } from "./client.js";
+import { assertNoMiddlewareClosures, type AgentSource, type AgentsClient } from "./client.js";
 import {
   Transport,
   RuntimeError,
@@ -19,6 +19,8 @@ import { readSSE } from "./sse.js";
 import { executeAction } from "./execute-action.js";
 export interface ConnectOptions {
   agents: readonly AgentSource[];
+  /** Application-mode client; when set, connectAgents uses application mode (D§7.2). */
+  application?: AgentsClient;
   runtime?: Destination;
   implementationVersion?: string;
   onError?: (error: unknown) => void;

@@ -10,12 +10,16 @@ export {
   TENANT_ID_PATTERN,
   isTenantId,
   newTenantId,
+  newPrincipalId,
   checkCompatibility,
+  compareVersions,
+  ERROR_CODES,
 } from "@nylorun/core/compatibility";
 export type {
   ProtocolFeature,
   ProtocolRange,
   Compatibility,
+  ErrorCode,
 } from "@nylorun/core/compatibility";
 export {
   Agent,
@@ -56,6 +60,8 @@ export { AgentsClient, SessionClient, createClient } from "./client.js";
 export type { AgentSource, SessionView, CommandOptions } from "./client.js";
 export { connectAgents } from "./executor.js";
 export type { ConnectOptions, AgentConnection } from "./executor.js";
+export { resolveConnection } from "./connection.js";
+export type { ResolvedConnection } from "./connection.js";
 export { RuntimeError, IncompatibleRuntimeError } from "./http.js";
 export type { Destination, IncompatibleReason } from "./http.js";
 export { plugin } from "./plugins/plugin.js";

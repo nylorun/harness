@@ -48,7 +48,7 @@ export async function startStubHost(
   const protocol = options.protocol ?? {
     min: 2,
     max: 2,
-    features: ["runtime-tenants"],
+    features: ["runtime-tenants", "admin-status"],
   };
   let aggregate = options.aggregate ?? {
     runningSessions: 0,

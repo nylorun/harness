@@ -6,9 +6,11 @@ const allowed = {
   core: [],
   harness: ["core"],
   agents: ["core"],
+  admin: ["core"],
   runtime: ["core", "harness"],
   studio: ["agents"],
-  cli: ["agents", "runtime"],
+  // Transitional until I2: cli may still depend on runtime (Wave 0).
+  cli: ["agents", "admin", "runtime"],
 };
 // Sandbox substrate SDKs stay behind the backend adapter contract.
 const substrates = { runtime: ["microsandbox", "just-bash"] };

@@ -197,9 +197,10 @@ export function planVersions(
   }
   // Release consumers whenever a pinned production dependency changes.
   for (const [dependency, consumers] of [
-    ["core", ["harness", "agents", "runtime"]],
+    ["core", ["harness", "agents", "admin", "runtime"]],
     ["harness", ["runtime"]],
     ["agents", ["studio", "cli"]],
+    ["admin", ["cli"]],
     ["runtime", ["cli"]],
   ]) {
     if (versions[dependency] && versions[dependency] !== before[dependency])

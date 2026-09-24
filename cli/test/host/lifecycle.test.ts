@@ -61,7 +61,7 @@ async function listenStubOn(
           status: "ok",
           service: "nylorun-runtime",
           version: "0.9.0-beta",
-          protocol: { min: 2, max: 2, features: ["runtime-tenants"] },
+          protocol: { min: 2, max: 2, features: ["runtime-tenants", "admin-status"] },
           coreVersion: "0.4.0-beta",
           hostId: options.hostId,
           pid: 42_042,
@@ -94,7 +94,7 @@ async function listenStubOn(
           url: `http://127.0.0.1:${port}`,
           pid: 42_042,
           version: "0.9.0-beta",
-          protocol: { min: 2, max: 2, features: ["runtime-tenants"] },
+          protocol: { min: 2, max: 2, features: ["runtime-tenants", "admin-status"] },
           tenants: [],
           aggregate: {
             runningSessions: 0,

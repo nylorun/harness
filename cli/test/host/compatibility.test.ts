@@ -19,7 +19,7 @@ it("E10: compatible Host protocol passes", async () => {
 
 it("E10: out-of-range client prints upgrade/downgrade remedy", async () => {
   const stub = await startStubHost({
-    protocol: { min: 2, max: 2, features: ["runtime-tenants"] },
+    protocol: { min: 2, max: 2, features: ["runtime-tenants", "admin-status"] },
   });
   closers.push(stub.close);
   await expect(

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 export const root = fileURLToPath(new URL("../../", import.meta.url));
-export const packages = ["core", "harness", "agents", "runtime", "studio", "cli", "create-agent"];
+export const packages = ["core", "harness", "agents", "admin", "runtime", "studio", "cli", "create-agent"];
 export const readJson = async (path) =>
   JSON.parse(await readFile(path, "utf8"));
 export const writeJson = (path, value) =>
