@@ -2,7 +2,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startEphemeralRuntime } from "../runtime/src/tenant/ephemeral.js";
+import { startEphemeralRuntime } from "@nylorun/runtime/core";
 import { Agent, connectAgents } from "@nylorun/agents";
 
 const agent = Agent({ id: "startup-only", name: "Startup import check" });
@@ -38,7 +38,9 @@ try {
     }),
   });
   if (!listed.ok)
-    throw new Error(`/v1/executors failed: ${listed.status} ${await listed.text()}`);
+    throw new Error(
+      `/v1/executors failed: ${listed.status} ${await listed.text()}`,
+    );
   console.log("/v1/executors", listed.status, await listed.json());
   connection = connectAgents({
     agents: [agent],

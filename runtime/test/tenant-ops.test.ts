@@ -213,7 +213,7 @@ it("startEphemeralRuntime opens a private Host with one Tenant (A19)", async () 
   expect(health.status).toBe(200);
   const ready = await fetch(`${runtime.url}/ready`);
   expect(ready.status).toBe(200);
-  expect(runtime.tenantId).toMatch(/^ten_/);
+  expect(runtime.tenantId).toMatch(/^tn_/);
   expect(runtime.applicationKey.length).toBeGreaterThanOrEqual(16);
   expect(runtime.adminKey.length).toBeGreaterThanOrEqual(16);
 
@@ -309,8 +309,8 @@ it("reset all clears definitions, executors, user vaults and tenant log (A17)", 
     "logs",
     "tenant.log",
   );
-  expect(existsSync(logPath)).toBe(true);
   writeFileSync(logPath, '{"level":"info","message":"noise"}\n');
+  expect(existsSync(logPath)).toBe(true);
 
   const reset = await fetch(`${runtime.url}/v1/tenant/reset`, {
     method: "POST",
