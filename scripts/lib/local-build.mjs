@@ -3,8 +3,10 @@
  * workspace. Local mode copies Node from process.execPath (D8, G1).
  */
 import {
+  access,
   chmod,
   copyFile,
+  lstat,
   mkdir,
   readFile,
   rm,
@@ -111,18 +113,54 @@ set "ROOT=%~dp0.."\r
 /**
  * Place a Node binary at build/node/bin/node[.exe] from process.execPath
  * (local mode) or from an extracted official distribution (release mode).
+ *
+ * Local mode copies by default: npm pack drops absolute symlinks, so a
+ * registry tarball would otherwise lack node/bin/node (J CCR / G Wave 3).
  */
-export async function installNodeBinary(buildDir, { sourcePath, windows }) {
+export async function installNodeBinary(
+  buildDir,
+  { sourcePath, windows, link = false },
+) {
   const binDir = join(buildDir, "node", "bin");
   await mkdir(binDir, { recursive: true });
   const target = join(binDir, windows ? "node.exe" : "node");
   await rm(target, { force: true });
-  try {
-    await symlink(sourcePath, target);
-  } catch {
-    await copyFile(sourcePath, target);
-    if (!windows) await chmod(target, 0o755);
+  if (link) {
+    try {
+      await symlink(sourcePath, target);
+      return target;
+    } catch {
+      /* fall through to copy */
+    }
   }
+  await copyFile(sourcePath, target);
+  if (!windows) await chmod(target, 0o755);
+  return target;
+}
+
+/**
+ * Ensure node/bin/node is a real file (not an absolute symlink) so npm pack
+ * includes it. Safe to call on an already-copied binary.
+ */
+export async function materializeNodeBinary(
+  buildDir,
+  platform = process.platform,
+) {
+  const binDir = join(buildDir, "node", "bin");
+  const target = join(binDir, platform === "win32" ? "node.exe" : "node");
+  try {
+    const stats = await lstat(target);
+    if (!stats.isSymbolicLink()) {
+      await access(target);
+      return target;
+    }
+  } catch {
+    /* missing — copy below */
+  }
+  await mkdir(binDir, { recursive: true });
+  await rm(target, { force: true });
+  await copyFile(process.execPath, target);
+  if (platform !== "win32") await chmod(target, 0o755);
   return target;
 }
 
