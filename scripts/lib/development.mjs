@@ -152,7 +152,7 @@ export async function develop(
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }
-    const args = [join(repo, "cli/dist/cli.js"), "dev", "--no-studio"];
+    const args = [join(repo, "cli/dist/cli.js"), "dev"];
     if (ephemeral) args.push("--ephemeral");
     runtime = group.start("runtime", process.execPath, args, {
       cwd: project,
@@ -210,7 +210,8 @@ export async function develop(
       agents: ["core"],
       runtime: ["core", "harness"],
       studio: ["agents"],
-      cli: ["agents", "runtime"],
+      cli: ["agents", "admin"],
+      admin: ["core"],
     };
     for (const [name, deps] of Object.entries(dependencies))
       if (
