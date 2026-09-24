@@ -1,32 +1,11 @@
-import { readFile } from "node:fs/promises";
 import { LAUNCHER_PROTOCOL } from "@nylorun/core/compatibility";
 import { installedVersions, type PlatformArch } from "./builds.js";
 import { readHostConfig } from "./host-config.js";
+import { readHostState } from "./host-state.js";
 import { processAlive } from "./locks.js";
 import { hostUrl, type HostPaths } from "./paths.js";
 import { portBindable, probeHostHealth } from "./probe.js";
 import type { StatusResult } from "./protocol.js";
-
-export interface HostStateFile {
-  pid: number;
-  startedAt: string;
-  version: string;
-  entry: string;
-  url: string;
-}
-
-async function readHostState(
-  paths: HostPaths,
-): Promise<HostStateFile | undefined> {
-  try {
-    const value = JSON.parse(
-      await readFile(paths.state, "utf8"),
-    ) as HostStateFile;
-    return typeof value?.pid === "number" ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * Status with no lock and no mutation (D§9.3).

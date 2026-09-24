@@ -34,6 +34,19 @@ function currentArch(): PlatformArch["arch"] {
   return value as PlatformArch["arch"];
 }
 
+/** Copy allowlisted ambient keys for Host spawn (Tenants §12). */
+function baselineFromEnv(
+  env: NodeJS.ProcessEnv,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const key of Object.keys(env)) {
+    if (key === "PATH" || key === "LANG" || key === "TZ" || key.startsWith("LC_")) {
+      out[key] = env[key];
+    }
+  }
+  return out;
+}
+
 export async function main(
   argv: readonly string[] = process.argv.slice(2),
   env: NodeJS.ProcessEnv = process.env,
@@ -43,6 +56,7 @@ export async function main(
     registry: resolveRegistry(env),
     platform: currentPlatform(),
     arch: currentArch(),
+    baselineEnv: baselineFromEnv(env),
     sink: {
       json: false,
       stdout: (line) => {

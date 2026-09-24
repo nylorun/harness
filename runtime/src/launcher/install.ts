@@ -52,8 +52,9 @@ function packageName(platform: string, arch: string): string {
 }
 
 function nodeBinaryRelative(platform: string): string {
+  // Matches scripts/lib/local-build.mjs installNodeBinary layout.
   return platform === "win32"
-    ? join("node", "node.exe")
+    ? join("node", "bin", "node.exe")
     : join("node", "bin", "node");
 }
 

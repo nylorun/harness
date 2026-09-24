@@ -77,4 +77,20 @@ export async function portBindable(
   });
 }
 
+export async function probeReady(
+  url: string,
+  timeoutMs = 2000,
+): Promise<boolean> {
+  try {
+    const response = await fetch(`${url}/ready`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) return false;
+    const body = (await response.json()) as { status?: string };
+    return body.status === "ready";
+  } catch {
+    return false;
+  }
+}
+
 export { processAlive };
