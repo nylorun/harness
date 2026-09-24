@@ -12,7 +12,7 @@ import { hookListIssue } from "./definition/hooks.js";
 import { DELEGATE_INPUT_SCHEMA } from "./definition/delegate.js";
 import { canonical } from "./utils/canonical.js";
 export type { AgentManifest } from "./types/manifest.js";
-export const PROTOCOL_VERSION = 1;
+export { PROTOCOL_VERSION } from "./compatibility.js";
 export const RequestIdSchema = z.string().min(1);
 export const IdempotencyKeySchema = z.string().min(1).max(256);
 const jsonObject = z.record(z.string(), z.unknown());
@@ -489,6 +489,7 @@ export const LiveEventSchema = z
   .object({
     eventId: z.string(),
     sessionId: z.string(),
+    tenantId: z.string().min(1),
     turnId: z.string().nullable(),
     cursor: z.string(),
     createdAt: z.string(),
@@ -630,14 +631,25 @@ export type RegisterExecutorsResponse = z.infer<
   typeof RegisterExecutorsResponseSchema
 >;
 export type ExecutorSummary = z.infer<typeof ExecutorSummarySchema>;
-// Health fields added after the beta stay optional so a new client can parse an older Runtime.
-export const HealthResponseSchema = z.object({
-  status: z.literal("ok"),
-  service: z.string(),
-  version: z.string().optional(),
-  scopeId: z.string().optional(),
-  pid: z.number().int().positive().optional(),
-});
+export const ProtocolRangeSchema = z
+  .object({
+    min: z.number().int(),
+    max: z.number().int(),
+    features: z.array(z.string()),
+  })
+  .strict();
+
+export const HealthResponseSchema = z
+  .object({
+    status: z.literal("ok"),
+    service: z.string(),
+    version: z.string(),
+    protocol: ProtocolRangeSchema,
+    coreVersion: z.string(),
+    hostId: z.string(),
+    pid: z.number().int(),
+  })
+  .strict();
 export const ReadyResponseSchema = z.object({
   status: z.enum(["ready", "not_ready"]),
   service: z.string(),
@@ -645,3 +657,188 @@ export const ReadyResponseSchema = z.object({
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type ReadyResponse = z.infer<typeof ReadyResponseSchema>;
+
+export const ProtocolRejectedResponseSchema = z
+  .object({
+    status: z.literal("rejected"),
+    code: z.literal("protocol_unsupported"),
+    protocol: ProtocolRangeSchema,
+  })
+  .strict();
+export type ProtocolRejectedResponse = z.infer<
+  typeof ProtocolRejectedResponseSchema
+>;
+
+export const TenantEnvelopeSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    createdAt: z.string().min(1),
+    updatedAt: z.string().min(1),
+    schemaVersion: z.number().int(),
+  })
+  .strict();
+export type TenantEnvelope = z.infer<typeof TenantEnvelopeSchema>;
+
+export const CreateTenantRequestSchema = z
+  .object({
+    tenantId: z.string().min(1),
+    name: z.string().min(1),
+    principalId: z.string().min(1),
+    credentialHash: z.string().regex(/^[0-9a-f]{64}$/),
+    idempotencyKey: IdempotencyKeySchema,
+  })
+  .strict();
+export type CreateTenantRequest = z.infer<typeof CreateTenantRequestSchema>;
+
+export const AdminTenantSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().nullable(),
+    state: z.enum(["open", "quarantined"]),
+    envelope: TenantEnvelopeSchema.nullable(),
+  })
+  .strict();
+export type AdminTenant = z.infer<typeof AdminTenantSchema>;
+
+export const QuarantineSchema = z
+  .object({
+    code: z.enum([
+      "locked",
+      "kek-missing",
+      "corrupt",
+      "schema-too-new",
+      "migration-failed",
+      "envelope-invalid",
+      "open-timeout",
+      "open-failed",
+    ]),
+    message: z.string(),
+    repair: z.string(),
+    lockPath: z.string().optional(),
+    lockPid: z.number().int().optional(),
+  })
+  .strict();
+export type QuarantineInfo = z.infer<typeof QuarantineSchema>;
+
+export const AdminTenantStatusSchema = AdminTenantSchema.extend({
+  quarantine: QuarantineSchema.optional(),
+});
+export type AdminTenantStatus = z.infer<typeof AdminTenantStatusSchema>;
+
+export const HostAggregateSchema = z
+  .object({
+    runningSessions: z.number().int().nonnegative(),
+    connectedExecutors: z.number().int().nonnegative(),
+    pendingActions: z.number().int().nonnegative(),
+    uncertainEffects: z.number().int().nonnegative(),
+  })
+  .strict();
+export type HostAggregate = z.infer<typeof HostAggregateSchema>;
+
+export const AdminHostStatusSchema = z
+  .object({
+    hostId: z.string().min(1),
+    url: z.string().min(1),
+    pid: z.number().int(),
+    version: z.string().min(1),
+    protocol: ProtocolRangeSchema,
+    tenants: z.array(AdminTenantSchema),
+    aggregate: HostAggregateSchema,
+  })
+  .strict();
+export type AdminHostStatus = z.infer<typeof AdminHostStatusSchema>;
+
+export const HostModelViewSchema = z.union([
+  z.object({ configured: z.literal(false) }).strict(),
+  z
+    .object({
+      configured: z.literal(true),
+      provider: z.string(),
+      model: z.string(),
+      authType: z.enum(["api_key", "oauth"]),
+      baseUrl: z.string().optional(),
+    })
+    .strict(),
+]);
+
+export const TenantStatusSchema = z
+  .object({
+    tenant: TenantEnvelopeSchema,
+    path: z.string().min(1),
+    checks: z
+      .object({
+        sqlite: z.boolean(),
+        scheduler: z.boolean(),
+        model: z.boolean(),
+        executors: z.boolean(),
+        schema: z.boolean(),
+      })
+      .strict(),
+    model: HostModelViewSchema,
+    agents: z.array(
+      z
+        .object({
+          agentId: z.string(),
+          registered: z.boolean(),
+          connected: z.boolean(),
+        })
+        .strict(),
+    ),
+    counts: z
+      .object({
+        sessions: z.number().int().nonnegative(),
+        runningSessions: z.number().int().nonnegative(),
+        pendingActions: z.number().int().nonnegative(),
+        uncertainEffects: z.number().int().nonnegative(),
+      })
+      .strict(),
+    sandbox: z
+      .object({
+        backend: z.string().nullable(),
+        retained: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict();
+export type TenantStatus = z.infer<typeof TenantStatusSchema>;
+
+const seedModelSchema = PutHostModelRequestSchema.omit({
+  requestId: true,
+  idempotencyKey: true,
+});
+
+export const SeedTenantConfigRequestSchema = z
+  .object({
+    requestId: RequestIdSchema,
+    sandbox: z
+      .object({
+        backend: z.enum(["auto", "microsandbox", "virtual"]),
+      })
+      .strict()
+      .optional(),
+    model: seedModelSchema.optional(),
+  })
+  .strict();
+export type SeedTenantConfigRequest = z.infer<
+  typeof SeedTenantConfigRequestSchema
+>;
+
+export const SeedTenantConfigResponseSchema = z
+  .object({
+    applied: z.array(z.string()),
+    kept: z.array(z.string()),
+  })
+  .strict();
+export type SeedTenantConfigResponse = z.infer<
+  typeof SeedTenantConfigResponseSchema
+>;
+
+export const ResetTenantRequestSchema = z
+  .object({
+    requestId: RequestIdSchema,
+    scope: z.enum(["sessions", "sandboxes", "all"]),
+    activeWork: z.enum(["drain", "cancel"]),
+  })
+  .strict();
+export type ResetTenantRequest = z.infer<typeof ResetTenantRequestSchema>;

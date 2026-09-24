@@ -1,5 +1,23 @@
 // Definition authoring and wire contracts are the only harness runtime imports.
 export {
+  hashManifest,
+  PROTOCOL_VERSION,
+  PROTOCOL_FEATURES,
+  HOST_PROTOCOL,
+  DEFINITION_SCHEMA_VERSION,
+  TENANT_HEADER,
+  PROTOCOL_HEADER,
+  TENANT_ID_PATTERN,
+  isTenantId,
+  newTenantId,
+  checkCompatibility,
+} from "@nylorun/core/compatibility";
+export type {
+  ProtocolFeature,
+  ProtocolRange,
+  Compatibility,
+} from "@nylorun/core/compatibility";
+export {
   Agent,
   AgentBuilder,
   AgentBuildError,

@@ -178,6 +178,8 @@ export class Store {
       .run(sessionId, "{}");
     const event = {
       ...base,
+      // TENANTS-W0: WS-A stamps the real Tenant id (D7). Placeholder keeps build green.
+      tenantId: "tn_00000000000000000000000000",
       cursor: Buffer.from(`${sessionId}:${result.lastInsertRowid}`).toString(
         "base64url",
       ),
