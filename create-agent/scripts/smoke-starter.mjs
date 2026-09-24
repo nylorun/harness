@@ -407,23 +407,35 @@ try {
         ...process.env,
         HOME: home,
         USERPROFILE: home,
-        // Still need local Runtime registry/build; only the model is missing.
         NYLORUN_HOME: missingHome,
         NYLORUN_REGISTRY: registry.url,
         PORT: String(missingPort),
+        // No fixture and no MODEL_* — vault model stays unconfigured.
         NYLORUN_DEV_MODEL: "",
       },
     },
   );
-  await missing.line(
-    (l) =>
-      l.includes("not configured") ||
-      l.includes("Model") ||
-      l.includes("provider") ||
-      l.includes("configure"),
-    60_000,
+  await missing.line(readyLine, 90_000);
+  const missingAuth = await readAuth(projects[1]);
+  const modelStatus = await fetch(
+    `${missingAuth.link.hostUrl}/v1/tenant/model`,
+    {
+      headers: {
+        authorization: `Bearer ${missingAuth.credentials.applicationKey}`,
+        "Nylorun-Tenant": missingAuth.link.tenantId,
+        "Nylorun-Protocol": "2",
+      },
+    },
   );
-  assert.notEqual(await missing.exit, 0);
+  assert.equal(modelStatus.status, 200);
+  const modelBody = await modelStatus.json();
+  assert.equal(
+    modelBody.configured,
+    false,
+    "expected unconfigured model without fixture/provider env",
+  );
+  await missing.stop();
+  await rm(missingHome, { recursive: true, force: true }).catch(() => {});
 
   console.log(
     "PASS: packed creator, both starters (ephemeral Host + fixture), browser tool/results, source restart, compiled npm start, shutdown, credentials, and missing-configuration error.",
