@@ -19,7 +19,9 @@ await connectAgents({ agents }).ready;
 Application mode saves definitions, registers **derived** executor credentials
 (HMAC of the application key + Tenant + agent id), and connects. Restarts and
 replicas re-register the same hashes; tokens are never stored in the Project.
-The same entry runs under `nylorun dev` and as `node dist/src/main.js`.
+The same entry runs under `nylorun dev` and as `node dist/src/main.js`
+(`npm start`). See [MIGRATION.md](../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta)
+for upgrading from `nylorun serve`.
 
 ## Connection resolution
 
