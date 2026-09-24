@@ -396,6 +396,7 @@ try {
   await headless.stop();
 
   const missingPort = await availablePort();
+  const missingHome = await mkdtemp(join(tmpdir(), "nylorun-release-missing-"));
   const missing = group.start(
     "missing-config",
     process.execPath,
@@ -406,6 +407,9 @@ try {
         ...process.env,
         HOME: home,
         USERPROFILE: home,
+        // Still need local Runtime registry/build; only the model is missing.
+        NYLORUN_HOME: missingHome,
+        NYLORUN_REGISTRY: registry.url,
         PORT: String(missingPort),
         NYLORUN_DEV_MODEL: "",
       },

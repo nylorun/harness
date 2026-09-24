@@ -7,6 +7,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn, fork } from "node:child_process";
 import {
   access,
+  chmod,
   cp,
   mkdir,
   mkdtemp,
@@ -142,10 +143,14 @@ async function writeHostFiles(hostRoot, { port = 0 } = {}) {
     join(hostRoot, "host.json"),
     JSON.stringify({ hostId, host: "127.0.0.1", port }, null, 2),
   );
+  const credentialsPath = join(hostRoot, "host-credentials.json");
   await writeFile(
-    join(hostRoot, "host-credentials.json"),
+    credentialsPath,
     JSON.stringify({ adminKey }, null, 2),
+    { mode: 0o600 },
   );
+  // umask can clear writeFile mode bits; enforce Admin API 0600 check.
+  await chmod(credentialsPath, 0o600);
   return { hostId, adminKey };
 }
 
