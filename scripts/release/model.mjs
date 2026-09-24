@@ -6,6 +6,7 @@ import readChangesets from "@changesets/read";
 import { readConfig } from "@changesets/config";
 import { getPackages } from "@manypkg/get-packages";
 import { root, packages, readJson, writeJson, run } from "../lib/repo.mjs";
+import { syncCliRuntimePin } from "./pins.mjs";
 import { planVersions } from "./version-policy.mjs";
 
 export async function prepareVersions(repo, channel) {
@@ -107,6 +108,12 @@ export async function prepareVersions(repo, channel) {
       "Clear legacy prerelease state before a latest dist-tag promotion.",
     );
   }
+  // D7: keep cli/package.json nylorun.runtime equal to the tested runtime.
+  const runtimePin =
+    calculated.plan.packages.runtime ??
+    calculated.plan.compatibility.runtime ??
+    before.runtime;
+  await syncCliRuntimePin(repo, runtimePin);
   await validatePlan(calculated.plan, repo);
   for (const [name, version] of Object.entries(calculated.plan.packages))
     await releaseNotes(repo, name, version);

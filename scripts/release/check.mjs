@@ -8,6 +8,7 @@ import {
 } from "../lib/repo.mjs";
 import { validatePlan, verifyReleaseCommit, releaseNotes } from "./model.mjs";
 import { packRelease, readArtifacts } from "./artifacts.mjs";
+import { assertRuntimePins } from "./pins.mjs";
 
 try {
   const args = process.argv.slice(2);
@@ -15,6 +16,7 @@ try {
   if (args.length > 1 || (args.length && !built))
     throw new Error("Usage: npm run release:check [-- --built]");
   await verifyToolchain();
+  await assertRuntimePins(root);
   if (process.env.RELEASE_SHA)
     await verifyReleaseCommit(root, process.env.RELEASE_SHA);
   const plan = await readJson(join(root, ".release/plan.json"));
