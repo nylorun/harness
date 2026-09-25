@@ -44,12 +44,26 @@ import {
   type EffectResolution,
 } from "@nylorun/harness/run";
 import {
+  aggregateWaits,
+  countActiveFlowWork,
   deriveSessionId,
   emitLoopActionEvents,
+  fenceWorkflowActions,
+  foreignInteractionConflict,
+  isFlowEffect,
+  isFlowToolEffect,
   isWorkflowManifest,
+  planCancelCascade,
   reconcilePendingAgentEffects,
+  reofferOrphanedFnVerifyClaims,
+  wakeForQueuedEffects,
   wakeLinkedWorkflow,
 } from "../core/flow-host.js";
+import {
+  mayDispatchMore,
+  resolveFlowLimits,
+  type FlowLimits,
+} from "../core/limits.js";
 import { hashManifest } from "@nylorun/core/compatibility";
 import {
   delegateManifest,
@@ -293,6 +307,7 @@ export class TenantRuntime implements TenantHandle {
   private readonly modelProvider: ModelProvider;
   private readonly useVaultModel: boolean;
   private readonly createKekIfMissing: boolean;
+  private readonly flowLimits: FlowLimits;
   readonly envelope: TenantEnvelope;
   private constructor(
     private readonly config: TenantConfig,
@@ -305,6 +320,10 @@ export class TenantRuntime implements TenantHandle {
       (!Number.isFinite(config.leaseMs) || config.leaseMs <= 0)
     )
       throw new Error("leaseMs must be finite and positive");
+    this.flowLimits = resolveFlowLimits({
+      flow: config.flow,
+      env: config.flowEnv,
+    });
     if (
       (config.model.kind === "fixture" || config.model.kind === "scripted") &&
       config.mode === "shared"
@@ -466,22 +485,7 @@ export class TenantRuntime implements TenantHandle {
     this.expireClaims();
     // Orphaned fn/verify claims from a prior process: re-offer immediately.
     this.store.tx(() => {
-      for (const action of this.store.all<Action>("actions")) {
-        if (
-          action.status === "claimed" &&
-          (action.kind === "fn" || action.kind === "verify")
-        ) {
-          action.status = "pending";
-          action.claimId = null;
-          action.leaseExpiresAt = null;
-          this.store.put("actions", action.actionId, action);
-          const s = this.store.get<Session>("sessions", action.sessionId);
-          if (s && (s.status === "waiting" || s.status === "running")) {
-            s.status = "runnable";
-            this.store.put("sessions", s.id, s);
-          }
-        }
-      }
+      reofferOrphanedFnVerifyClaims(this.store);
     });
     this.notify();
     this.timer = setInterval(
@@ -665,12 +669,26 @@ export class TenantRuntime implements TenantHandle {
         // A result can arrive during concurrent action persistence. Preserve the runnable marker.
         const resumeRequested = current.status === "runnable";
         if (result.status === "waiting" || result.status === "uncertain") {
-          current.status = resumeRequested
-            ? "runnable"
-            : current.status === "uncertain"
-            ? "uncertain"
-            : result.status;
-          current.waits = { effectIds: result.effectIds };
+          const linkedWaits = isWorkflowManifest(current.manifest)
+            ? aggregateWaits({
+                store: this.store,
+                workflowSessionId: id,
+              })
+            : [];
+          if (linkedWaits.length > 0 && !resumeRequested) {
+            current.status = "paused";
+            current.waits = linkedWaits;
+          } else {
+            current.status = resumeRequested
+              ? "runnable"
+              : current.status === "uncertain"
+                ? "uncertain"
+                : result.status;
+            current.waits =
+              linkedWaits.length > 0
+                ? linkedWaits
+                : { effectIds: result.effectIds };
+          }
         } else if ("result" in result) {
           const flow = isWorkflowManifest(current.manifest);
           if (!flow) {
@@ -743,6 +761,18 @@ export class TenantRuntime implements TenantHandle {
                       (event!.payload as { message?: string }).message ?? ""
                     )
                   : undefined,
+              schedule: (sid) => this.schedule(sid),
+              publish: (e) => this.publish(e),
+            });
+          });
+        }
+        if (event.type === "turn.cancelled") {
+          this.store.tx(() => {
+            wakeLinkedWorkflow({
+              agentSessionId: id,
+              store: this.store,
+              cancelled: true,
+              error: "Agent turn was cancelled",
               schedule: (sid) => this.schedule(sid),
               publish: (e) => this.publish(e),
             });
@@ -870,7 +900,8 @@ export class TenantRuntime implements TenantHandle {
       if (
         request.kind === "agent" ||
         request.kind === "fn" ||
-        request.kind === "verify"
+        request.kind === "verify" ||
+        isFlowToolEffect(request)
       ) {
         // Handled outside the agent-manifest path below.
         return { status: "pending", __flow: true } as any;
@@ -973,9 +1004,7 @@ export class TenantRuntime implements TenantHandle {
     if (
       resolution &&
       (resolution as any).__flow &&
-      (request.kind === "agent" ||
-        request.kind === "fn" ||
-        request.kind === "verify")
+      isFlowEffect(request)
     ) {
       return this.resolveNewFlowEffect(request, signal);
     }
@@ -1020,7 +1049,7 @@ export class TenantRuntime implements TenantHandle {
     }
   }
 
-  /** Journal and dispatch a new flow effect (agent / fn / verify). */
+  /** Journal and dispatch a new flow effect (agent / tool node / fn / verify). */
   private async resolveNewFlowEffect(
     request: HostEffect,
     signal: AbortSignal
@@ -1030,7 +1059,9 @@ export class TenantRuntime implements TenantHandle {
     if (existing) {
       if (existing.status === "completed")
         return { status: "completed", outcome: existing.outcome };
-      if (request.kind === "agent") {
+      if (existing.status === "queued") {
+        // Fall through to dispatch when a concurrency slot is free.
+      } else if (request.kind === "agent") {
         const agentSessionId = existing.agentSessionId as string | undefined;
         if (agentSessionId) {
           const agent = this.store.get<Session>("sessions", agentSessionId);
@@ -1043,38 +1074,120 @@ export class TenantRuntime implements TenantHandle {
             });
             return { status: "completed", outcome };
           }
+          if (agent?.status === "cancelled") {
+            const outcome = {
+              value: {
+                kind: "failed" as const,
+                code: "agent.cancelled",
+                message: agent.error ?? "Agent turn was cancelled",
+              },
+            };
+            this.store.tx(() => {
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+            });
+            return { status: "completed", outcome };
+          }
+          if (agent?.status === "failed") {
+            const outcome = {
+              value: {
+                kind: "failed" as const,
+                code: "agent.failed",
+                message: agent.error ?? "Agent turn failed",
+              },
+            };
+            this.store.tx(() => {
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+            });
+            return { status: "completed", outcome };
+          }
         }
+        return { status: "pending" };
+      } else {
+        return { status: "pending" };
+      }
+    }
+
+    const active = countActiveFlowWork(
+      this.store,
+      request.sessionId,
+      request.turnId
+    );
+    if (!mayDispatchMore(active, this.flowLimits)) {
+      if (!existing || existing.status !== "queued") {
+        this.store.tx(() => {
+          this.store.put("effects", request.effectId, {
+            request,
+            status: "queued",
+          });
+        });
       }
       return { status: "pending" };
     }
 
-    if (request.kind === "fn" || request.kind === "verify") {
+    if (
+      request.kind === "fn" ||
+      request.kind === "verify" ||
+      isFlowToolEffect(request)
+    ) {
       let event: LiveEvent | undefined;
+      let started: LiveEvent | undefined;
       this.store.tx(() => {
         const s = this.session(request.sessionId);
         this.store.put("effects", request.effectId, {
           request,
           status: "pending",
         });
-        const kind = request.kind as "fn" | "verify";
-        const action = {
-          actionId: request.effectId,
-          sessionId: request.sessionId,
-          turnId: request.turnId,
-          agentId: request.agentId,
-          manifestHash: request.manifestHash,
-          implementationVersion: s.implementationVersion,
-          input: request.input as any,
-          context: request.context,
-          status: "pending" as const,
-          generation: 0,
-          claimId: null,
-          leaseExpiresAt: null,
-          kind,
-          path: request.path!,
-          key: request.key!,
-        } satisfies Action;
+        const action =
+          request.kind === "fn" || request.kind === "verify"
+            ? ({
+                actionId: request.effectId,
+                sessionId: request.sessionId,
+                turnId: request.turnId,
+                agentId: request.agentId,
+                manifestHash: request.manifestHash,
+                implementationVersion: s.implementationVersion,
+                input: request.input as any,
+                context: request.context,
+                status: "pending" as const,
+                generation: 0,
+                claimId: null,
+                leaseExpiresAt: null,
+                kind: request.kind,
+                path: request.path!,
+                key: request.key!,
+              } satisfies Action)
+            : ({
+                actionId: request.effectId,
+                sessionId: request.sessionId,
+                turnId: request.turnId,
+                agentId: request.agentId,
+                manifestHash: request.manifestHash,
+                implementationVersion: s.implementationVersion,
+                input: request.input as any,
+                context: request.context,
+                status: "pending" as const,
+                generation: 0,
+                claimId: null,
+                leaseExpiresAt: null,
+                kind: "tool" as const,
+                path: request.path!,
+                key: request.key!,
+              } satisfies Action);
         this.store.put("actions", action.actionId, action);
+        if (isFlowToolEffect(request)) {
+          started = this.store.event(s.id, s.activeTurnId, "node.started", {
+            path: request.path!,
+            kind: "tool",
+            key: request.key!,
+            ...(request.iterations !== undefined
+              ? { iterations: request.iterations }
+              : {}),
+          });
+        }
         event = this.store.event(s.id, s.activeTurnId, "action.pending", {
           actionId: action.actionId,
           kind: action.kind,
@@ -1083,6 +1196,7 @@ export class TenantRuntime implements TenantHandle {
           input: action.input,
         });
       });
+      if (started) this.publish(started);
       if (event) this.publish(event);
       this.notify();
       return { status: "pending" };
@@ -1247,6 +1361,7 @@ export class TenantRuntime implements TenantHandle {
   ): unknown {
     let event: LiveEvent | undefined;
     const extraEvents: LiveEvent[] = [];
+    const cascadeCancelIds: string[] = [];
     let schedule = false;
     const response = this.store.tx(() => {
       const s = this.session(id);
@@ -1347,22 +1462,50 @@ export class TenantRuntime implements TenantHandle {
         };
         prior.receipt = receipt;
         this.store.put("effects", action.actionId, prior);
+        if (isWorkflowManifest(s.manifest) && s.activeTurnId) {
+          wakeForQueuedEffects({
+            store: this.store,
+            workflowSessionId: id,
+            turnId: s.activeTurnId,
+            limits: this.flowLimits,
+            schedule: (sid) => {
+              schedule = true;
+              void sid;
+            },
+          });
+        }
       } else if (command.type === "cancel") {
         const cancelledTurnId = s.activeTurnId;
+        const workflowCancel = isWorkflowManifest(s.manifest);
+        const cascade = workflowCancel
+          ? planCancelCascade({
+              store: this.store,
+              workflowSessionId: id,
+              turnId: cancelledTurnId,
+            })
+          : null;
         s.status = "cancelled";
-        for (const a of this.store.all<Action>("actions"))
-          if (
-            a.sessionId === id &&
-            a.turnId === cancelledTurnId &&
-            ["pending", "claimed"].includes(a.status)
-          ) {
-            // Claimed work may already have an external effect. Preserve it for reconciliation.
-            a.status = a.status === "claimed" ? "uncertain" : "cancelled";
-            this.store.put("actions", a.actionId, a);
-            const effect = this.store.get("effects", a.actionId);
-            effect.status = a.status;
-            this.store.put("effects", a.actionId, effect);
-          }
+        if (workflowCancel) {
+          fenceWorkflowActions({
+            store: this.store,
+            workflowSessionId: id,
+            turnId: cancelledTurnId,
+          });
+        } else {
+          for (const a of this.store.all<Action>("actions"))
+            if (
+              a.sessionId === id &&
+              a.turnId === cancelledTurnId &&
+              ["pending", "claimed"].includes(a.status)
+            ) {
+              // Claimed work may already have an external effect. Preserve it for reconciliation.
+              a.status = a.status === "claimed" ? "uncertain" : "cancelled";
+              this.store.put("actions", a.actionId, a);
+              const effect = this.store.get("effects", a.actionId);
+              effect.status = a.status;
+              this.store.put("effects", a.actionId, effect);
+            }
+        }
         for (const effect of this.store.all("effects"))
           if (
             effect.request.sessionId === id &&
@@ -1383,6 +1526,21 @@ export class TenantRuntime implements TenantHandle {
         s.checkpoint = undefined;
         s.waits = undefined;
         s.error = undefined;
+        // Cascade: cancel linked agent sessions deepest-first (after fencing this session).
+        if (cascade) {
+          for (const agentId of cascade.agentSessionIds) {
+            const agent = this.store.get<Session>("sessions", agentId);
+            if (
+              !agent ||
+              !agent.activeTurnId ||
+              ["idle", "completed", "failed", "cancelled"].includes(
+                agent.status
+              )
+            )
+              continue;
+            cascadeCancelIds.push(agentId);
+          }
+        }
       } else {
         if (command.type === "message") {
           if (!["idle", "completed", "failed", "cancelled"].includes(s.status))
@@ -1441,11 +1599,22 @@ export class TenantRuntime implements TenantHandle {
                   interactionId: command.interactionId,
                   value: command.value,
                 };
-          if (isWorkflowManifest(s.manifest))
+          if (isWorkflowManifest(s.manifest)) {
+            // Approvals owned by linked agent sessions must be answered there (WF-R52).
+            const conflict = foreignInteractionConflict({
+              store: this.store,
+              workflowSessionId: id,
+              interactionId: command.interactionId,
+            });
+            if (conflict)
+              fail(409, conflict.message);
+            // Workflow-owned interactions (tool-node / verify) resume on this session once
+            // the flow engine supports pause segments; tracer root Loop has none yet.
             fail(
               409,
-              "Workflow sessions do not accept approve/respond on the root (tracer)"
+              "Workflow sessions do not accept approve/respond on the root without a pending interaction"
             );
+          }
           s.checkpoint = createDurableCheckpoint({
             manifest: s.manifest,
             sessionId: id,
@@ -1484,6 +1653,39 @@ export class TenantRuntime implements TenantHandle {
     if (event) this.publish(event);
     for (const extra of extraEvents) this.publish(extra);
     if (input.type === "cancel") this.running.get(id)?.abort();
+    // Cascade cancel linked agents deepest-first under existing fencing (WF-R53).
+    for (const agentId of cascadeCancelIds) {
+      try {
+        this.command(
+          agentId,
+          {
+            type: "cancel",
+            requestId: `flow-cascade-${id}-${agentId}`,
+            idempotencyKey: `flow-cascade-cancel:${id}:${agentId}`,
+            reason: "workflow cancelled",
+          },
+          scope
+        );
+      } catch {
+        /* agent may already be terminal */
+      }
+    }
+    // Direct cancel of a linked agent fails that node with agent.cancelled (WF-R54).
+    if (input.type === "cancel") {
+      const link = this.store.get("links", id);
+      if (link) {
+        this.store.tx(() => {
+          wakeLinkedWorkflow({
+            agentSessionId: id,
+            store: this.store,
+            cancelled: true,
+            error: "Agent turn was cancelled",
+            schedule: (sid) => this.schedule(sid),
+            publish: (e) => this.publish(e),
+          });
+        });
+      }
+    }
     if (schedule) this.schedule(id);
     return response;
   }
@@ -1940,14 +2142,23 @@ export class TenantRuntime implements TenantHandle {
       credentialSelections: s.credentialSelections ?? [],
       mcpSnapshot: s.mcpSnapshot ?? null,
       mcpDiagnostics: s.mcpDiagnostics ?? [],
-      waits: Array.isArray(s.waits)
-        ? s.waits.map((call: any) => ({
-            invocationId: call.invocationId,
-            interaction: call.interaction,
-            wait: call.wait,
-            status: call.status,
-          }))
-        : s.waits,
+      waits: (() => {
+        if (isWorkflowManifest(s.manifest)) {
+          const aggregated = aggregateWaits({
+            store: this.store,
+            workflowSessionId: s.id,
+          });
+          if (aggregated.length > 0) return aggregated;
+        }
+        return Array.isArray(s.waits)
+          ? s.waits.map((call: any) => ({
+              invocationId: call.invocationId,
+              interaction: call.interaction,
+              wait: call.wait,
+              status: call.status,
+            }))
+          : s.waits;
+      })(),
       error: s.error,
       actions: this.store
         .all<Action>("actions")

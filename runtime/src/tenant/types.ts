@@ -5,6 +5,7 @@ import type {
   HostAggregate,
   TenantEnvelope,
 } from "@nylorun/core/contracts";
+import type { FlowLimits } from "../core/limits.js";
 import type { SandboxBackend } from "../sandbox/types.js";
 
 export type TenantMode = "shared" | "ephemeral" | "test";
@@ -43,6 +44,13 @@ export interface TenantConfig {
   model: TenantModelConfig;
   childEnv: Readonly<Record<string, string>>; // allowlisted base + Tenant HOME/TMPDIR
   leaseMs?: number;
+  /** Operator flow limits (`RuntimeOptions.flow` / `workflows.md` §13). */
+  flow?: Partial<FlowLimits>;
+  /**
+   * Optional env snapshot for `NYLORUN_FLOW_*`. Host passes this; the Runtime
+   * never reads ambient `process.env` for flow limits.
+   */
+  flowEnv?: Readonly<Record<string, string | undefined>>;
   vaultFetch?: typeof fetch;
   logger: Logger;
 }
