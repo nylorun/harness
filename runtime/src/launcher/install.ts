@@ -309,7 +309,7 @@ export async function install(
     throw new LauncherError(
       "platform_unsupported",
       `Platform ${options.platform} is not supported.`,
-      "Use macOS, Linux (glibc), or Windows x64.",
+      "Use macOS on Apple silicon, Linux (glibc), or Windows x64.",
     );
   }
   if (options.arch !== "arm64" && options.arch !== "x64") {
@@ -317,6 +317,14 @@ export async function install(
       "platform_unsupported",
       `Architecture ${options.arch} is not supported.`,
       "Use arm64 or x64.",
+    );
+  }
+  // No darwin-x64 build is published (see RUNTIME_BUILD_PLATFORMS).
+  if (options.platform === "darwin" && options.arch === "x64") {
+    throw new LauncherError(
+      "platform_unsupported",
+      "Runtime builds are not published for Intel macOS (darwin-x64).",
+      "Use macOS on Apple silicon, Linux (glibc), or Windows x64.",
     );
   }
 

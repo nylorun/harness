@@ -80,4 +80,18 @@ describe("F1-2 bootstrap", () => {
 
     await registry.close();
   });
+
+  it("rejects Intel macOS before downloading (no darwin-x64 build is published)", async () => {
+    const home = await temporaryRoot("nylorun-cli-home-");
+    roots.push(home);
+
+    await expect(
+      bootstrap(home, "0.9.0-f1-intel", {
+        registry: "http://127.0.0.1:9",
+        platform: { platform: "darwin", arch: "x64" },
+        onProgress: () => undefined,
+      }),
+    ).rejects.toThrow(/Intel macOS/);
+    expect(existsSync(join(home, "runtime"))).toBe(false);
+  });
 });

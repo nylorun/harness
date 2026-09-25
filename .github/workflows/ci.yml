@@ -82,11 +82,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          # No darwin-x64: RUNTIME_BUILD_PLATFORMS in scripts/lib/local-build.mjs.
+          - os: macos-15
             platform: darwin-arm64
-          # darwin-x64 lives in runtime-build-darwin-x64 (optional): GitHub-hosted
-          # macos-13 capacity has been unavailable for hours on this PR and a
-          # forever-queued matrix leg blocks the required `ci` aggregator.
           - os: ubuntu-latest
             platform: linux-x64
           - os: ubuntu-24.04-arm
@@ -139,9 +137,6 @@ jobs:
           else
             npm test --workspace @nylorun/runtime -- test/launcher
           fi
-  # darwin-x64 (macos-13) is omitted from required CI: GitHub-hosted macos-13
-  # capacity has been unavailable for hours on #110 (forever-queued legs block
-  # merge). Re-add when macos-13 runners are obtainable; darwin-arm64 remains.
   # J5: desktop contract smoke on the three desktop operating systems.
   desktop-contract:
     strategy:
@@ -194,14 +189,8 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - run: npm run check --workspace @nylorun/core
-      - run: npm run check --workspace @nylorun/cli
-      - run: npm run check --workspace @nylorun/harness
-      - run: npm run check --workspace @nylorun/agents
-      - run: npm run check --workspace @nylorun/runtime
-      - run: npm run check --workspace @nylorun/studio
-      - run: npm run check --workspace @nylorun/create-agent
+      # Declared workspace order is dependency order; each check builds its package.
+      - run: npm run check --workspaces
   ci:
     if: always()
     needs: [check, test, runtime-build, desktop-contract, supervisor, consumers]

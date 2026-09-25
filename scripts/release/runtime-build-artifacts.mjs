@@ -17,7 +17,7 @@ export async function readRuntimeBuildArtifacts(directory, runtimeVersion) {
   } catch (error) {
     if (error.code === "ENOENT")
       throw new Error(
-        `Missing Runtime build index at ${indexPath}. The publish matrix must upload five platform tarballs.`,
+        `Missing Runtime build index at ${indexPath}. The publish matrix must upload four platform tarballs.`,
       );
     throw error;
   }

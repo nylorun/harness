@@ -18,9 +18,10 @@ import { pathToFileURL } from "node:url";
 import { packWorkspacePackages } from "./workspace-host-install.mjs";
 import { npm, readJson, root, writeJson } from "./repo.mjs";
 
+// No darwin-x64: microsandbox ships no Intel macOS binary and GitHub-hosted
+// Intel macOS runners end in Aug 2027.
 export const RUNTIME_BUILD_PLATFORMS = [
   "darwin-arm64",
-  "darwin-x64",
   "linux-x64",
   "linux-arm64",
   "win32-x64",
