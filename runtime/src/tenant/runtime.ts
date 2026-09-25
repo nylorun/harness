@@ -46,8 +46,9 @@ import {
 } from "@nylorun/harness/run";
 import {
   aggregateWaits,
+  cancelSiblingWork,
   countActiveFlowWork,
-  deriveSessionId,
+  deriveAgentEffectSessionId,
   emitLoopActionEvents,
   fenceWorkflowActions,
   foreignInteractionConflict,
@@ -730,6 +731,7 @@ export class TenantRuntime implements TenantHandle {
             checkpoint: current.checkpoint as FlowCheckpoint,
             signal: controller.signal,
             host,
+            limits: this.flowLimits,
           })
         : await runDurable({
             manifest: turnManifestOf(current),
@@ -739,6 +741,7 @@ export class TenantRuntime implements TenantHandle {
             host,
           });
       let event: LiveEvent | undefined;
+      const siblingCancelIds: string[] = [];
       this.store.tx(() => {
         const current = this.session(id);
         if (
@@ -790,6 +793,23 @@ export class TenantRuntime implements TenantHandle {
               : undefined;
           if (result.status === "completed")
             current.lastOutput = (result.result as any).output;
+          // Fail-fast: cancel pending Parallel/Map siblings before clearing the turn.
+          if (
+            result.status === "failed" &&
+            flow &&
+            "cancelEffectIds" in result &&
+            Array.isArray(result.cancelEffectIds) &&
+            result.cancelEffectIds.length > 0 &&
+            s.activeTurnId
+          ) {
+            const cancelResult = cancelSiblingWork({
+              store: this.store,
+              workflowSessionId: id,
+              turnId: s.activeTurnId,
+              cancelEffectIds: result.cancelEffectIds,
+            });
+            siblingCancelIds.push(...cancelResult.agentSessionIds);
+          }
           if (result.status !== "paused") current.activeTurnId = null;
           event = this.store.event(
             id,
@@ -823,6 +843,25 @@ export class TenantRuntime implements TenantHandle {
         }
         this.store.put("sessions", id, current);
       });
+      for (const agentId of siblingCancelIds) {
+        try {
+          this.command(
+            agentId,
+            {
+              type: "cancel",
+              requestId: `flow-sibling-${id}-${agentId}`,
+              idempotencyKey: `flow-sibling-cancel:${id}:${agentId}:${s.activeTurnId}`,
+              reason: "sibling branch failed",
+            },
+            {
+              kind: "application",
+              principalId: "flow-host",
+            }
+          );
+        } catch {
+          /* agent may already be terminal */
+        }
+      }
       if (event) {
         this.publish(event);
         if (event.type === "turn.completed" || event.type === "turn.failed") {
@@ -1298,7 +1337,7 @@ export class TenantRuntime implements TenantHandle {
     };
     const path = body.path ?? request.path!;
     const workflow = this.session(request.sessionId);
-    const agentSessionId = deriveSessionId(workflow.id, path);
+    const agentSessionId = deriveAgentEffectSessionId(workflow.id, path, request);
     const iterations = request.iterations ?? "-";
     const n = Number(request.context.n ?? iterations.split(".")[0] ?? 1);
 

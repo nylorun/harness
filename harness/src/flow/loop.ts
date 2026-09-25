@@ -5,6 +5,7 @@ import type { DurableHost } from "../run/durable.js";
 import { HostSuspension } from "../loop/host-suspension.js";
 import type { FlowCheckpoint } from "./checkpoint.js";
 import { createFlowContext, failureOf, settleInFlight, type FlowContext } from "./context.js";
+import { assertLoopIteration, type FlowOperatorLimits } from "./limits.js";
 import { joinPath, nodeKeyOf } from "./paths.js";
 import { runNode, unwrapSlot } from "./node.js";
 import { FlowNodeError, type FlowDurableResult, type FlowRunResult } from "./types.js";
@@ -65,6 +66,7 @@ export async function runLoop(options: {
   readonly checkpoint: FlowCheckpoint;
   readonly host: DurableHost;
   readonly signal?: AbortSignal;
+  readonly limits?: Partial<FlowOperatorLimits> | null;
 }): Promise<FlowDurableResult> {
   const { manifest, checkpoint, host } = options;
   const root = manifest.root;
@@ -76,6 +78,7 @@ export async function runLoop(options: {
     checkpoint,
     host,
     signal: options.signal,
+    limits: options.limits,
   });
 
   try {
@@ -103,6 +106,9 @@ export async function runLoop(options: {
       status: "failed",
       checkpoint,
       result: { status: "failed", error: failure },
+      ...(ctx.cancelEffectIds.size > 0
+        ? { cancelEffectIds: [...ctx.cancelEffectIds] }
+        : {}),
     };
   }
 }
@@ -129,6 +135,9 @@ export async function runLoopNode(
   for (;;) {
     if (ctx.signal?.aborted)
       throw new FlowNodeError({ code: "cancelled", message: "cancelled", path });
+
+    // Operator ceiling before starting this iteration (WF-L3 / LOOP-A8).
+    assertLoopIteration(iteration, ctx.limits, path);
 
     ctx.iterations = [...ctx.iterations, iteration];
     const iterations = ctx.iterationsString();

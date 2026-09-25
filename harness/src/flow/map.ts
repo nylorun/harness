@@ -3,6 +3,7 @@ import type { WorkflowMapNode } from "@nylorun/core";
 import { HostSuspension } from "../loop/host-suspension.js";
 import type { FlowContext } from "./context.js";
 import { failureOf, markFailFastCancels } from "./context.js";
+import { assertMapItemCount } from "./limits.js";
 import { FlowNodeError } from "./types.js";
 import { mapItemPath, nodeKeyOf } from "./paths.js";
 import { runNode, unwrapSlot } from "./node.js";
@@ -27,6 +28,8 @@ export async function runMap(
   }
 
   const items = over as JsonValue[];
+  // Operator ceiling before any item starts (WF-L2 / MAP-E2).
+  assertMapItemCount(items.length, ctx.limits, path);
   // Runtime emits map.items { path, count } after over is journaled.
   if (items.length === 0) return [];
 

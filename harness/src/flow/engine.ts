@@ -6,6 +6,7 @@ import { HostSuspension } from "../loop/host-suspension.js";
 import { CHECKPOINT_VERSION, FLOW_ENGINE_VERSION } from "../compatibility.js";
 import type { FlowCheckpoint } from "./checkpoint.js";
 import { createFlowContext, failureOf, settleInFlight } from "./context.js";
+import type { FlowOperatorLimits } from "./limits.js";
 import { runNode, unwrapSlot } from "./node.js";
 import { runLoop } from "./loop.js";
 import { FlowNodeError, type FlowDurableResult } from "./types.js";
@@ -19,8 +20,10 @@ export async function runFlowDurable(options: {
   checkpoint: FlowCheckpoint;
   host: DurableHost;
   signal?: AbortSignal;
+  /** Operator ceilings (`maxMapItems`, `maxLoopIterations`). Host/Runtime supplies these. */
+  limits?: Partial<FlowOperatorLimits> | null;
 }): Promise<FlowDurableResult> {
-  const { manifest, checkpoint, host, signal } = options;
+  const { manifest, checkpoint, host, signal, limits } = options;
   WorkflowManifestSchema.parse(manifest);
   if (
     checkpoint.version !== CHECKPOINT_VERSION ||
@@ -32,9 +35,9 @@ export async function runFlowDurable(options: {
   const root = manifest.root;
 
   // Root Loop keeps the dedicated entry (history / verify wiring).
-  if ("loop" in root) return runLoop({ manifest, checkpoint, host, signal });
+  if ("loop" in root) return runLoop({ manifest, checkpoint, host, signal, limits });
 
-  const ctx = createFlowContext({ manifest, checkpoint, host, signal });
+  const ctx = createFlowContext({ manifest, checkpoint, host, signal, limits });
   const { part } = unwrapSlot(root);
   const rootPath = part;
 
@@ -63,6 +66,9 @@ export async function runFlowDurable(options: {
       status: "failed",
       checkpoint,
       result: { status: "failed", error: failure },
+      ...(ctx.cancelEffectIds.size > 0
+        ? { cancelEffectIds: [...ctx.cancelEffectIds] }
+        : {}),
     };
   }
 }

@@ -6,6 +6,7 @@ import {
   applyFlowLeaseExpiry,
   cancelSiblingWork,
   countActiveFlowWork,
+  deriveAgentEffectSessionId,
   deriveSessionId,
   emitMapItems,
   emitNodeCompleted,
@@ -93,6 +94,98 @@ it("WF-R22: deriveSessionId is stable for (workflowSessionId, path)", () => {
   expect(a.startsWith("wf_")).toBe(true);
 });
 
+it("LOOP-R28/R6: verify-agent sessions differ across Loop iterations", () => {
+  const path = "polish/judge";
+  const iter1 = deriveAgentEffectSessionId("wf-1", path, {
+    turnId: "turn-1",
+    iterations: "1",
+    context: { role: "verify-agent" },
+  });
+  const iter2 = deriveAgentEffectSessionId("wf-1", path, {
+    turnId: "turn-1",
+    iterations: "2",
+    context: { role: "verify-agent" },
+  });
+  const runAgent = deriveAgentEffectSessionId("wf-1", path, {
+    turnId: "turn-1",
+    iterations: "1",
+    context: {},
+  });
+  expect(iter1).not.toBe(iter2);
+  expect(iter1).not.toBe(runAgent);
+  expect(iter1).toBe(
+    deriveSessionId("wf-1", path, "verify", "turn-1", "1")
+  );
+  expect(iter2).toBe(
+    deriveSessionId("wf-1", path, "verify", "turn-1", "2")
+  );
+});
+
+it("PAR-R6/A2: cancelSiblingWork with cancelEffectIds cancels pending siblings", () => {
+  const store = memoryStore();
+  store.put("sessions", "wf-1", {
+    id: "wf-1",
+    status: "running",
+    activeTurnId: "turn-1",
+  });
+  const styleId = deriveSessionId("wf-1", "review/style");
+  const testsId = deriveSessionId("wf-1", "review/tests");
+  store.put("sessions", styleId, {
+    id: styleId,
+    status: "completed",
+    activeTurnId: null,
+  });
+  store.put("sessions", testsId, {
+    id: testsId,
+    status: "running",
+    activeTurnId: "at-tests",
+  });
+  store.put("links", styleId, {
+    workflowSessionId: "wf-1",
+    path: "review/style",
+    effectId: "e-style",
+    turnId: "turn-1",
+  } satisfies FlowLink);
+  store.put("links", testsId, {
+    workflowSessionId: "wf-1",
+    path: "review/tests",
+    effectId: "e-tests",
+    turnId: "turn-1",
+  } satisfies FlowLink);
+  store.put("effects", "e-tests", {
+    request: {
+      effectId: "e-tests",
+      sessionId: "wf-1",
+      turnId: "turn-1",
+      path: "review/tests",
+      kind: "agent",
+    },
+    status: "pending",
+    agentSessionId: testsId,
+  });
+  store.put("actions", "pending-tool", {
+    actionId: "pending-tool",
+    sessionId: "wf-1",
+    turnId: "turn-1",
+    status: "pending",
+    kind: "tool",
+    path: "review/tests/lint",
+    key: "review/tests/lint",
+  });
+  store.put("effects", "pending-tool", { status: "pending" });
+
+  const result = cancelSiblingWork({
+    store,
+    workflowSessionId: "wf-1",
+    turnId: "turn-1",
+    cancelEffectIds: ["e-tests"],
+  });
+  expect(result.agentSessionIds).toContain(testsId);
+  expect(result.agentSessionIds).not.toContain(styleId);
+  expect(result.cancelledActions).toContain("pending-tool");
+  expect(store.get("effects", "e-tests")?.status).toBe("cancelled");
+  expect(store.get<Action>("actions", "pending-tool")?.status).toBe("cancelled");
+});
 it("WF-EV7: tool-node actions carry path and key on action.pending", () => {
   const store = memoryStore();
   const session: FlowHostSession = {

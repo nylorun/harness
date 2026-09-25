@@ -2,6 +2,10 @@ import type { JsonValue, WorkflowManifest } from "@nylorun/core/define";
 import type { DurableHost, HostEffect } from "../run/durable.js";
 import { HostSuspension } from "../loop/host-suspension.js";
 import type { FlowCheckpoint } from "./checkpoint.js";
+import {
+  resolveOperatorLimits,
+  type FlowOperatorLimits,
+} from "./limits.js";
 import { flowEffectId, iterationsOf, nodeKeyOf } from "./paths.js";
 import { failedValueOf, FlowNodeError, type FlowFailure } from "./types.js";
 
@@ -12,6 +16,8 @@ export type FlowContext = {
   readonly checkpoint: FlowCheckpoint;
   readonly host: DurableHost;
   readonly signal?: AbortSignal;
+  /** Operator ceilings (Map items / Loop iterations). */
+  readonly limits: FlowOperatorLimits;
   readonly pending: Map<string, "pending" | "uncertain">;
   readonly inFlight: Set<Promise<unknown>>;
   /** Nearest enclosing Chain `results`, outermost first. */
@@ -35,6 +41,7 @@ export function createFlowContext(options: {
   readonly checkpoint: FlowCheckpoint;
   readonly host: DurableHost;
   readonly signal?: AbortSignal;
+  readonly limits?: Partial<FlowOperatorLimits> | null;
 }): FlowContext {
   const pending = new Map<string, "pending" | "uncertain">();
   const inFlight = new Set<Promise<unknown>>();
@@ -45,6 +52,7 @@ export function createFlowContext(options: {
     checkpoint: options.checkpoint,
     host: options.host,
     signal: options.signal,
+    limits: resolveOperatorLimits(options.limits),
     pending,
     inFlight,
     resultsStack,

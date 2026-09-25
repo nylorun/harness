@@ -17,9 +17,16 @@ export type FlowDurableResult =
       readonly effectIds: readonly string[];
     }
   | {
-      readonly status: "completed" | "paused" | "cancelled" | "failed";
+      readonly status: "completed" | "paused" | "cancelled";
       readonly checkpoint: FlowCheckpoint;
       readonly result: FlowRunResult;
+    }
+  | {
+      readonly status: "failed";
+      readonly checkpoint: FlowCheckpoint;
+      readonly result: FlowRunResult;
+      /** Pending sibling effect ids to cancel after Parallel/Map fail-fast. */
+      readonly cancelEffectIds?: readonly string[];
     };
 
 export type FlowFailure = {

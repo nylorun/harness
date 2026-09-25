@@ -349,4 +349,62 @@ describe("flow Loop (tracer)", () => {
     });
     expect(seen).toEqual([{ input: "loop-input", output: "draft", iteration: 1 }]);
   });
+
+  it("loop.too-many-iterations stops runaway Loop (LOOP-A8,WF-E13,WF-L3)", async () => {
+    const writer = Agent({ id: "writer", instructions: "Write." }).build();
+    const workflow = Loop({
+      id: "polish",
+      run: writer,
+      verify: () => ({ pass: false, feedback: "again" }),
+      decide: ({ verdict }) => ({ input: verdict.feedback ?? "again" }),
+    });
+    const journal = new Map<string, EffectResolution>();
+    let agentStarts = 0;
+    const host: DurableHost = {
+      async resolveEffect(effect) {
+        const recorded = journal.get(effect.effectId);
+        if (recorded) return recorded;
+        let resolution: EffectResolution;
+        if (effect.kind === "agent") {
+          agentStarts += 1;
+          resolution = {
+            status: "completed",
+            outcome: { value: `draft-v${effect.iterations}` },
+          };
+        } else if (effect.kind === "verify") {
+          resolution = {
+            status: "completed",
+            outcome: { value: { pass: false, feedback: "again" } },
+          };
+        } else {
+          resolution = {
+            status: "completed",
+            outcome: { value: { input: "again" } },
+          };
+        }
+        journal.set(effect.effectId, resolution);
+        return resolution;
+      },
+    };
+    const result = await runFlowDurable({
+      manifest: workflow.manifest,
+      checkpoint: createFlowCheckpoint({
+        manifest: workflow.manifest,
+        sessionId: "wf",
+        turnId: "t",
+        input: "draft",
+      }),
+      host,
+      limits: { maxLoopIterations: 3 },
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      result: {
+        status: "failed",
+        error: { code: "loop.too-many-iterations", path: "polish" },
+      },
+    });
+    // Iterations 1..3 ran; iteration 4 was rejected before starting.
+    expect(agentStarts).toBe(3);
+  });
 });

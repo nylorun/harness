@@ -20,6 +20,37 @@ export function deriveSessionId(
   return `wf_${digest}`;
 }
 
+/**
+ * Linked agent session id for a flow agent effect.
+ * Verifier agents (`context.role === "verify-agent"`) get a unique session per
+ * (path, turnId, iterations) so prior verdicts cannot leak across Loop iterations.
+ */
+export function deriveAgentEffectSessionId(
+  workflowSessionId: string,
+  path: string,
+  request: {
+    readonly turnId: string;
+    readonly iterations?: string;
+    readonly context?: Record<string, unknown>;
+  }
+): string {
+  if (request.context?.role === "verify-agent") {
+    const iterations = request.iterations ?? "-";
+    const iterParts =
+      iterations !== "-" && iterations.length > 0
+        ? iterations.split(".")
+        : [];
+    return deriveSessionId(
+      workflowSessionId,
+      path,
+      "verify",
+      request.turnId,
+      ...iterParts
+    );
+  }
+  return deriveSessionId(workflowSessionId, path);
+}
+
 export function isWorkflowManifest(
   manifest: unknown
 ): manifest is WorkflowManifest {
@@ -365,7 +396,7 @@ function startAgentEffect(input: {
     path: string;
   };
   const path = body.path ?? request.path!;
-  const agentSessionId = deriveSessionId(session.id, path);
+  const agentSessionId = deriveAgentEffectSessionId(session.id, path, request);
   const iterations = request.iterations ?? "-";
   const n = Number(request.context.n ?? iterations.split(".")[0] ?? 1);
 
@@ -455,9 +486,10 @@ function settleAgentEffect(
 
   const agentSessionId =
     effect.agentSessionId ??
-    deriveSessionId(
+    deriveAgentEffectSessionId(
       input.session.id,
-      (input.request.input as { path?: string }).path ?? input.request.path!
+      (input.request.input as { path?: string }).path ?? input.request.path!,
+      input.request
     );
   const agent = input.readSession(agentSessionId);
   if (!agent) return undefined;
@@ -892,21 +924,44 @@ export function planCancelCascade(input: {
  * Cancel sibling work under a Parallel/Map parent when one branch fails (PAR-R6).
  * Agent turns listed in `agentSessionIds` are returned for the caller to cancel;
  * pending actions → cancelled, claimed tool actions → uncertain.
+ * When `cancelEffectIds` is provided, those effects are marked cancelled and their
+ * paths are included in the sibling path set.
  */
 export function cancelSiblingWork(input: {
   readonly store: FlowHostStore;
   readonly workflowSessionId: string;
   readonly turnId: string;
   /** Paths of siblings still running (not the failed branch). */
-  readonly siblingPaths: readonly string[];
+  readonly siblingPaths?: readonly string[];
+  /** Effect ids the flow engine marked for fail-fast cancel. */
+  readonly cancelEffectIds?: readonly string[];
 }): CancelSiblingResult {
   const cancelledActions: string[] = [];
   const uncertainActions: string[] = [];
   const agentSessionIds: string[] = [];
 
+  const siblingPaths = new Set<string>(input.siblingPaths ?? []);
+  for (const effectId of input.cancelEffectIds ?? []) {
+    const effect = input.store.get("effects", effectId);
+    if (!effect) continue;
+    const path =
+      typeof effect.request?.path === "string"
+        ? effect.request.path
+        : undefined;
+    if (path) siblingPaths.add(path);
+    if (
+      effect.status === "pending" ||
+      effect.status === "queued" ||
+      effect.status === "uncertain"
+    ) {
+      effect.status = "cancelled";
+      input.store.put("effects", effectId, effect);
+    }
+  }
+
   const matchesSibling = (path: string | undefined): boolean => {
     if (!path) return false;
-    return input.siblingPaths.some(
+    return [...siblingPaths].some(
       (sib) => path === sib || path.startsWith(`${sib}/`)
     );
   };

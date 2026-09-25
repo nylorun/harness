@@ -409,6 +409,9 @@ describe("flow Parallel", () => {
     expect(journal.get(seen.find((e) => e.path === "review/tests")!.effectId)?.status).toBe(
       "pending",
     );
+    expect(result.cancelEffectIds).toContain(
+      seen.find((e) => e.path === "review/tests")!.effectId,
+    );
   });
 });
 
@@ -494,6 +497,36 @@ describe("flow Map", () => {
     });
   });
 
+  it("map.too-many-items before any item starts (MAP-E2,MAP-A3,WF-E9,WF-L2)", async () => {
+    const manifest = manifestOf({
+      map: { id: "write", over: { fn: true }, each: { agent: "w" } },
+    });
+    const { host, seen } = fakeHost({
+      fn: () => [0, 1, 2],
+      agent: () => "x",
+    });
+    const result = await runFlowDurable({
+      manifest,
+      checkpoint: createFlowCheckpoint({
+        manifest,
+        sessionId: "s1",
+        turnId: "t1",
+        input: {},
+      }),
+      host,
+      limits: { maxMapItems: 2 },
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      result: {
+        status: "failed",
+        error: { code: "map.too-many-items", path: "write" },
+      },
+    });
+    expect(seen.filter((e) => e.kind === "agent")).toHaveLength(0);
+    expect(seen.filter((e) => e.kind === "fn")).toHaveLength(1);
+  });
+
   it("fail-fast cancels siblings; error path includes index (MAP-R6,E4,A4,D3)", async () => {
     const manifest = manifestOf({
       map: { id: "write", over: { fn: true }, each: { agent: "w" } },
@@ -523,6 +556,7 @@ describe("flow Map", () => {
     const pending = seen.find((e) => e.path === "write[2]/w");
     expect(pending).toBeTruthy();
     expect(journal.get(pending!.effectId)?.status).toBe("pending");
+    expect(result.cancelEffectIds).toContain(pending!.effectId);
   });
 
   it("replays journaled over list after partial progress (MAP-R12,A1)", async () => {
