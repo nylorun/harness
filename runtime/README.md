@@ -15,19 +15,23 @@ npm run build --workspace @nylorun/harness
 npm run build --workspace @nylorun/runtime
 ```
 
-## Runtime builds and the launcher
+## Install and the launcher
 
-Each release also publishes per-platform **Runtime builds**
-(`@nylorun/runtime-<platform>-<arch>`) that contain:
+Developers install the Runtime as a prerequisite; nothing downloads it for
+them ([runtime distribution](../docs/design/runtime-distribution.md)):
 
-- checksum-verified Node (`nylorun.node` pin),
-- this package installed with production dependencies,
-- the **launcher** (`nylorun-runtime`) — source in `src/launcher/`, not listed
-  in `exports`.
+```sh
+node --version                            # 24 or newer
+npm install --global @nylorun/runtime     # provides nylorun-runtime
+nylorun-runtime --version
+```
 
-Clients (CLI, desktop apps) run the launcher of the newest installed build as a
-process. Prefer `nylorun runtime up` or the desktop bootstrap flow; do not add
-this package as an application dependency. For tests and ephemeral embeds, use
+The **launcher** (`nylorun-runtime`, source in `src/launcher/`, not listed in
+`exports`) starts, stops and restarts the Host on the Node it runs on, from
+this package. Clients (CLI, desktop apps) find it on PATH and run it as a
+process; prefer `nylorun runtime up`. A project may instead add this package
+as a devDependency to pin its Runtime version; do not make it an application
+production dependency. For tests and ephemeral embeds, use
 `startEphemeralRuntime()` from `@nylorun/runtime/core`. See
 [MIGRATION.md](../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta) and
 [building a desktop client](../docs/building-a-desktop-client.md).
@@ -43,7 +47,6 @@ is `NYLORUN_HOME` or `~/.nylorun`. Tenants live under `tenants/<tenantId>/`.
   host-state.json           # pid, url — removed on shutdown
   host-credentials.json     # adminKey (0600)
   runtime.log
-  runtime/<version>/        # Runtime build (manifest, node, launcher, lib)
   tenants/<tenantId>/       # envelope, SQLite, KEK, logs, sandboxes, …
   trash/                    # deleted Tenants
 ```

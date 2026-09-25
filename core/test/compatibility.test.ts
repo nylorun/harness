@@ -17,7 +17,6 @@ import {
   ProjectCredentialsFileSchema,
   ProjectLinkFileSchema,
   RejectedResponseSchema,
-  RuntimeBuildManifestSchema,
 } from "../src/contracts.js";
 
 const CROCKFORD = /^[0-9a-hjkmnp-tv-z]+$/;
@@ -112,27 +111,13 @@ describe("Wave 0 schemas", () => {
     expect(link.format).toBe(0);
   });
 
-  it("parses Project credentials and build manifest", () => {
+  it("parses Project credentials", () => {
     expect(
       ProjectCredentialsFileSchema.parse({
         format: 1,
         applicationKey: "a".repeat(64),
         principalId: "pr_00000000000000000000000000",
       }).format,
-    ).toBe(1);
-    expect(
-      RuntimeBuildManifestSchema.parse({
-        format: 1,
-        runtimeVersion: "0.9.0-beta",
-        platform: "linux",
-        arch: "x64",
-        node: { version: "24.15.0" },
-        entry: "runtime/dist/host/main.js",
-        launcher: "runtime/dist/launcher/main.js",
-        launcherProtocol: 1,
-        protocol: { min: 2, max: 2, features: ["runtime-tenants"] },
-        tenantSchema: { max: 2 },
-      }).launcherProtocol,
     ).toBe(1);
   });
 

@@ -70,7 +70,7 @@ export function emitError(
   }
   emitEvent(sink, {
     type: "error",
-    code: "install_failed",
+    code: "launcher_failed",
     message: error.message,
     remedy: "Retry the command. If it keeps failing, check runtime.log.",
   });

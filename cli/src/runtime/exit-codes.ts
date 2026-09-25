@@ -10,10 +10,8 @@ export const LAUNCHER_ERROR_EXIT_CODES: Record<string, number> = {
   incompatible_host: 5,
   protocol_unsupported: 5,
   // Everything else falls through to 1.
-  version_required: 1,
   platform_unsupported: 1,
-  install_failed: 1,
-  integrity_mismatch: 1,
+  launcher_failed: 1,
   lock_timeout: 1,
   host_unresponsive: 1,
   host_schema_newer: 1,

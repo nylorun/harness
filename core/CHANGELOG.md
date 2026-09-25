@@ -6,11 +6,11 @@
 
 - c49efed: **Runtime Clients and Admin API (supporting packages).**
 
-  - **core:** `AdminStatusSchema`, Project-link and build-manifest schemas, `ERROR_CODES`, `admin-status` feature, `newPrincipalId`, `compareVersions`.
-  - **runtime:** `/v1/admin/status` (alias `/v1/admin/host`), loopback/`Origin`/content-type checks; launcher source under `src/launcher/` (not in `exports`) shipped inside per-platform **Runtime builds**.
+  - **core:** `AdminStatusSchema`, Project-link schemas, `ERROR_CODES` (launcher codes include `platform_unsupported`, `launcher_failed`, `downgrade_refused`), `admin-status` feature, `newPrincipalId`, `compareVersions`.
+  - **runtime:** `/v1/admin/status` (alias `/v1/admin/host`), loopback/`Origin`/content-type checks; the launcher ships as this package's `nylorun-runtime` bin (source under `src/launcher/`, not in `exports`) and runs the Host on the Node it runs on.
   - **studio:** `nylorun-studio` binary; connects via `resolveConnection`; waits for `dev`; never calls Admin API or writes `.nylorun/`.
 
-  **New packages (not workspace members):** `@nylorun/runtime-<platform>-<arch>` at the same version as `@nylorun/runtime`, for `darwin-arm64`, `linux-x64`, `linux-arm64`, and `win32-x64` (no Intel macOS build). Each build contains Node, `@nylorun/runtime` with production dependencies, and the `nylorun-runtime` launcher. Release tooling packs and publishes them after `@nylorun/runtime` and before `@nylorun/cli` (`scripts/release/runtime-builds.mjs`).
+  **Prerequisites:** developers install Node 24+ and `@nylorun/runtime` (`npm install --global @nylorun/runtime`) themselves; no package downloads Node or the Runtime, and there are no per-platform Runtime packages. Launcher commands: `version`, `up`, `down`, `restart`, `run`, `status`, `logs` (launcher protocol 1).
 
 - c49efed: **Breaking (pre-1.0 minor):** Replace a single SQLite Runtime per Project or home directory with a **Runtime Host** that serves isolated **Tenants**, selected by `Nylorun-Tenant` and negotiated with `Nylorun-Protocol` (protocol `2`, feature `runtime-tenants`). Vocabulary: Host root + Tenant + Project link.
 

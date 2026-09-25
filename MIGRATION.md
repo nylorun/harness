@@ -7,10 +7,18 @@ Vocabulary: [runtime/src/CONTEXT.md](./runtime/src/CONTEXT.md). Companion docs:
 
 Every process that talks to a Runtime is a **client**. Two client packages
 cover the two surfaces: `@nylorun/agents` (Tenant API) and `@nylorun/admin`
-(Admin API). A local OSS Runtime is installed and started by the **launcher**
-(`nylorun-runtime`) inside a per-platform **Runtime build**. The CLI and
-desktop apps run that launcher as a process; nothing imports
-`@nylorun/runtime`.
+(Admin API). A local OSS Runtime is the npm package `@nylorun/runtime`, which
+developers install as a prerequisite, and it is started by its **launcher**
+(`nylorun-runtime`). The CLI and desktop apps find that launcher on PATH and
+run it as a process; nothing imports `@nylorun/runtime`, and nothing downloads
+it.
+
+Before upgrading, install the prerequisites:
+
+```sh
+node --version                            # 24 or newer
+npm install --global @nylorun/runtime     # provides nylorun-runtime
+```
 
 ### Upgrade a generated application (steps 1–4)
 
@@ -136,8 +144,8 @@ node dist/src/main.js
 | `nylorun serve` | `nylorun dev` (watch) / `node dist/src/main.js` (`npm start`) against a running Host |
 | `nylorun studio` | `nylorun-studio` (Studio's own binary) |
 | `--no-studio` on `dev` | Omit the `studio` script / `@nylorun/studio` if unused |
-| CLI depending on `@nylorun/runtime` | CLI runs the **launcher** inside a Runtime build |
-| In-process CLI Host install/lifecycle | `nylorun runtime …` → `nylorun-runtime` (bootstrap when no build is installed) |
+| CLI depending on `@nylorun/runtime` | CLI runs the installed Runtime's **launcher** (`nylorun-runtime` on PATH) |
+| In-process CLI Host install/lifecycle | `nylorun runtime …` → `nylorun-runtime`; install the Runtime with npm first |
 | Ad-hoc Host admin HTTP from the CLI | `@nylorun/admin` (`createAdmin`, `createTenant`, `status`, …) |
 
 Managing clients (CLI, desktop Runtime panel, CI) add `@nylorun/admin` for the
@@ -148,14 +156,14 @@ never through an import of `@nylorun/runtime`.
 ### Existing Host roots
 
 - A Host started by the Tenants-era CLI is reused while it runs.
-- Its next restart moves it onto a Runtime build.
+- Its next restart moves it onto the installed `@nylorun/runtime`.
 - `host.json` gains `format` and `runtimeVersion` on the first launcher write.
 - Project link and credentials accept format `0` (missing `format`) and write
   format `1`.
 
 Upgrade `@nylorun/core`, `@nylorun/agents`, `@nylorun/admin`, `@nylorun/cli`,
-`@nylorun/studio` and Runtime builds (`@nylorun/runtime-<platform>-<arch>`)
-together (breaking beta set). Protocol feature `admin-status` is additive on
+`@nylorun/studio` and the installed `@nylorun/runtime` together (breaking beta
+set). Protocol feature `admin-status` is additive on
 protocol `2`.
 
 # Scoped hooks and manifest schema 4

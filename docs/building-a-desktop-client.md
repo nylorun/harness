@@ -23,37 +23,39 @@ and applies loopback `Host` checks on every route. Browser `fetch` sends
 `Origin`; Node's `fetch` does not. Studio's proxy already strips `Origin`
 upstream.
 
+## Prerequisites
+
+The app's user installs the Runtime once, as a developer does; the app never
+downloads Node or the Runtime (see
+[runtime distribution](design/runtime-distribution.md)):
+
+```sh
+node --version                            # 24 or newer
+npm install --global @nylorun/runtime     # provides nylorun-runtime
+```
+
+When a prerequisite is missing, show these two commands and stop. Desktop apps
+for people without Node are out of scope for version 1.
+
 ## Pin and store
 
-- Pin the Runtime build version the app is tested with.
+- Record the Runtime version the app is tested with, and name it in the
+  install command it shows.
 - Store the Tenant id and application key in the OS keychain (Electron
-  `safeStorage`, or equivalent). Never bundle a Runtime build in version 1.
+  `safeStorage`, or equivalent).
 - Do not start the Runtime at login; start it with `up` when the app needs it.
 
-## Resolve the newest launcher
+## Find the launcher
 
-List `<home>/runtime/*` (default `NYLORUN_HOME` or `~/.nylorun`). Skip names
-starting with `.`. Keep directories whose `manifest.json` matches this platform
-and architecture. Pick the highest `runtimeVersion` by semver. The executable
-is `<dir>/bin/nylorun-runtime` (`.cmd` on Windows).
+Search `PATH` for `nylorun-runtime` (`nylorun-runtime.cmd` on Windows). npm
+links it to `@nylorun/runtime/dist/launcher/main.js`: a symlink on macOS and
+Linux, a `.cmd` shim beside `node_modules/@nylorun/runtime` on Windows. Run
+that script with Node rather than the `.cmd` shim, which Node spawns only
+through a shell.
 
-If none exists, **bootstrap** once (below), then use that install's launcher.
-
-## Bootstrap (when no build is installed)
-
-1. Fetch
-   `<registry>/@nylorun%2fruntime-<platform>-<arch>/<pinned version>` and read
-   `dist.tarball` and `dist.integrity`. Registry defaults to
-   `https://registry.npmjs.org` (`NYLORUN_REGISTRY` overrides).
-2. Download into `<home>/runtime/.download-<random>/`, verify the SRI
-   integrity, and extract, stripping `package/`.
-3. Run
-   `<extracted>/bin/nylorun-runtime install <version> --from <extracted> --json`.
-4. Delete `.download-<random>/` whatever the result.
-
-Write nothing else. A failed download must leave no files outside
-`.download-*`. The CLI's bootstrap is the reference; desktop apps implement the
-same four steps.
+Then run `nylorun-runtime --json version` and check
+`launcherProtocol === 1` and that `protocol.min <= 2 <= protocol.max`. If not,
+show the install command for the version the app was tested with.
 
 ## Launcher commands
 
@@ -61,20 +63,20 @@ Global options: `--home <dir>`, `--json`.
 
 | Command | Result (JSON `type: "result"`) |
 | --- | --- |
-| `install <version> [--from <dir>]` | `{ version, path, installed }` |
-| `up [--version <v>] [--port <n>]` | `{ url, hostId, pid, version, started }` |
+| `version` (also `--version`) | `{ runtimeVersion, launcherProtocol, protocol, node }` |
+| `up [--port <n>] [--allow-downgrade]` | `{ url, hostId, pid, version, started }` |
 | `down [--wait [--timeout <s>]] [--force]` | `{ stopped }` |
-| `restart [--version <v>] [--allow-downgrade] [--wait \| --force]` | same as `up` |
-| `status` | `{ launcherProtocol, home, state, url?, hostId?, pid?, version?, runtimeVersion?, installed }` — `state`: `running` \| `stopped` \| `absent` \| `unresponsive` \| `foreign-port` |
+| `restart [--port <n>] [--allow-downgrade] [--wait \| --force]` | same as `up` |
+| `status` | `{ launcherProtocol, home, state, url?, hostId?, pid?, version?, runtimeVersion?, launcherVersion }` — `state`: `running` \| `stopped` \| `absent` \| `unresponsive` \| `foreign-port`; `runtimeVersion` is the version that last ran the Host, `launcherVersion` the installed one |
 | `logs [--lines <n>] [--follow] [--tenant <id> \| --all]` | log lines as events |
 | `run [--port <n>]` | foreground Host; prints `up` result once ready |
 
 With `--json`, stdout is newline-delimited JSON:
 
 ```json
-{"type":"progress","phase":"download","received":1048576,"total":41943040}
+{"type":"progress","phase":"start"}
 {"type":"result","url":"http://127.0.0.1:8787","hostId":"host_…","pid":123,"version":"0.9.0-beta","started":true}
-{"type":"error","code":"integrity_mismatch","message":"…","remedy":"…"}
+{"type":"error","code":"downgrade_refused","message":"…","remedy":"…"}
 {"type":"log","source":"host","line":"…"}
 ```
 
@@ -84,10 +86,12 @@ error. Every error carries a `remedy`. Command names, flags and JSON fields are
 
 Important behaviors:
 
-- `up` never restarts a running Host and never starts below
-  `host.json.runtimeVersion`.
-- Concurrent `install` / `up` from two processes produce one install and one
-  Host.
+- `up` never restarts a running Host and never starts a Runtime older than
+  `host.json.runtimeVersion` without `--allow-downgrade`.
+- The Host runs on the same Node as the launcher, from the installed package.
+  `restart` moves it onto the currently installed Runtime.
+- Concurrent `up` from two processes starts one Host.
+- The launcher refuses Node older than 24 (`platform_unsupported`).
 - `down` without flags refuses when sessions or executors are active
   (`active_work`); use `--wait` or `--force`.
 
@@ -110,9 +114,9 @@ throws `incompatible_host` on mismatch.
 
 ## First-launch sequence (reference)
 
-1. If no Tenant id/key in the keychain and no launcher installed → show
-   progress, run bootstrap.
-2. `up --version <pin> --json`.
+1. If `nylorun-runtime` is not on PATH, or `version` reports an incompatible
+   protocol → show the prerequisites and stop.
+2. `up --json`.
 3. If no stored Tenant → `admin.createTenant({ name })`, store id and key.
 4. `connectAgents` / `createClient` with `{ url, tenant, key }` from the
    `up` result and keychain.
@@ -123,9 +127,10 @@ the Runtime up so CLI Projects can share it.
 
 ## Everyday use
 
-- Every launch runs `up --version <pin>` (no-op when already running).
-- When `status.version` is below the pin, offer `restart --version <pin>`
-  (ask before `--wait` if other Tenants are active).
+- Every launch runs `up` (no-op when already running).
+- When `status.version` is below the version the app was tested with, show the
+  install command, then offer `restart` (ask before `--wait` if other Tenants
+  are active).
 - Runtime panel: `admin.status()` / launcher `status` when stopped;
   `listTenants` / `getTenant`; Start · Stop · Restart · Delete · Logs via the
   launcher commands above.
@@ -144,5 +149,6 @@ the Runtime up so CLI Projects can share it.
 ## Sharing the machine with the CLI
 
 One Runtime per machine. Whichever client runs `up` first starts it; the other
-reuses it. Each sees the other's Tenants. A newer CLI pin does not restart a
-Runtime the desktop app is using without `--wait` or `--force`.
+reuses it. Each sees the other's Tenants. Installing a newer Runtime does not
+restart a Host the desktop app is using; `restart` needs `--wait` or `--force`
+while work is active.

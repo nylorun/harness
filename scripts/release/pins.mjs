@@ -1,28 +1,9 @@
 /**
- * Runtime build version pins (D6, D7, G3).
- *
- * - runtime/package.json nylorun.node must equal .node-version
- * - cli/package.json nylorun.runtime must equal the @nylorun/runtime version
+ * Runtime version pin (D7, G3): cli/package.json nylorun.runtime must equal
+ * the @nylorun/runtime version. The CLI names it in install instructions.
  */
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readJson, root, writeJson } from "../lib/repo.mjs";
-
-export async function readPinnedNodeVersion(repo = root) {
-  return (await readFile(join(repo, ".node-version"), "utf8")).trim();
-}
-
-export async function assertNodePin(repo = root) {
-  const expected = await readPinnedNodeVersion(repo);
-  const pkg = await readJson(join(repo, "runtime/package.json"));
-  const actual = pkg.nylorun?.node;
-  if (actual !== expected) {
-    throw new Error(
-      `runtime/package.json nylorun.node (${actual ?? "missing"}) must equal .node-version (${expected}).`,
-    );
-  }
-  return expected;
-}
 
 export async function assertCliRuntimePin(repo = root) {
   const runtimeVersion = (await readJson(join(repo, "runtime/package.json")))
@@ -37,9 +18,8 @@ export async function assertCliRuntimePin(repo = root) {
   return runtimeVersion;
 }
 
-/** Fail when D6/D7 pins are missing or disagree with the sources of truth. */
+/** Fail when the D7 pin is missing or disagrees with the runtime version. */
 export async function assertRuntimePins(repo = root) {
-  await assertNodePin(repo);
   await assertCliRuntimePin(repo);
 }
 

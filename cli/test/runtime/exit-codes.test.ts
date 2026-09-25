@@ -12,9 +12,7 @@ describe("F1-4 launcher error → CLI exit code table", () => {
     ["host_start_failed", 7],
     ["incompatible_host", 5],
     ["protocol_unsupported", 5],
-    ["version_required", 1],
-    ["install_failed", 1],
-    ["integrity_mismatch", 1],
+    ["launcher_failed", 1],
     ["lock_timeout", 1],
     ["host_unresponsive", 1],
     ["host_schema_newer", 1],
@@ -30,10 +28,8 @@ describe("F1-4 launcher error → CLI exit code table", () => {
 
   it("covers every launcher-raised ERROR_CODES entry", () => {
     const launcherCodes = [
-      "version_required",
       "platform_unsupported",
-      "install_failed",
-      "integrity_mismatch",
+      "launcher_failed",
       "lock_timeout",
       "foreign_port",
       "host_unresponsive",
