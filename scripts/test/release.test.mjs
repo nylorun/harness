@@ -256,6 +256,65 @@ test("publication retries retain completed packages and never publish creator be
   );
 });
 
+test("publication waits for the engines together, then publishes the creator", async () => {
+  const versions = {
+    core: "0.2.0-beta",
+    harness: "0.11.0-beta",
+    runtime: "0.2.0-beta",
+    "create-agent": "0.2.0-beta",
+  };
+  const plan = {
+    packages: versions,
+    channel: "beta",
+    compatibility: {
+      core: "0.2.0-beta",
+      harness: "0.11.0-beta",
+      agents: "0.1.0-beta.1",
+      admin: "0.1.0-beta.1",
+      runtime: "0.2.0-beta",
+      studio: "0.3.0-beta.1",
+      cli: "0.1.0-beta.1",
+    },
+  };
+  const artifacts = Object.fromEntries(
+    Object.keys(versions).map((name) => [
+      name,
+      { integrity: `${name}-hash`, path: `${name}.tgz` },
+    ]),
+  );
+  const published = new Map(
+    ["agents", "admin", "studio", "cli"].map((name) => [
+      name,
+      { integrity: `${name}-hash` },
+    ]),
+  );
+  const events = [];
+  const registry = {
+    lookup: async (name) => published.get(name),
+    checkTag: async () => {},
+    async publish(name) {
+      events.push(`publish ${name}`);
+      published.set(name, { integrity: artifacts[name].integrity });
+    },
+    async waitFor(name) {
+      events.push(`wait ${name}`);
+      return published.get(name);
+    },
+    ensureTag: async () => {},
+  };
+  await publishCandidates(plan, artifacts, registry);
+  assert.deepEqual(events, [
+    "publish core",
+    "publish harness",
+    "publish runtime",
+    "wait core",
+    "wait harness",
+    "wait runtime",
+    "publish create-agent",
+    "wait create-agent",
+  ]);
+});
+
 test("release commit validation accepts prepare commits and tips with an unchanged plan", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nylorun-release-git-"));
   const git = (args) => run("git", args, { cwd: directory, capture: true });

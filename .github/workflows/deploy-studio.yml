@@ -29,6 +29,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && github.event.label.name == 'deploy-studio')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: studio
     permissions:
       contents: read
@@ -37,11 +38,11 @@ jobs:
       FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'nylorun-oss-studio' }}
       STUDIO_HOSTING_ORIGIN: https://local.nylorun.studio
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -59,7 +60,7 @@ jobs:
       - name: Authenticate to Google Cloud (service account)
         id: auth
         continue-on-error: true
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       - name: Deploy Studio UI to Firebase Hosting
