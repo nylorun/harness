@@ -29,7 +29,7 @@
     "@nylorun/cli": "file:../cli",
     "@nylorun/studio": "file:../studio",
     "@types/node": "^22.18.0",
-    "tsx": "^4.20.6",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "@nylorun/admin": "file:../admin",
     "vitest": "^4.1.11"
