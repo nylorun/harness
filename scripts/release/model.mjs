@@ -208,9 +208,8 @@ export async function releaseNotes(repo, name, version) {
 /**
  * Registry boundary: retries may skip only byte-identical completed publications.
  *
- * `npm publish` returns in seconds, but a new version takes minutes to show up
- * in `npm view`. Publish the engines back to back and wait for them together,
- * then the creator, which is never published before its pins exist.
+ * Publish the engines back to back and wait for them together, then the
+ * creator, which is never published before its pins exist.
  */
 export async function publishCandidates(
   plan,
