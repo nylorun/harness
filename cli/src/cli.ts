@@ -185,8 +185,7 @@ async function main() {
     }
     const auth = await resolveLinkedAuth(projectRoot);
     const localUi = flags.booleans.has("--local-ui");
-    // Until I2 the startStudio default is still "local". After I2, omit ui for
-    // hosted default; `--local-ui` always forces local + cacheDir.
+    // I2: startStudio default is hosted; `--local-ui` forces local + cacheDir.
     const dashboard = await startStudio({
       runtimeUrl: auth.url,
       serverKey: auth.key,
@@ -200,8 +199,6 @@ async function main() {
         : {}),
     });
     console.log(`Studio        ${dashboard.launchUrl}`);
-    // Hosted tip: when explicitly not local-ui and startStudio default flips (I2),
-    // or when the returned URL is the hosted origin.
     if (!localUi && dashboard.launchUrl.startsWith("https://local.nylorun.studio")) {
       console.log(`Safari or offline: nylorun studio --local-ui`);
     }

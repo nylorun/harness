@@ -140,3 +140,72 @@ jobs:
         env:
           # Optional first-publication fallback; npm prefers configured OIDC trust.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+  # Hosted Studio dashboard → Firebase Hosting (Wave 3 / H1 Firebase).
+  # Protected environment `studio`. Pauses (exit 78) until FIREBASE_* secrets exist.
+  # Custom domain DNS is Rahul-owned — see docs handoff. No-op does not block npm.
+  deploy-studio:
+    needs: [publish]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: studio
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ inputs.commit }}
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'nylorun-studio' }}
+      STUDIO_HOSTING_ORIGIN: https://local.nylorun.studio
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm ci
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: studio-ui-bundle
+          path: .
+      - name: Ensure UI digest exists
+        run: |
+          test -d studio/dist/web
+          test -f studio/dist/bundle.tar
+          if [[ ! -f studio/dist/ui-digest.json ]]; then
+            npm run build --workspace @nylorun/core
+            npm run build --workspace @nylorun/agents
+            npm run build --workspace @nylorun/studio
+          fi
+          test -f studio/dist/ui-digest.json
+      - name: Authenticate to Google Cloud (service account)
+        id: auth
+        continue-on-error: true
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - name: Deploy Studio UI to Firebase Hosting
+        id: deploy
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: node studio/scripts/deploy-studio.mjs
+        continue-on-error: true
+      - name: Report deploy outcome
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [[ "${{ steps.deploy.outcome }}" == "success" ]]; then
+            echo "Studio hosting deploy succeeded."
+            exit 0
+          fi
+          if [[ -n "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" || -n "$FIREBASE_TOKEN" ]]; then
+            echo "deploy-studio failed while credentials were configured" >&2
+            exit 1
+          fi
+          echo "::warning::Studio Firebase credentials not in Environment 'studio' yet."
+          echo "Rahul: complete hosted-studio-firebase-handoff.md (DNS + FIREBASE_SERVICE_ACCOUNT)."
+          echo "npm publish already completed; hosting can be retried alone."

@@ -124,34 +124,36 @@ confirm the version's integrity before retrying the same reviewed release.
 
 The local browser gate requires Chromium: run `npx playwright-core install chromium` on Linux, or set `NYLORUN_CHROME_PATH` to an installed Chrome executable. CI installs Chromium before testing packed artifacts.
 
-## Studio hosted dashboard (planned)
+## Studio hosted dashboard
 
 `@nylorun/studio` publishes the Node proxy plus `dist/ui-digest.json`
 (`{ version, sha256 }`). The dashboard `dist/web` tree is **not** in the npm
 tarball. Release packaging builds the web UI once, then
 `studio/scripts/pack-ui.mjs` writes `dist/bundle.tar` (POSIX ustar of
 `dist/web`) and the digest. The publish workflow uploads `studio/dist/web` and
-`studio/dist/bundle.tar` as the `studio-ui-bundle` artifact for the future
-hosted deploy. Default Studio mode stays `ui: "local"` until the hosted default
-flip (Wave 3 / I2).
+`studio/dist/bundle.tar` as the `studio-ui-bundle` artifact.
 
-### Deploy (Wave 3 — blocked on H1/H2)
+**H1 host:** Firebase Hosting · **H2:** Rahul owns `local.nylorun.studio` DNS.
+See the Project handoff `docs/hosted-studio-firebase-handoff.md` (Agent Store)
+for Firebase project, DNS records, and CI secrets.
 
-Host and ownership (design open decisions H1/H2) are undecided. Do **not** add
-a `deploy-studio` job until those are settled. The planned job, in a protected
-`studio` environment, will:
+Default Studio mode is `ui: "hosted"` (I2). Use `--local-ui` for Safari/offline.
 
-1. Upload immutable `/v/<version>/` from the Studio UI artifact (refuse to
-   overwrite an existing version).
-2. Write root `index.html` (from the built entry / `studio/hosting/index-root.html`
-   template) and `versions.json` (validated against
-   `studio/hosting/versions.schema.json`).
-3. Verify with `curl -I` that hosted-origin headers match
-   `studio/hosting/_headers` (CSP and related), and that
-   `curl /v/<version>/bundle.tar | sha256sum` matches the digest published on npm.
+### Deploy (Wave 3)
 
-Until that job exists, npm publication alone does not update
-`https://local.nylorun.studio/`.
+After npm publish, `deploy-studio` runs in the protected GitHub Environment
+`studio`:
+
+1. Builds `studio/dist/hosting-site` via `prepare-hosting-site.mjs` (preserves
+   prior `/v/*` when the live origin or a mirror is available; **refuses** to
+   overwrite an existing `/v/<version>/`).
+2. Deploys with Firebase Hosting (`firebase.json` headers = design §9.1).
+3. Verifies `curl -I` CSP and `/v/<version>/bundle.tar` SHA-256 vs the digest.
+
+Credentials: `FIREBASE_SERVICE_ACCOUNT` (preferred) or `FIREBASE_TOKEN`, plus
+`FIREBASE_PROJECT_ID` (default `nylorun-studio`). Until secrets and custom-domain
+DNS are in place, the job warns and exits soft so npm is not blocked; rerun
+deploy alone after Rahul finishes the handoff.
 
 ### Rollback and retry
 

@@ -84,14 +84,20 @@ test("P2: mintToken is 43-char base64url; length mismatch skips compare", () => 
   assert.equal(tokensEqual(token, "x".repeat(43)), false);
 });
 
-test("AC1: startStudio returns launchUrl; open uses it; default ui is local", async () => {
+test("AC1: startStudio returns launchUrl; open uses it; default ui is hosted (I2)", async () => {
   await withUpstream(
     (req, res) => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(healthBody());
     },
     async (runtimeUrl) => {
-      const hosted = await startHosted(runtimeUrl);
+      const hosted = await startStudio({
+        runtimeUrl,
+        serverKey: "server-secret",
+        tenant: TENANT,
+        open: false,
+        port: 0,
+      });
       try {
         assert.ok(hosted.launchUrl.startsWith(`${HOSTED_ORIGIN}/#`));
         assert.equal(typeof hosted.address, "string");
@@ -107,6 +113,7 @@ test("AC1: startStudio returns launchUrl; open uses it; default ui is local", as
         tenant: TENANT,
         open: false,
         port: 0,
+        ui: "local",
       });
       try {
         assert.ok(local.launchUrl.startsWith(`${local.address}/#`));

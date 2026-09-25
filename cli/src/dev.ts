@@ -96,7 +96,7 @@ export async function startStudio(options: {
   tenant: { id: string; name: string };
   open: boolean;
   port?: number;
-  /** When true, force local UI. When false/omit, use startStudio default. */
+  /** When true, force local UI. When false/omit, use startStudio default (hosted). */
   localUi?: boolean;
   cacheDir?: string;
   projectRoot?: string;

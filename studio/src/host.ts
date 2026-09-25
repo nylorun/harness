@@ -316,7 +316,7 @@ function writeHostedLanding(
 export async function startStudio(
   options: StudioOptions = {},
 ): Promise<StudioHost> {
-  const ui: StudioMode = options.ui ?? "local";
+  const ui: StudioMode = options.ui ?? "hosted";
   const token = mintToken();
   const requestedAgentServerUrl =
     options.runtimeUrl === undefined
