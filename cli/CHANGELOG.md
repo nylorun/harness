@@ -1,5 +1,39 @@
 # @nylorun/cli
 
+## 0.3.0-beta
+
+### Minor Changes
+
+- c49efed: **Breaking (pre-1.0 minor):** CLI reaches the local Runtime only through the launcher inside a Runtime build.
+
+  - Dependencies: `@nylorun/agents` and `@nylorun/admin` only (no `@nylorun/runtime`, no `@nylorun/studio`).
+  - `nylorun runtime …` invokes `nylorun-runtime` (bootstrap when no build is installed); pin via `package.json` `nylorun.runtime`.
+  - `nylorun dev` runs the application entry under `tsx watch`; creates Tenants through `@nylorun/admin`.
+  - **Removed:** `nylorun serve`, `nylorun studio`, `--no-studio`, in-process Project runner.
+  - Install as a **devDependency**; production `start` is `node dist/src/main.js`.
+
+- c49efed: **Breaking (pre-1.0 minor):** Replace a single SQLite Runtime per Project or home directory with a **Runtime Host** that serves isolated **Tenants**, selected by `Nylorun-Tenant` and negotiated with `Nylorun-Protocol` (protocol `2`, feature `runtime-tenants`). Vocabulary: Host root + Tenant + Project link.
+
+  - **core:** `PROTOCOL_VERSION = 2`, `HOST_PROTOCOL`, `TENANT_HEADER`, `PROTOCOL_HEADER`, `newTenantId` / `isTenantId`, `checkCompatibility`; health schema gains `hostId` + `protocol` (`service: "nylorun-runtime"`); Tenant/admin wire schemas; Tenant model routes under `/v1/tenant/*`.
+  - **runtime:** Host process + Tenant module; Tenant model routes under `/v1/tenant/*`; `startEphemeralRuntime` for tests/embeds; executors via `PUT /v1/executors`; sandbox prefix `nylorun-<tenant-id>-`.
+  - **agents:** `createClient({ url, key, tenant })`; Transport sends Tenant + protocol headers; `/health` compatibility cache; `IncompatibleRuntimeError` with upgrade remedies.
+  - **cli:** Host root lifecycle (`runtime up|down|status|logs|restart|run`); Project link (`.nylorun/link.json` + `credentials.json`); `tenant` commands; `runtime status --env` exports `NYLORUN_RUNTIME_URL`, `NYLORUN_SERVER_KEY`, `NYLORUN_TENANT`; removed Project/home SQLite selectors.
+  - **studio:** `startStudio({ …, tenant: { id, name } })`; proxy forwards Tenant + protocol headers; UI shows Tenant name/short id.
+
+### Patch Changes
+
+- Pin agents to the tested release.
+- Pin admin to the tested release.
+- Pin runtime to the tested release.
+- Updated dependencies [c49efed]
+- Updated dependencies [c49efed]
+- Updated dependencies [c49efed]
+- Updated dependencies [fd9fd87]
+- Updated dependencies
+- Updated dependencies
+  - @nylorun/agents@0.6.0-beta
+  - @nylorun/admin@0.2.0-beta
+
 ## 0.2.1-beta
 
 ### Patch Changes
