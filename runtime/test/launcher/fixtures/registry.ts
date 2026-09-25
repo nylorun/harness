@@ -1,8 +1,8 @@
 import { createServer, type Server } from "node:http";
 import { readFileSync } from "node:fs";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { integrityOfBuffer } from "../../../src/launcher/integrity.js";
 import { writeFakeBuild } from "./fake-build.js";
@@ -58,12 +58,14 @@ export async function packFakeBuildTarball(
   try {
     const packageDir = join(staging, "package");
     await cp(buildDir, packageDir, { recursive: true });
+    // Relative archive name + cwd=staging: GNU tar on Windows never sees `C:\...`
+    // (it treats `C:` as a remote host → "Cannot connect to C: resolve failed").
+    const archiveName = "package.tgz";
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(
-        "tar",
-        ["-czf", tarballPath, "-C", staging, "package"],
-        { stdio: ["ignore", "ignore", "pipe"] },
-      );
+      const child = spawn("tar", ["-czf", archiveName, "package"], {
+        cwd: staging,
+        stdio: ["ignore", "ignore", "pipe"],
+      });
       let stderr = "";
       child.stderr?.on("data", (c: Buffer) => {
         stderr += c.toString("utf8");
@@ -75,6 +77,8 @@ export async function packFakeBuildTarball(
           : reject(new Error(`tar pack failed: ${stderr}`)),
       );
     });
+    await mkdir(dirname(tarballPath), { recursive: true });
+    await cp(join(staging, archiveName), tarballPath);
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
