@@ -34,6 +34,8 @@ jobs:
             examples/package-lock.json
       - run: npm install --global npm@11.15.0
       - run: npm run setup
+      # Studio build (via setup) runs pack-ui → dist/bundle.tar + dist/ui-digest.json
+      # before check-package / npm pack (Wave 2; deploy-studio is Wave 3 after H1/H2).
       - run: npm run check -- --built
       - run: npx playwright-core install --with-deps chromium
       - run: npm run release:check -- --built
@@ -42,6 +44,14 @@ jobs:
           name: release-packages
           path: .tmp/release-artifacts/
           include-hidden-files: true
+          if-no-files-found: error
+      - name: Upload Studio UI hosting artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: studio-ui-bundle
+          path: |
+            studio/dist/web
+            studio/dist/bundle.tar
           if-no-files-found: error
   # D8 / D17: five platform builds on native runners (wiring only — publish consumes).
   runtime-build:

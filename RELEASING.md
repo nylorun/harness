@@ -123,3 +123,42 @@ for up to ten minutes. A registry timeout does not mean the publication failed:
 confirm the version's integrity before retrying the same reviewed release.
 
 The local browser gate requires Chromium: run `npx playwright-core install chromium` on Linux, or set `NYLORUN_CHROME_PATH` to an installed Chrome executable. CI installs Chromium before testing packed artifacts.
+
+## Studio hosted dashboard (planned)
+
+`@nylorun/studio` publishes the Node proxy plus `dist/ui-digest.json`
+(`{ version, sha256 }`). The dashboard `dist/web` tree is **not** in the npm
+tarball. Release packaging builds the web UI once, then
+`studio/scripts/pack-ui.mjs` writes `dist/bundle.tar` (POSIX ustar of
+`dist/web`) and the digest. The publish workflow uploads `studio/dist/web` and
+`studio/dist/bundle.tar` as the `studio-ui-bundle` artifact for the future
+hosted deploy. Default Studio mode stays `ui: "local"` until the hosted default
+flip (Wave 3 / I2).
+
+### Deploy (Wave 3 — blocked on H1/H2)
+
+Host and ownership (design open decisions H1/H2) are undecided. Do **not** add
+a `deploy-studio` job until those are settled. The planned job, in a protected
+`studio` environment, will:
+
+1. Upload immutable `/v/<version>/` from the Studio UI artifact (refuse to
+   overwrite an existing version).
+2. Write root `index.html` (from the built entry / `studio/hosting/index-root.html`
+   template) and `versions.json` (validated against
+   `studio/hosting/versions.schema.json`).
+3. Verify with `curl -I` that hosted-origin headers match
+   `studio/hosting/_headers` (CSP and related), and that
+   `curl /v/<version>/bundle.tar | sha256sum` matches the digest published on npm.
+
+Until that job exists, npm publication alone does not update
+`https://local.nylorun.studio/`.
+
+### Rollback and retry
+
+- **Rollback:** repoint root `index.html` and `versions.json` at an earlier
+  build. Never delete or mutate `/v/*` (immutable builds).
+- **Retry after a failed deploy:** if npm publish succeeded but the hosted
+  upload did not, rerun only the deploy job for the same release commit and
+  Studio UI artifact. The previous dashboard stays live and protocol-compatible.
+- **Do not** republish a new npm version solely to fix a hosting deploy failure
+  when the digest and tarball are already correct.
