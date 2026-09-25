@@ -112,10 +112,7 @@ import { McpPool, serversOf } from "../mcp/pool.js";
 import { SandboxManager, sandboxCapabilityOf } from "../sandbox/manager.js";
 import { defaultSandboxBackends } from "../sandbox/select.js";
 import type { SandboxBackend } from "../sandbox/types.js";
-import {
-  owningSandboxSessionId,
-  sandboxSpecOf,
-} from "../sandbox/share.js";
+import { owningSandboxSessionId, sandboxSpecOf } from "../sandbox/share.js";
 import {
   SandboxRouteError,
   handleActionSandboxTool,
@@ -765,8 +762,8 @@ export class TenantRuntime implements TenantHandle {
             current.status = resumeRequested
               ? "runnable"
               : current.status === "uncertain"
-                ? "uncertain"
-                : result.status;
+              ? "uncertain"
+              : result.status;
             current.waits =
               linkedWaits.length > 0
                 ? linkedWaits
@@ -1125,11 +1122,7 @@ export class TenantRuntime implements TenantHandle {
     });
     if (event) this.publish(event);
     if (notify) this.notify();
-    if (
-      resolution &&
-      (resolution as any).__flow &&
-      isFlowEffect(request)
-    ) {
+    if (resolution && (resolution as any).__flow && isFlowEffect(request)) {
       return this.resolveNewFlowEffect(request, signal);
     }
     if (!invoke) return resolution!;
@@ -1337,7 +1330,11 @@ export class TenantRuntime implements TenantHandle {
     };
     const path = body.path ?? request.path!;
     const workflow = this.session(request.sessionId);
-    const agentSessionId = deriveAgentEffectSessionId(workflow.id, path, request);
+    const agentSessionId = deriveAgentEffectSessionId(
+      workflow.id,
+      path,
+      request
+    );
     const iterations = request.iterations ?? "-";
     const n = Number(request.context.n ?? iterations.split(".")[0] ?? 1);
 
@@ -1378,9 +1375,7 @@ export class TenantRuntime implements TenantHandle {
           requestId: `flow-put-${request.effectId}`,
           agentId: body.agentId,
           ownerUserId: workflow.ownerUserId,
-          ...(sandboxOwnerId
-            ? { sandbox: { session: sandboxOwnerId } }
-            : {}),
+          ...(sandboxOwnerId ? { sandbox: { session: sandboxOwnerId } } : {}),
         },
         vaultIds: workflow.vaultIds,
         credentialSelections: workflow.credentialSelections,
@@ -1769,8 +1764,7 @@ export class TenantRuntime implements TenantHandle {
               workflowSessionId: id,
               interactionId: command.interactionId,
             });
-            if (conflict)
-              fail(409, conflict.message);
+            if (conflict) fail(409, conflict.message);
             // Workflow-owned interactions (tool-node / verify) resume on this session once
             // the flow engine supports pause segments; tracer root Loop has none yet.
             fail(

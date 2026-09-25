@@ -2,10 +2,7 @@ import { createHash } from "node:crypto";
 import type { Action, ActionOutcome, LiveEvent } from "@nylorun/core/contracts";
 import type { JsonValue, WorkflowManifest } from "@nylorun/core/define";
 import type { EffectResolution, HostEffect } from "@nylorun/harness/run";
-import {
-  mayDispatchMore,
-  type FlowLimits,
-} from "./limits.js";
+import { mayDispatchMore, type FlowLimits } from "./limits.js";
 
 /** Deterministic agent session id: derive(workflowSessionId, path, …parts). */
 export function deriveSessionId(
@@ -37,9 +34,7 @@ export function deriveAgentEffectSessionId(
   if (request.context?.role === "verify-agent") {
     const iterations = request.iterations ?? "-";
     const iterParts =
-      iterations !== "-" && iterations.length > 0
-        ? iterations.split(".")
-        : [];
+      iterations !== "-" && iterations.length > 0 ? iterations.split(".") : [];
     return deriveSessionId(
       workflowSessionId,
       path,
@@ -575,14 +570,14 @@ export function wakeLinkedWorkflow(input: {
         },
       }
     : input.failed
-      ? {
-          value: {
-            kind: "failed",
-            code: "agent.failed",
-            message: input.error ?? "Agent turn failed",
-          },
-        }
-      : { value: input.output ?? null };
+    ? {
+        value: {
+          kind: "failed",
+          code: "agent.failed",
+          message: input.error ?? "Agent turn failed",
+        },
+      }
+    : { value: input.output ?? null };
 
   input.store.put("effects", link.effectId, {
     ...effect,
@@ -1066,9 +1061,7 @@ export function aggregateWaits(input: {
     if (!Array.isArray(raw)) return;
     for (const call of raw as any[]) {
       const interaction = call.interaction ?? call;
-      const interactionId = String(
-        interaction?.id ?? call.interactionId ?? ""
-      );
+      const interactionId = String(interaction?.id ?? call.interactionId ?? "");
       if (!interactionId) continue;
       waits.push({
         sessionId: session.id,
@@ -1163,11 +1156,7 @@ export function wakeForQueuedEffects(input: {
 }): boolean {
   if (
     !mayDispatchMore(
-      countActiveFlowWork(
-        input.store,
-        input.workflowSessionId,
-        input.turnId
-      ),
+      countActiveFlowWork(input.store, input.workflowSessionId, input.turnId),
       input.limits
     )
   )

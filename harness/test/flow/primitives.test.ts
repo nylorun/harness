@@ -409,9 +409,7 @@ describe("flow Parallel", () => {
     expect(journal.get(seen.find((e) => e.path === "review/tests")!.effectId)?.status).toBe(
       "pending",
     );
-    expect(result.cancelEffectIds).toContain(
-      seen.find((e) => e.path === "review/tests")!.effectId,
-    );
+    expect(result.cancelEffectIds).toContain(seen.find((e) => e.path === "review/tests")!.effectId);
   });
 });
 

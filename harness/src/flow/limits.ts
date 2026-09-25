@@ -1,6 +1,7 @@
 /**
  * Operator flow ceilings for the engine (`workflows.md` §13).
- * Duplicated from Runtime's limits helpers — harness must not import `@nylorun/runtime`.
+ * Host-side assert helpers live in the Runtime package; harness duplicates the
+ * codes here so the engine never depends on Runtime.
  * Codes must stay identical: `map.too-many-items`, `loop.too-many-iterations`.
  */
 
@@ -22,8 +23,7 @@ export function resolveOperatorLimits(
 ): FlowOperatorLimits {
   return {
     maxMapItems: limits?.maxMapItems ?? FLOW_OPERATOR_DEFAULTS.maxMapItems,
-    maxLoopIterations:
-      limits?.maxLoopIterations ?? FLOW_OPERATOR_DEFAULTS.maxLoopIterations,
+    maxLoopIterations: limits?.maxLoopIterations ?? FLOW_OPERATOR_DEFAULTS.maxLoopIterations,
   };
 }
 

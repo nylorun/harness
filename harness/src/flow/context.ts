@@ -2,10 +2,7 @@ import type { JsonValue, WorkflowManifest } from "@nylorun/core/define";
 import type { DurableHost, HostEffect } from "../run/durable.js";
 import { HostSuspension } from "../loop/host-suspension.js";
 import type { FlowCheckpoint } from "./checkpoint.js";
-import {
-  resolveOperatorLimits,
-  type FlowOperatorLimits,
-} from "./limits.js";
+import { resolveOperatorLimits, type FlowOperatorLimits } from "./limits.js";
 import { flowEffectId, iterationsOf, nodeKeyOf } from "./paths.js";
 import { failedValueOf, FlowNodeError, type FlowFailure } from "./types.js";
 

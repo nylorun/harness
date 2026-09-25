@@ -113,12 +113,8 @@ it("LOOP-R28/R6: verify-agent sessions differ across Loop iterations", () => {
   });
   expect(iter1).not.toBe(iter2);
   expect(iter1).not.toBe(runAgent);
-  expect(iter1).toBe(
-    deriveSessionId("wf-1", path, "verify", "turn-1", "1")
-  );
-  expect(iter2).toBe(
-    deriveSessionId("wf-1", path, "verify", "turn-1", "2")
-  );
+  expect(iter1).toBe(deriveSessionId("wf-1", path, "verify", "turn-1", "1"));
+  expect(iter2).toBe(deriveSessionId("wf-1", path, "verify", "turn-1", "2"));
 });
 
 it("PAR-R6/A2: cancelSiblingWork with cancelEffectIds cancels pending siblings", () => {
@@ -184,7 +180,9 @@ it("PAR-R6/A2: cancelSiblingWork with cancelEffectIds cancels pending siblings",
   expect(result.agentSessionIds).not.toContain(styleId);
   expect(result.cancelledActions).toContain("pending-tool");
   expect(store.get("effects", "e-tests")?.status).toBe("cancelled");
-  expect(store.get<Action>("actions", "pending-tool")?.status).toBe("cancelled");
+  expect(store.get<Action>("actions", "pending-tool")?.status).toBe(
+    "cancelled"
+  );
 });
 it("WF-EV7: tool-node actions carry path and key on action.pending", () => {
   const store = memoryStore();

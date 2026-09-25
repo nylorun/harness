@@ -66,9 +66,7 @@ export async function runFlowDurable(options: {
       status: "failed",
       checkpoint,
       result: { status: "failed", error: failure },
-      ...(ctx.cancelEffectIds.size > 0
-        ? { cancelEffectIds: [...ctx.cancelEffectIds] }
-        : {}),
+      ...(ctx.cancelEffectIds.size > 0 ? { cancelEffectIds: [...ctx.cancelEffectIds] } : {}),
     };
   }
 }
