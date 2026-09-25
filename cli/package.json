@@ -32,7 +32,7 @@
   "dependencies": {
     "@nylorun/agents": "0.6.0-beta",
     "@nylorun/admin": "0.2.0-beta",
-    "@earendil-works/pi-ai": "0.85.1"
+    "@earendil-works/pi-ai": "0.87.0"
   },
   "devDependencies": {
     "typescript": "npm:@typescript/typescript6@^6.0.2",
