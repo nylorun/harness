@@ -49,19 +49,31 @@ async function withEnv<T>(
   }
 }
 
-test("D1: parseStudioArgs accepts --port and --no-open", () => {
-  assert.deepEqual(parseStudioArgs([]), { port: undefined, open: true });
+test("D1: parseStudioArgs accepts --port, --no-open, and --local-ui", () => {
+  assert.deepEqual(parseStudioArgs([]), {
+    port: undefined,
+    open: true,
+    localUi: false,
+  });
   assert.deepEqual(parseStudioArgs(["--no-open"]), {
     port: undefined,
     open: false,
+    localUi: false,
   });
   assert.deepEqual(parseStudioArgs(["--port", "4199"]), {
     port: 4199,
     open: true,
+    localUi: false,
   });
   assert.deepEqual(parseStudioArgs(["--port", "4199", "--no-open"]), {
     port: 4199,
     open: false,
+    localUi: false,
+  });
+  assert.deepEqual(parseStudioArgs(["--local-ui", "--no-open"]), {
+    port: undefined,
+    open: false,
+    localUi: true,
   });
 });
 

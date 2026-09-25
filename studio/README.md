@@ -11,6 +11,9 @@ nylorun studio --local-ui   # Safari / offline / distrust live origin
 nylorun-studio          # --port <n>  --no-open  --local-ui
 ```
 
+`nylorun-studio` defaults to the hosted dashboard (same as `nylorun studio`).
+Pass `--local-ui` for Safari, offline work, or CI smokes without a live origin.
+
 ## Hosted vs local UI
 
 | Mode | How | Dashboard origin |
