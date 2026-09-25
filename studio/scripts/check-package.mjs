@@ -106,7 +106,7 @@ if (digest.version !== manifest.version)
 
 const cache = mkdtempSync(join(tmpdir(), "nylo-studio-pack-"));
 const output = execFileSync(
-  process.platform === "win32" ? "npm.cmd" : "npm",
+  "npm",
   ["pack", "--json", "--dry-run", "--ignore-scripts"],
   { encoding: "utf8", env: { ...process.env, npm_config_cache: cache } }
 );

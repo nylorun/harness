@@ -9,19 +9,14 @@ import { parse, usage } from "./arguments.js";
 import { CreationCancelled, runCommand } from "./process.js";
 
 function findOnPath(name: string): string | undefined {
-  const extensions =
-    process.platform === "win32"
-      ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
-      : [""];
-  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean))
-    for (const extension of extensions) {
-      const candidate = join(dir, `${name}${extension.toLowerCase()}`);
-      try {
-        if (statSync(candidate).isFile()) return candidate;
-      } catch {
-        /* not here */
-      }
+  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    const candidate = join(dir, name);
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      /* not here */
     }
+  }
   return undefined;
 }
 
@@ -31,6 +26,10 @@ async function main(): Promise<void> {
     console.log(usage);
     return;
   }
+  if (process.platform === "win32")
+    throw new Error(
+      "Nylorun does not run on native Windows. Use WSL2: install Node 24 and the Nylorun Runtime inside your WSL distribution and create the project there (https://learn.microsoft.com/windows/wsl/install).",
+    );
   const options = parse(argv);
   const [major, minor] = process.versions.node.split(".").map(Number);
   if (!(major > 22 || (major === 22 && minor >= 19)))

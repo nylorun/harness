@@ -27,10 +27,6 @@ afterEach(async () => {
       /* ignore */
     }
   }
-  // Give Windows a beat to release node.exe file locks before rmdir.
-  if (process.platform === "win32" && roots.length > 0) {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
   await Promise.all(roots.splice(0).map(removeRoot));
 });
 
@@ -44,7 +40,6 @@ async function installed(
   roots.push(dir);
   const ctx: LifecycleContext = {
     paths,
-    platform: process.platform,
     nodeBinary: process.execPath,
     hostEntry: await writeFakeHost(dir, { version }),
     runtimeVersion: version,
@@ -215,5 +210,5 @@ it("E2-12: run emits ready then stops on signal", async () => {
 
 it("E2-14: forceKillHost tolerates a missing PID", () => {
   // POSIX path: killing a nonexistent PID must not throw.
-  expect(() => forceKillHost(999_999_997, "linux")).not.toThrow();
+  expect(() => forceKillHost(999_999_997)).not.toThrow();
 });

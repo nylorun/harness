@@ -37,8 +37,8 @@ function platformLine(): string {
   const os =
     process.platform === "darwin"
       ? "macOS"
-      : process.platform === "win32"
-        ? "Windows"
+      : process.env.WSL_DISTRO_NAME
+        ? `Linux (WSL: ${process.env.WSL_DISTRO_NAME})`
         : process.platform;
   return `${os} (kernel ${release()}) · ${process.arch}`;
 }

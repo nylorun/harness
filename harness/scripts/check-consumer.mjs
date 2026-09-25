@@ -6,13 +6,12 @@ import ts from "typescript";
 
 /** Validate the actual tarball without reaching the registry or running install scripts. */
 export function checkPackedConsumer(cache) {
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const npm = "npm";
   const run = (args, cwd) =>
     execFileSync(npm, args, {
       cwd,
       encoding: "utf8",
       env: { ...process.env, npm_config_cache: cache },
-      shell: process.platform === "win32",
     });
   const pack = (cwd) =>
     join(

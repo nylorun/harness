@@ -8,14 +8,12 @@ export interface SpawnHostInput {
   cwd: string;
   detached: boolean;
   logPath?: string;
-  platform?: NodeJS.Platform;
 }
 
 /**
- * Spawn the Host on the launcher's own Node (`process.execPath`). Detached background Hosts survive after
- * `up` exits (including Windows — without detached the Host dies with the
- * launcher parent and createTenant sees ECONNREFUSED). stdout/stderr append to
- * runtime.log when logPath is set.
+ * Spawn the Host on the launcher's own Node (`process.execPath`). Detached
+ * background Hosts get their own process group and survive after `up` exits.
+ * stdout/stderr append to runtime.log when logPath is set.
  */
 export function spawnHostProcess(input: SpawnHostInput): ChildProcess {
   const detached = input.detached;
@@ -25,7 +23,6 @@ export function spawnHostProcess(input: SpawnHostInput): ChildProcess {
     try {
       const child = spawn(input.nodeBinary, [input.entry], {
         detached,
-        windowsHide: true,
         cwd: input.cwd,
         env: input.environment,
         stdio: ["ignore", fd, fd],
@@ -46,42 +43,13 @@ export function spawnHostProcess(input: SpawnHostInput): ChildProcess {
   return spawn(input.nodeBinary, [input.entry], {
     cwd: input.cwd,
     env: input.environment,
-    windowsHide: true,
     stdio: ["ignore", "inherit", "inherit"],
     ...(detached ? { detached: true } : {}),
   });
 }
 
-/**
- * Force-kill a Host process. SIGKILL / process group on POSIX; taskkill on Windows.
- * Exported for Windows-path unit coverage (E14).
- */
-export function forceKillHost(
-  pid: number,
-  platform: NodeJS.Platform = process.platform,
-): void {
-  if (platform === "win32") {
-    try {
-      const child = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      child.on("error", () => {
-        try {
-          process.kill(pid);
-        } catch {
-          /* gone */
-        }
-      });
-    } catch {
-      try {
-        process.kill(pid);
-      } catch {
-        /* gone */
-      }
-    }
-    return;
-  }
+/** Force-kill a Host process: its process group, else the process itself. */
+export function forceKillHost(pid: number): void {
   try {
     process.kill(-pid, "SIGKILL");
   } catch {

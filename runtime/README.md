@@ -18,7 +18,8 @@ npm run build --workspace @nylorun/runtime
 ## Install and the launcher
 
 Developers install the Runtime as a prerequisite; nothing downloads it for
-them:
+them. It runs on macOS and Linux, including [WSL2](https://learn.microsoft.com/windows/wsl/install) on
+Windows; on native Windows the launcher refuses with `platform_unsupported`.
 
 ```sh
 node --version                            # 24 or newer

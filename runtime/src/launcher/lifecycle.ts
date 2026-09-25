@@ -43,7 +43,6 @@ export type LifecycleEmit = (event: LauncherEvent) => void;
 
 export interface LifecycleContext {
   paths: HostPaths;
-  platform: NodeJS.Platform;
   /** Node that runs the Host: the launcher's own `process.execPath`. */
   nodeBinary: string;
   /** Host entry of this package (`dist/host/main.js`). */
@@ -298,7 +297,6 @@ async function upLocked(
       environment,
       cwd: ctx.paths.home,
       detached: false,
-      platform: ctx.platform,
     });
     await awaitHostReady(url, ctx.paths.log, child.pid);
     await recordReady(ctx.paths, config, child.pid!, target, entry);
@@ -320,12 +318,11 @@ async function upLocked(
     cwd: ctx.paths.home,
     detached: true,
     logPath: ctx.paths.log,
-    platform: ctx.platform,
   });
   try {
     await awaitHostReady(url, ctx.paths.log, child.pid);
   } catch (error) {
-    if (child.pid) forceKillHost(child.pid, ctx.platform);
+    if (child.pid) forceKillHost(child.pid);
     throw error;
   }
   child.unref();
@@ -479,7 +476,7 @@ async function downLocked(
       }
       await new Promise((r) => setTimeout(r, 100));
     }
-    forceKillHost(pid, ctx.platform);
+    forceKillHost(pid);
   }
   await clearHostState(ctx.paths);
   return { stopped: true };
@@ -597,7 +594,7 @@ export async function run(
           while (Date.now() < deadline && pid && processAlive(pid)) {
             await new Promise((r) => setTimeout(r, 100));
           }
-          if (pid && processAlive(pid)) forceKillHost(pid, ctx.platform);
+          if (pid && processAlive(pid)) forceKillHost(pid);
           await clearHostState(ctx.paths);
           resolvePromise();
         };

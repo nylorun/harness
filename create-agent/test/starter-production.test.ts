@@ -10,7 +10,7 @@ import type { Compatibility } from "../src/contracts.js";
 
 const execFileAsync = promisify(execFile);
 const repo = fileURLToPath(new URL("../..", import.meta.url));
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const npm = "npm";
 
 const compatibility: Compatibility = {
   core: "0.4.0-beta",

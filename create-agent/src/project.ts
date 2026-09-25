@@ -33,9 +33,7 @@ export async function createProject(
     isAbsolute(options.directory) ||
     pathFromCurrentDirectory === "" ||
     pathFromCurrentDirectory === ".." ||
-    pathFromCurrentDirectory.startsWith(
-      `..${process.platform === "win32" ? "\\" : "/"}`
-    )
+    pathFromCurrentDirectory.startsWith("../")
   )
     throw new Error(
       "Target directory must be a new child of the current directory."
@@ -148,7 +146,5 @@ function packageName(directory: string): string {
 
 function quote(value: string): string {
   if (/^[a-zA-Z0-9_./-]+$/.test(value)) return value;
-  return process.platform === "win32"
-    ? `"${value.replaceAll('"', '""')}"`
-    : `'${value.replaceAll("'", "'\\''")}'`;
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
