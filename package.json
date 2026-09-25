@@ -46,6 +46,6 @@
     "chokidar": "^5.0.0",
     "playwright-core": "^1.63.0",
     "semver": "^7.7.4",
-    "wrangler": "4.134.0"
+    "wrangler": "4.136.2"
   }
 }
