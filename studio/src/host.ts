@@ -1,13 +1,32 @@
 import { proxyRuntime } from "./proxy.js";
 import {
+  authorize,
+  mintToken,
+  studioCorsHeaders,
+  type AuthorizeResult,
+} from "./access.js";
+import { packagedWebRoot, serveLocalUi } from "./local-ui.js";
+import {
+  HOSTED_ORIGIN,
+  STUDIO_PROTOCOL,
+  pairingFragment,
+  type StudioHello,
+  type StudioMode,
+} from "./contract.js";
+import {
+  PROTOCOL_FEATURES,
+  PROTOCOL_VERSION,
+  checkCompatibility,
+  type ProtocolRange,
+} from "@nylorun/agents";
+import {
   createServer,
   type IncomingMessage,
   type Server,
   type ServerResponse,
 } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type StudioTenant = Readonly<{ id: string; name: string }>;
@@ -17,9 +36,16 @@ export type StudioOptions = Readonly<{
   tenant?: StudioTenant;
   port?: number;
   open?: boolean;
+  /** Dashboard delivery mode. Default `"local"` until Hosted Studio I2. */
+  ui?: StudioMode;
+  /** Reserved for local-mode bundle cache (WS-4). */
+  cacheDir?: string;
+  /** Non-public: one extra allowed Origin for repository Vite development. */
+  extraOrigin?: string;
 }>;
 export type StudioHost = Readonly<{
   address: string;
+  launchUrl: string;
   readonly runtimeUrl: string;
   readonly tenant: StudioTenant;
   open(): void;
@@ -31,20 +57,27 @@ export type StudioConfig = Readonly<{
   tenant: StudioTenant;
 }>;
 
-const CONFIG_PATH = "/nylo-studio.config.json";
-const MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".ico": "image/x-icon",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".map": "application/json; charset=utf-8",
-  ".png": "image/png",
-  ".webmanifest": "application/manifest+json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".webp": "image/webp",
-  ".woff2": "font/woff2",
-});
+const HOSTED_LANDING = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nylorun Studio</title>
+</head>
+<body>
+<p>Open the Studio URL printed in your terminal.</p>
+</body>
+</html>
+`;
+
+const PROXY_VERSION: string = (() => {
+  try {
+    const path = fileURLToPath(new URL("../package.json", import.meta.url));
+    const pkg = JSON.parse(readFileSync(path, "utf8")) as { version?: string };
+    return typeof pkg.version === "string" ? pkg.version : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 export function parseAgentServerUrl(value: string): string {
   let url: URL;
@@ -64,21 +97,30 @@ export function parseAgentServerUrl(value: string): string {
   return url.href.replace(/\/$/u, "");
 }
 
-function json(response: ServerResponse, status: number, value: unknown): void {
+function json(
+  response: ServerResponse,
+  status: number,
+  value: unknown,
+  extraHeaders: Readonly<Record<string, string>> = {},
+): void {
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
+    ...extraHeaders,
   });
   response.end(`${JSON.stringify(value)}\n`);
 }
+
 function reject(
   response: ServerResponse,
   status: number,
   message: string,
+  extraHeaders: Readonly<Record<string, string>> = {},
 ): void {
-  json(response, status, { error: { message } });
+  json(response, status, { error: { message } }, extraHeaders);
 }
+
 function browser(address: string): void {
   const command =
     process.platform === "darwin"
@@ -91,46 +133,80 @@ function browser(address: string): void {
   const child = spawn(command, args, { detached: true, stdio: "ignore" });
   child.unref();
 }
-function staticPath(root: string, pathname: string): string | undefined {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    return undefined;
-  }
-  if (decoded.includes("\0")) return undefined;
-  const candidate = resolve(root, decoded.replace(/^\/+/, "") || "index.html");
-  return candidate === root || candidate.startsWith(`${root}${sep}`)
-    ? candidate
-    : undefined;
-}
-function staticHeaders(file: string): Record<string, string> {
-  const immutable = file.includes(`${sep}assets${sep}`);
-  return {
-    "content-type": MIME_TYPES[extname(file)] ?? "application/octet-stream",
-    "cache-control": immutable
-      ? "public, max-age=31536000, immutable"
-      : "no-store",
-    "x-content-type-options": "nosniff",
-  };
-}
-async function sendFile(
-  response: ServerResponse,
-  method: string,
-  file: string,
-): Promise<boolean> {
-  try {
-    const content = await readFile(file);
-    response.writeHead(200, staticHeaders(file));
-    response.end(method === "HEAD" ? undefined : content);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function loopbackHosts(port: number): ReadonlySet<string> {
   return new Set([`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`]);
+}
+
+function parseProtocolRange(value: unknown): ProtocolRange | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.min !== "number" ||
+    typeof record.max !== "number" ||
+    !Array.isArray(record.features) ||
+    !record.features.every((feature) => typeof feature === "string")
+  )
+    return undefined;
+  return {
+    min: record.min,
+    max: record.max,
+    features: record.features as readonly string[],
+  };
+}
+
+/** Probes Runtime `/health` and reports SDK protocol compatibility for hello. */
+export async function probeRuntimeCompatibility(
+  runtimeUrl: string,
+): Promise<StudioHello["runtime"]> {
+  try {
+    const response = await fetch(`${runtimeUrl}/health`, {
+      method: "GET",
+      redirect: "error",
+    });
+    const text = await response.text();
+    let body: unknown = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      /* keep text */
+    }
+    if (!response.ok) {
+      return Object.freeze({
+        compatible: false,
+        message: `Runtime health returned HTTP ${response.status}`,
+      });
+    }
+    const protocol = parseProtocolRange(
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>).protocol
+        : undefined,
+    );
+    if (!protocol) {
+      return Object.freeze({
+        compatible: false,
+        message:
+          "Runtime health did not advertise a protocol range; upgrade the Runtime Host.",
+      });
+    }
+    const result = checkCompatibility(
+      { version: PROTOCOL_VERSION, required: [...PROTOCOL_FEATURES] },
+      protocol,
+    );
+    if (result.ok) return Object.freeze({ compatible: true });
+    const message =
+      result.reason === "version"
+        ? `Client protocol ${result.client} is outside Host range ${result.host.min}–${result.host.max}`
+        : `Host is missing required features: ${result.missing.join(", ")}`;
+    return Object.freeze({ compatible: false, message });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return Object.freeze({
+      compatible: false,
+      message: `Local Runtime is unavailable${detail ? `: ${detail}` : ""}`,
+    });
+  }
 }
 
 type RequestHandle = (
@@ -144,8 +220,8 @@ async function listenOn(
   handle: RequestHandle,
 ): Promise<Server> {
   const server = createServer(handle);
-  await new Promise<void>((ready, reject) => {
-    const failed = (error: Error) => reject(error);
+  await new Promise<void>((ready, rejectListen) => {
+    const failed = (error: Error) => rejectListen(error);
     server.once("error", failed);
     server.listen(port, host, () => {
       server.off("error", failed);
@@ -216,16 +292,33 @@ async function listenForStudio(
   );
 }
 
-/** Serves the packaged React distribution and a non-secret in-memory runtime configuration. */
+function applyAuthorizeDeny(
+  response: ServerResponse,
+  result: Extract<AuthorizeResult, { ok: false }>,
+): void {
+  reject(response, result.status, result.message, result.headers ?? {});
+}
+
+function writeHostedLanding(
+  response: ServerResponse,
+  method: string,
+): void {
+  response.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "content-security-policy": "default-src 'none'",
+    "x-content-type-options": "nosniff",
+  });
+  response.end(method === "HEAD" ? undefined : HOSTED_LANDING);
+}
+
+/** Serves the trusted Studio proxy (hosted or local UI) on loopback. */
 export async function startStudio(
   options: StudioOptions = {},
 ): Promise<StudioHost> {
-  const root = resolve(
-    dirname(fileURLToPath(import.meta.url)),
-    "..",
-    "dist",
-    "web",
-  );
+  const ui: StudioMode = options.ui ?? "local";
+  const webRoot = ui === "local" ? packagedWebRoot() : undefined;
+  const token = mintToken();
   const requestedAgentServerUrl =
     options.runtimeUrl === undefined
       ? undefined
@@ -247,9 +340,21 @@ export async function startStudio(
     )
   )
     throw new Error("This Studio release connects only to a loopback Runtime");
+  if (
+    options.extraOrigin !== undefined &&
+    (typeof options.extraOrigin !== "string" ||
+      options.extraOrigin.length === 0)
+  )
+    throw new Error("extraOrigin must be a non-empty origin string");
+
   let origin = "";
   let agentServerUrl = requestedAgentServerUrl;
   const studioTenant = Object.freeze({ id: tenant.id, name: tenant.name });
+  const allowedOrigins = new Set<string>();
+  if (ui === "hosted") allowedOrigins.add(HOSTED_ORIGIN);
+  if (options.extraOrigin) allowedOrigins.add(options.extraOrigin);
+  // cacheDir is accepted for API stability; bundle download lands in WS-4.
+  void options.cacheDir;
 
   const handle = (request: IncomingMessage, response: ServerResponse): void => {
     void (async () => {
@@ -267,43 +372,86 @@ export async function startStudio(
         );
         return;
       }
-      if (url.pathname.startsWith("/_studio/runtime/")) {
-        await proxyRuntime(request, response, {
-          origin: `http://${request.headers.host}`,
-          runtimeUrl: agentServerUrl!,
-          serverKey: options.serverKey!,
-          tenantId: studioTenant.id,
-        });
+
+      if (url.pathname.startsWith("/_studio/")) {
+        const gate = authorize(request, allowedOrigins, token);
+        if (gate.ok && "preflight" in gate && gate.preflight) {
+          response.writeHead(204, { ...gate.headers });
+          response.end();
+          return;
+        }
+        if (!gate.ok) {
+          applyAuthorizeDeny(response, gate);
+          return;
+        }
+        const cors = studioCorsHeaders(gate.corsOrigin);
+
+        if (url.pathname === "/_studio/hello") {
+          if (request.method !== "GET" && request.method !== "HEAD") {
+            reject(response, 405, "Method not allowed", cors);
+            return;
+          }
+          const runtime = await probeRuntimeCompatibility(agentServerUrl!);
+          const body: StudioHello = Object.freeze({
+            studioProtocol: STUDIO_PROTOCOL,
+            proxyVersion: PROXY_VERSION,
+            mode: ui,
+            tenant: { id: studioTenant.id, name: studioTenant.name },
+            runtime,
+          });
+          if (request.method === "HEAD") {
+            response.writeHead(200, {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              ...cors,
+            });
+            response.end();
+            return;
+          }
+          json(response, 200, body, cors);
+          return;
+        }
+
+        if (url.pathname.startsWith("/_studio/runtime/")) {
+          await proxyRuntime(request, response, {
+            origin: `http://${request.headers.host}`,
+            runtimeUrl: agentServerUrl!,
+            serverKey: options.serverKey!,
+            tenantId: studioTenant.id,
+            allowedOrigins,
+            corsOrigin: gate.corsOrigin,
+          });
+          return;
+        }
+
+        reject(response, 404, "Unknown Studio route", cors);
         return;
       }
-      if (url.pathname === CONFIG_PATH && request.method === "GET") {
-        json(response, 200, {
-          runtimeUrl: "/_studio/runtime",
-          local: true,
-          tenant: { id: studioTenant.id, name: studioTenant.name },
-        });
+
+      if (ui === "hosted") {
+        if (
+          (request.method === "GET" || request.method === "HEAD") &&
+          url.pathname === "/"
+        ) {
+          writeHostedLanding(response, request.method);
+          return;
+        }
+        reject(response, 404, "Studio asset not found.");
         return;
       }
+
       if (request.method !== "GET" && request.method !== "HEAD") {
         reject(response, 405, "Studio only serves static assets.");
         return;
       }
-      const target = staticPath(root, url.pathname);
-      if (target === undefined) {
-        reject(response, 400, "Invalid Studio asset path.");
-        return;
-      }
-      if (await sendFile(response, request.method, target)) return;
-      if (extname(target) !== "") {
-        reject(response, 404, "Studio asset not found.");
-        return;
-      }
-      if (!(await sendFile(response, request.method, join(root, "index.html"))))
-        reject(
-          response,
-          500,
-          "Studio distribution is missing. Reinstall or rebuild @nylorun/studio.",
-        );
+      await serveLocalUi(
+        response,
+        request.method,
+        url.pathname,
+        webRoot!,
+        (status, message) => reject(response, status, message),
+      );
     })().catch(() => {
       if (!response.headersSent) reject(response, 500, "Studio request failed");
       else response.end();
@@ -312,24 +460,33 @@ export async function startStudio(
 
   const bound = await listenForStudio(handle, options.port);
   origin = `http://localhost:${bound.port}`;
+  if (ui === "local") allowedOrigins.add(origin);
   const address = origin;
+  const fragment = pairingFragment({
+    protocol: STUDIO_PROTOCOL,
+    port: bound.port,
+    token,
+  });
+  const launchUrl =
+    ui === "hosted" ? `${HOSTED_ORIGIN}/${fragment}` : `${address}/${fragment}`;
   const host = Object.freeze({
     address,
+    launchUrl,
     get runtimeUrl() {
       return agentServerUrl;
     },
     get tenant() {
       return studioTenant;
     },
-    open: () => browser(address),
+    open: () => browser(launchUrl),
     close: async () => {
       await Promise.all(
         bound.servers.map(
           (server) =>
-            new Promise<void>((done, reject) => {
+            new Promise<void>((done, rejectClose) => {
               server.closeAllConnections();
               server.close((error) =>
-                error === undefined ? done() : reject(error),
+                error === undefined ? done() : rejectClose(error),
               );
             }),
         ),

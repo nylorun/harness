@@ -5,3 +5,12 @@ export type {
   StudioOptions,
   StudioTenant,
 } from "./host.js";
+export type { StudioMode, StudioHello, Pairing } from "./contract.js";
+export {
+  STUDIO_PROTOCOL,
+  HOSTED_ORIGIN,
+  PROXY_HOST,
+  pairingFragment,
+  parsePairingFragment,
+  proxyOrigin,
+} from "./contract.js";

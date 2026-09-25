@@ -17,8 +17,9 @@ const studio = await startStudio({
   serverKey: credentials.applicationKey,
   tenant: { id: link.tenantId, name: link.tenantId },
   port: Number(studioPort),
+  ui: "local",
   open: open === "true",
 });
-console.log(`Studio on ${studio.address}`);
+console.log(`Studio launchUrl ${studio.launchUrl}`);
 process.once("SIGINT", () => void studio.close());
 process.once("SIGTERM", () => void studio.close());
