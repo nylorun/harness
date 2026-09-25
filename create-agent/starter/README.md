@@ -1,7 +1,10 @@
 # My Nylorun agent
 
 Before you start, install the prerequisites once. Nothing downloads them for
-you; `npx nylorun doctor runtime` checks both.
+you; `npx nylorun doctor runtime` checks both. On Windows, use
+[WSL2](https://learn.microsoft.com/windows/wsl/install): install both inside your WSL distribution and keep
+the project in the Linux filesystem (`~/…`, not `/mnt/c/…`), where file
+watching works.
 
 ```sh
 node --version                            # 24 or newer

@@ -68,7 +68,6 @@ function runFirebaseDeploy(projectId) {
     cwd: repoRoot,
     env,
     stdio: "inherit",
-    shell: process.platform === "win32",
   });
   if (result.status !== 0) {
     throw new Error(`firebase deploy exited ${result.status}`);

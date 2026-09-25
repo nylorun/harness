@@ -145,7 +145,6 @@ function lifecycleContext(
 ): LifecycleContext {
   return {
     paths,
-    platform: options.platform,
     nodeBinary: options.nodeBinary,
     hostEntry: fileURLToPath(new URL("../host/main.js", import.meta.url)),
     runtimeVersion: RUNTIME_VERSION,
@@ -184,6 +183,14 @@ export async function runLauncher(
         node: options.nodeVersion,
       });
       return 0;
+    }
+
+    if (options.platform === "win32") {
+      throw new LauncherError(
+        "platform_unsupported",
+        "The Nylorun Runtime does not run on native Windows.",
+        "Use WSL2: install Node 24 and @nylorun/runtime inside your WSL distribution (https://learn.microsoft.com/windows/wsl/install).",
+      );
     }
 
     const nodeMajor = Number(options.nodeVersion.split(".")[0]);

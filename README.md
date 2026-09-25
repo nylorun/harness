@@ -20,7 +20,9 @@ and conformance gates remain open.
 
 ## Quick start
 
-Install the prerequisites once: Node.js 24 or newer, and the Runtime.
+Install the prerequisites once: Node.js 24 or newer, and the Runtime. Nylorun
+runs on macOS and Linux; on Windows, use [WSL2](https://learn.microsoft.com/windows/wsl/install) and
+install both inside your WSL distribution (native Windows is not supported).
 
 ```sh
 node --version                                 # 24 or newer

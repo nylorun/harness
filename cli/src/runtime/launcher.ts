@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { PROTOCOL_VERSION } from "@nylorun/agents";
 import { CliError } from "../errors.js";
 import {
@@ -99,49 +99,29 @@ export function runtimeInstallCommand(): string {
   return `npm install --global @nylorun/runtime@${runtimeVersion()}`;
 }
 
-/** Find `name` on PATH (with PATHEXT on Windows). */
+/** Find `name` on PATH. */
 export function findOnPath(
   name: string,
   env: NodeJS.ProcessEnv,
 ): string | undefined {
-  const dirs = (env.PATH ?? env.Path ?? "").split(delimiter).filter(Boolean);
-  const extensions =
-    process.platform === "win32"
-      ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
-      : [""];
-  for (const dir of dirs) {
-    for (const extension of extensions) {
-      const candidate = join(dir, `${name}${extension.toLowerCase()}`);
-      try {
-        if (statSync(candidate).isFile()) return candidate;
-      } catch {
-        /* not here */
-      }
+  for (const dir of (env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    const candidate = join(dir, name);
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      /* not here */
     }
   }
   return undefined;
 }
 
 /**
- * npm links a bin to the package's JS file: a symlink on POSIX, a `.cmd` shim
- * next to the package on Windows. Running that file on this Node avoids
- * spawning `.cmd` shims, which Node refuses without a shell.
+ * npm links a bin to the package's JS file. Running that file on this Node
+ * keeps the launcher on the CLI's Node whatever the bin's shebang resolves to.
  */
 function launcherScript(bin: string): string | undefined {
-  if (process.platform !== "win32") {
-    const real = realpathSync(bin);
-    return real.endsWith(".js") ? real : undefined;
-  }
-  const dir = dirname(bin);
-  const main = join("@nylorun", "runtime", "dist", "launcher", "main.js");
-  // Global prefix (`<prefix>/nylorun-runtime.cmd`) or project `.bin`.
-  for (const candidate of [
-    join(dir, "node_modules", main),
-    join(dir, "..", main),
-  ]) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
+  const real = realpathSync(bin);
+  return real.endsWith(".js") ? real : undefined;
 }
 
 /**
@@ -219,11 +199,6 @@ function createHandle(
   };
 }
 
-/** Quote one argument for cmd.exe (only used for non-npm `.cmd` shims). */
-function quoteForCmd(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
 function spawnLauncher(
   bin: string,
   args: readonly string[],
@@ -235,13 +210,6 @@ function spawnLauncher(
   };
   const script = launcherScript(bin);
   if (script) return spawn(process.execPath, [script, ...args], options);
-  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(bin)) {
-    // Windows runs .cmd files only through cmd.exe, which needs quoting.
-    return spawn(quoteForCmd(bin), args.map(quoteForCmd), {
-      ...options,
-      shell: true,
-    });
-  }
   return spawn(bin, args, options);
 }
 

@@ -76,6 +76,23 @@ it("E1-7: --json emits NDJSON result and errors carry remedy; exit 0/1/2", async
   expect(errorLine.message).toContain("22.11.0");
   expect(errorLine.remedy).toContain("npm install --global @nylorun/runtime");
 
+  // Native Windows: refused with the WSL2 route, before anything touches the home.
+  const windows = capture();
+  const code3 = await runLauncher(["--json", "--home", root, "up"], {
+    ...options(root, windows.sink),
+    platform: "win32",
+  });
+  expect(code3).toBe(1);
+  const windowsError = JSON.parse(windows.stdout.at(-1)!) as Extract<
+    LauncherEvent,
+    { type: "error" }
+  >;
+  expect(windowsError).toMatchObject({
+    type: "error",
+    code: "platform_unsupported",
+  });
+  expect(windowsError.remedy).toContain("WSL2");
+
   const usage = capture();
   const code2 = await runLauncher(
     ["--json", "install", "0.9.0"],

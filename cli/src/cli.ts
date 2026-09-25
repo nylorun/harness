@@ -116,6 +116,11 @@ async function main() {
   const [rawCommand, ...rawArgs] = process.argv.slice(2);
   if (!rawCommand || rawCommand === "--help" || rawCommand === "-h")
     return void console.log(usage);
+  if (process.platform === "win32")
+    throw new CliError(
+      "Nylorun does not run on native Windows. Use WSL2: install Node 24 and the Nylorun Runtime inside your WSL distribution and run nylorun there (https://learn.microsoft.com/windows/wsl/install).",
+      1,
+    );
   const aliases: Record<string, string> = {
     up: "up",
     down: "down",

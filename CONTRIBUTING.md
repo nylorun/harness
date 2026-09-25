@@ -19,7 +19,7 @@ npm project with its own lockfile.
 
 ## First run
 
-Use **Node 24 and npm 11** (CI pins 24.15.0 and 11.15.0; matching majors is enough). With nvm:
+Use **Node 24 and npm 11** (CI pins 24.15.0 and 11.15.0; matching majors is enough) on macOS or Linux. On Windows, clone and work inside [WSL2](https://learn.microsoft.com/windows/wsl/install). With nvm:
 
 ```sh
 nvm install

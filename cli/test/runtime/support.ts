@@ -37,10 +37,7 @@ export async function installTestRuntime(
   version: string,
   options: { main?: string } = {},
 ): Promise<TestRuntime> {
-  const windows = process.platform === "win32";
-  const packageDir = windows
-    ? join(prefix, "node_modules", "@nylorun", "runtime")
-    : join(prefix, "lib", "node_modules", "@nylorun", "runtime");
+  const packageDir = join(prefix, "lib", "node_modules", "@nylorun", "runtime");
   const launcherDir = join(packageDir, "dist", "launcher");
   await mkdir(launcherDir, { recursive: true });
   await writeFile(
@@ -83,21 +80,10 @@ process.exit(code);
     { mode: 0o755 },
   );
 
-  let binDir: string;
-  let bin: string;
-  if (windows) {
-    binDir = prefix;
-    bin = join(prefix, "nylorun-runtime.cmd");
-    await writeFile(
-      bin,
-      `@echo off\r\nnode "%~dp0node_modules\\@nylorun\\runtime\\dist\\launcher\\main.js" %*\r\n`,
-    );
-  } else {
-    binDir = join(prefix, "bin");
-    await mkdir(binDir, { recursive: true });
-    bin = join(binDir, "nylorun-runtime");
-    await symlink(main, bin);
-  }
+  const binDir = join(prefix, "bin");
+  await mkdir(binDir, { recursive: true });
+  const bin = join(binDir, "nylorun-runtime");
+  await symlink(main, bin);
   return {
     bin,
     env: {

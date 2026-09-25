@@ -31,7 +31,7 @@ it("the real CLI rejects unknown options before making the destination", async (
   }
 });
 
-it.skipIf(process.platform === "win32").each(["SIGINT", "SIGTERM"] as const)(
+it.each(["SIGINT", "SIGTERM"] as const)(
   "forwards %s to the whole command tree and removes cancellation listeners",
   async (signal) => {
     const root = await mkdtemp(join(tmpdir(), "creator-tree-"));

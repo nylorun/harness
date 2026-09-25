@@ -12,7 +12,7 @@ export class ProcessGroup {
   start(label, command, args, options = {}) {
     const child = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      detached: process.platform !== "win32",
+      detached: true,
       ...options,
     });
     const lines = [];
@@ -100,21 +100,9 @@ export class ProcessGroup {
       async stop() {
         intentional = true;
         if (ended) return;
-        if (process.platform === "win32") {
-          await new Promise((resolve) => {
-            const killer = spawn(
-              "taskkill",
-              ["/pid", String(child.pid), "/T", "/F"],
-              { stdio: "ignore" },
-            );
-            killer.once("error", resolve);
-            killer.once("exit", resolve);
-          });
-        } else {
-          try {
-            process.kill(-child.pid, "SIGTERM");
-          } catch {}
-        }
+        try {
+          process.kill(-child.pid, "SIGTERM");
+        } catch {}
         let timer;
         await Promise.race([
           exit,
@@ -125,9 +113,7 @@ export class ProcessGroup {
         clearTimeout(timer);
         if (!ended) {
           try {
-            process.platform === "win32"
-              ? child.kill("SIGKILL")
-              : process.kill(-child.pid, "SIGKILL");
+            process.kill(-child.pid, "SIGKILL");
           } catch {}
           // Never wait forever for close — a detached Host can outlive the
           // launcher pipe and leave CI smokes wedged until a wall-clock abort.

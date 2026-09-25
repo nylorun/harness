@@ -10,7 +10,8 @@ developers install as a prerequisite, and it is started by its **launcher**
 run it as a process; nothing imports `@nylorun/runtime`, and nothing downloads
 it.
 
-Before upgrading, install the prerequisites:
+Before upgrading, install the prerequisites. Native Windows is no longer
+supported: on Windows, install them inside WSL2 and move projects there.
 
 ```sh
 node --version                            # 24 or newer

@@ -296,7 +296,7 @@ async function spawnWatcher(options: {
         cwd: options.projectRoot,
         stdio: "inherit",
         env: childEnv,
-        detached: process.platform !== "win32",
+        detached: true,
       },
     );
     child = watcher;

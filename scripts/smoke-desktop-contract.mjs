@@ -12,7 +12,7 @@
  */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -25,25 +25,19 @@ import { installRuntime } from "./lib/runtime-install.mjs";
 
 /**
  * Find the installed launcher on PATH (D§9.1), independent of CLI source.
- * npm links the bin to `dist/launcher/main.js`: a symlink on POSIX, a `.cmd`
- * shim beside `node_modules/@nylorun/runtime` on Windows. Returns the script
- * to run on this Node, so Windows never needs a shell for `.cmd`.
+ * npm links the bin to `dist/launcher/main.js`; returns that script to run on
+ * this Node.
  */
 export function resolveLauncher(env = process.env) {
-  const windows = process.platform === "win32";
-  const name = windows ? "nylorun-runtime.cmd" : "nylorun-runtime";
-  for (const dir of (env.PATH ?? env.Path ?? "").split(delimiter)) {
+  for (const dir of (env.PATH ?? "").split(delimiter)) {
     if (!dir) continue;
-    const bin = join(dir, name);
+    const bin = join(dir, "nylorun-runtime");
     try {
       if (!statSync(bin).isFile()) continue;
     } catch {
       continue;
     }
-    if (!windows) return { bin, script: realpathSync(bin) };
-    const main = join("@nylorun", "runtime", "dist", "launcher", "main.js");
-    for (const script of [join(dir, "node_modules", main), join(dir, "..", main)])
-      if (existsSync(script)) return { bin, script };
+    return { bin, script: realpathSync(bin) };
   }
   return undefined;
 }
@@ -63,7 +57,6 @@ export async function runLauncher(home, args, env = process.env) {
     {
       env: { ...env, NYLORUN_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
     },
   );
   let stdout = "";
