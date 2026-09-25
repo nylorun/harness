@@ -10,7 +10,6 @@ import {
   type LauncherHandle,
   type LauncherOptions,
 } from "./launcher.js";
-import { runtimeVersion } from "./version.js";
 
 export interface EphemeralOptions extends LauncherOptions {
   /** Temporary Host root. Default: a new directory under os.tmpdir(). */
@@ -54,23 +53,12 @@ export async function startEphemeral(
   const home =
     options.home ??
     (await mkdtemp(join(tmpdir(), "nylorun-ephemeral-")));
-  const version = options.version ?? runtimeVersion();
   const createAdminFn = options.createAdmin ?? defaultCreateAdmin;
   const env = options.env ?? process.env;
 
-  const handle: LauncherHandle = await launcher(home, {
-    version,
-    registry: options.registry,
-    fetchImpl: options.fetchImpl,
-    env,
-    onProgress: options.onProgress,
-    bootstrap: options.bootstrap,
-  });
+  const handle: LauncherHandle = await launcher(home, { env });
 
-  const up = await handle.invoke(
-    ["up", "--version", version, "--port", "0"],
-    { env },
-  );
+  const up = await handle.invoke(["up", "--port", "0"], { env });
   throwOnLauncherFailure(up);
   const result = up.result ?? {};
   const url = typeof result.url === "string" ? result.url : undefined;
@@ -84,7 +72,10 @@ export async function startEphemeral(
     url,
     hostId:
       typeof result.hostId === "string" ? result.hostId : "host_unknown",
-    version: typeof result.version === "string" ? result.version : version,
+    version:
+      typeof result.version === "string"
+        ? result.version
+        : handle.runtime.version,
   };
 
   const admin = createAdminFn({ home });

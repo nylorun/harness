@@ -4,7 +4,7 @@ import { afterEach, expect, it } from "vitest";
 import { logs } from "../../src/launcher/logs.js";
 import { ensureHostLayout, hostPaths } from "../../src/launcher/paths.js";
 import type { LauncherEvent } from "../../src/launcher/protocol.js";
-import { removeRoot, temporaryRoot } from "./fixtures/registry.js";
+import { removeRoot, temporaryRoot } from "./fixtures/roots.js";
 
 const roots: string[] = [];
 afterEach(async () => {

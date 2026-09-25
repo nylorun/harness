@@ -1,8 +1,10 @@
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { watch } from "chokidar";
 import { ProcessGroup } from "./processes.mjs";
 import { npmCli, root } from "./repo.mjs";
+import { installRuntime } from "./runtime-install.mjs";
 
 export function developmentOptions(args) {
   const options = { studio: true, open: true, port: 8787, studioPort: 4161 };
@@ -104,9 +106,31 @@ export async function develop(
       );
     await command(`${name}:build`, ["run", "build"], cwd);
   }
+  let launcherEnv;
+  /**
+   * Put the workspace Runtime's launcher first on PATH: a linked install, so
+   * rebuilds apply, and never the developer's own global nylorun-runtime.
+   */
+  async function workspaceLauncherEnv(env) {
+    const runtimePackage = join(repo, "runtime");
+    const manifest = join(runtimePackage, "package.json");
+    // Unit fixtures stand in a Runtime without a launcher; nothing to install.
+    if (
+      !existsSync(manifest) ||
+      !JSON.parse(readFileSync(manifest, "utf8")).bin?.["nylorun-runtime"]
+    )
+      return env;
+    launcherEnv ??= (
+      await installRuntime(join(repo, ".tmp/runtime-prefix"), runtimePackage)
+    ).env;
+    return launcherEnv(env);
+  }
   async function startRuntime() {
     if (stopping) return;
-    const env = { ...process.env, PORT: String(options.port) };
+    const env = await workspaceLauncherEnv({
+      ...process.env,
+      PORT: String(options.port),
+    });
     if (hostRoot) env.NYLORUN_HOME = hostRoot;
     // Keep Host files out of the real developer home during scripted runs.
     if (home) {
@@ -114,12 +138,7 @@ export async function develop(
       env.USERPROFILE = home;
     }
     if (!ephemeral && hostRoot) {
-      // Registry runtime lacks the Tenant Host entry; seed from workspace packs,
-      // then bind the requested port before `nylorun dev` attaches.
-      const { seedWorkspaceHostInstall, workspaceRuntimeVersion } =
-        await import("./workspace-host-install.mjs");
-      const version = await workspaceRuntimeVersion();
-      await seedWorkspaceHostInstall(hostRoot, version);
+      // Bind the requested port before `nylorun dev` attaches.
       const upCode = await group.start(
         "runtime-up",
         process.execPath,

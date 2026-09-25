@@ -5,6 +5,10 @@ import { readFileSync, readdirSync, mkdtempSync, rmSync } from "node:fs";
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 if (!pkg.dependencies?.["@nylorun/harness"])
   throw new Error("Runtime must use canonical Harness contracts through a direct dependency.");
+if (pkg.bin?.["nylorun-runtime"] !== "dist/launcher/main.js")
+  throw new Error('Runtime must expose the launcher as bin "nylorun-runtime" (dist/launcher/main.js).');
+if (!readFileSync("dist/launcher/main.js", "utf8").startsWith("#!/usr/bin/env node\n"))
+  throw new Error("dist/launcher/main.js must start with a node shebang.");
 const cache = mkdtempSync(join(tmpdir(), "nylorun-runtime-pack-"));
 const output = execFileSync(
   process.platform === "win32" ? "npm.cmd" : "npm",
@@ -26,6 +30,7 @@ for (const path of [
   "dist/node/index.js",
   "dist/core/runtime.js",
   "dist/host/main.js",
+  "dist/launcher/main.js",
   "dist/version.js",
   "README.md",
   "CHANGELOG.md",

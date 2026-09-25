@@ -1,14 +1,10 @@
-import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { HOST_PROTOCOL } from "@nylorun/core/compatibility";
 import { runLauncher } from "../../src/launcher/commands.js";
 import { ensureHostLayout, hostPaths } from "../../src/launcher/paths.js";
 import type { LauncherEvent } from "../../src/launcher/protocol.js";
-import { writeFakeBuild } from "./fixtures/fake-build.js";
-import {
-  currentPlatformArch,
-  removeRoot,
-  temporaryRoot,
-} from "./fixtures/registry.js";
+import { RUNTIME_VERSION } from "../../src/version.js";
+import { removeRoot, temporaryRoot } from "./fixtures/roots.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -31,67 +27,60 @@ function capture() {
 
 const baselineEnv = { PATH: process.env.PATH };
 
+function options(root: string, sink: ReturnType<typeof capture>["sink"], nodeVersion = "24.15.0") {
+  return {
+    home: root,
+    platform: process.platform,
+    nodeBinary: process.execPath,
+    nodeVersion,
+    baselineEnv,
+    sink,
+  };
+}
+
 it("E1-7: --json emits NDJSON result and errors carry remedy; exit 0/1/2", async () => {
   const root = await temporaryRoot();
   roots.push(root);
-  const paths = hostPaths(root);
-  await ensureHostLayout(paths);
-  const current = currentPlatformArch();
-  const version = "0.9.9-json";
-  const source = await temporaryRoot("nylorun-build-");
-  roots.push(source);
-  await writeFakeBuild(source, { version, ...current });
 
   const ok = capture();
-  ok.sink.json = true;
-  const code0 = await runLauncher(
-    ["--json", "--home", root, "install", version, "--from", source],
-    {
-      home: root,
-      registry: "http://127.0.0.1:9",
-      ...current,
-      baselineEnv,
-      sink: ok.sink,
-    },
-  );
+  const code0 = await runLauncher(["--json", "version"], options(root, ok.sink));
   expect(code0).toBe(0);
   const resultLine = JSON.parse(ok.stdout.at(-1)!) as LauncherEvent;
-  expect(resultLine.type).toBe("result");
-  expect(resultLine).toMatchObject({
-    version,
-    installed: true,
+  expect(resultLine).toEqual({
+    type: "result",
+    runtimeVersion: RUNTIME_VERSION,
+    launcherProtocol: 1,
+    protocol: HOST_PROTOCOL,
+    node: "24.15.0",
   });
 
-  const fail = capture();
-  fail.sink.json = true;
+  const bare = capture();
+  expect(await runLauncher(["--version"], options(root, bare.sink))).toBe(0);
+  expect(bare.stdout.join("\n")).toContain(RUNTIME_VERSION);
+
+  // Older Node: every lifecycle command refuses, with an install remedy.
+  const old = capture();
   const code1 = await runLauncher(
-    ["--json", "--home", root, "install", "no-such-version"],
-    {
-      home: root,
-      registry: "http://127.0.0.1:9",
-      ...current,
-      baselineEnv,
-      sink: fail.sink,
-    },
+    ["--json", "--home", root, "up"],
+    options(root, old.sink, "22.11.0"),
   );
   expect(code1).toBe(1);
-  const errorLine = JSON.parse(fail.stdout.at(-1)!) as Extract<
+  const errorLine = JSON.parse(old.stdout.at(-1)!) as Extract<
     LauncherEvent,
     { type: "error" }
   >;
-  expect(errorLine.type).toBe("error");
-  expect(errorLine.remedy.length).toBeGreaterThan(0);
-  expect(errorLine.code).toBeTruthy();
+  expect(errorLine).toMatchObject({
+    type: "error",
+    code: "platform_unsupported",
+  });
+  expect(errorLine.message).toContain("22.11.0");
+  expect(errorLine.remedy).toContain("npm install --global @nylorun/runtime");
 
   const usage = capture();
-  usage.sink.json = true;
-  const code2 = await runLauncher(["--json", "not-a-command"], {
-    home: root,
-    registry: "http://127.0.0.1:9",
-    ...current,
-    baselineEnv,
-    sink: usage.sink,
-  });
+  const code2 = await runLauncher(
+    ["--json", "install", "0.9.0"],
+    options(root, usage.sink),
+  );
   expect(code2).toBe(2);
   expect(usage.stderr.join("\n")).toMatch(/Unknown command|Usage/);
 });
@@ -100,25 +89,17 @@ it("E1-7: status --json matches StatusResult shape", async () => {
   const root = await temporaryRoot();
   roots.push(root);
   await ensureHostLayout(hostPaths(root));
-  const current = currentPlatformArch();
-  await writeFakeBuild(join(hostPaths(root).runtime, "0.9.0-beta"), {
-    version: "0.9.0-beta",
-    ...current,
-  });
   const cap = capture();
-  cap.sink.json = true;
-  const code = await runLauncher(["--json", "--home", root, "status"], {
-    home: root,
-    registry: "http://127.0.0.1:9",
-    ...current,
-    baselineEnv,
-    sink: cap.sink,
-  });
+  const code = await runLauncher(
+    ["--json", "--home", root, "status"],
+    options(root, cap.sink),
+  );
   expect(code).toBe(0);
   const body = JSON.parse(cap.stdout.at(-1)!) as Record<string, unknown>;
   expect(body.type).toBe("result");
   expect(body.launcherProtocol).toBe(1);
   expect(body.state).toBe("absent");
-  expect(body.installed).toEqual(["0.9.0-beta"]);
+  expect(body.launcherVersion).toBe(RUNTIME_VERSION);
+  expect(body).not.toHaveProperty("installed");
   expect(body.home).toBe(root);
 });

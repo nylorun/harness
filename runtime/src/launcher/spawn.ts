@@ -1,7 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { join } from "node:path";
-import type { PlatformArch } from "./builds.js";
 
 export interface SpawnHostInput {
   nodeBinary: string;
@@ -10,20 +8,11 @@ export interface SpawnHostInput {
   cwd: string;
   detached: boolean;
   logPath?: string;
-  platform?: PlatformArch["platform"];
-}
-
-export function nodeBinaryPath(
-  buildDir: string,
-  platform: PlatformArch["platform"],
-): string {
-  return platform === "win32"
-    ? join(buildDir, "node", "bin", "node.exe")
-    : join(buildDir, "node", "bin", "node");
+  platform?: NodeJS.Platform;
 }
 
 /**
- * Spawn the Host on the build's Node. Detached background Hosts survive after
+ * Spawn the Host on the launcher's own Node (`process.execPath`). Detached background Hosts survive after
  * `up` exits (including Windows — without detached the Host dies with the
  * launcher parent and createTenant sees ECONNREFUSED). stdout/stderr append to
  * runtime.log when logPath is set.

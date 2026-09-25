@@ -1,5 +1,4 @@
 import { LAUNCHER_PROTOCOL } from "@nylorun/core/compatibility";
-import { installedVersions, type PlatformArch } from "./builds.js";
 import { readHostConfig } from "./host-config.js";
 import { readHostState } from "./host-state.js";
 import { processAlive } from "./locks.js";
@@ -12,11 +11,10 @@ import type { StatusResult } from "./protocol.js";
  */
 export async function status(
   paths: HostPaths,
-  current: PlatformArch,
+  launcherVersion: string,
 ): Promise<StatusResult> {
   const config = await readHostConfig(paths);
   const stateFile = await readHostState(paths);
-  const installed = installedVersions(paths, current);
   const runtimeVersion =
     config && typeof config.runtimeVersion === "string"
       ? config.runtimeVersion
@@ -26,7 +24,7 @@ export async function status(
     launcherProtocol: LAUNCHER_PROTOCOL,
     home: paths.root,
     state: "absent",
-    installed,
+    launcherVersion,
     ...(runtimeVersion ? { runtimeVersion } : {}),
   };
 

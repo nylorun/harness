@@ -9,7 +9,9 @@ function cliPackageJsonPath(): string {
 }
 
 /**
- * Pinned Runtime build version from `cli/package.json` `nylorun.runtime` (D7).
+ * Recommended Runtime version from `cli/package.json` `nylorun.runtime` (D7):
+ * the version named in install instructions. Compatibility itself is checked
+ * by launcher and Host protocol, not by an exact match.
  */
 export function runtimeVersion(): string {
   let raw: unknown;
@@ -24,7 +26,7 @@ export function runtimeVersion(): string {
   const version = (raw as { nylorun?: { runtime?: unknown } })?.nylorun?.runtime;
   if (typeof version !== "string" || version.trim() === "") {
     throw new CliError(
-      'cli/package.json is missing "nylorun.runtime" (the pinned Runtime build version).',
+      'cli/package.json is missing "nylorun.runtime" (the recommended Runtime version).',
       1,
     );
   }

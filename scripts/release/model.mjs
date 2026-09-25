@@ -8,8 +8,6 @@ import { getPackages } from "@manypkg/get-packages";
 import { root, packages, readJson, writeJson, run } from "../lib/repo.mjs";
 import { syncCliRuntimePin } from "./pins.mjs";
 import { planVersions } from "./version-policy.mjs";
-import { runtimeBuildPublishOrder } from "./runtime-build-validate.mjs";
-import { RUNTIME_BUILD_PLATFORMS } from "../lib/local-build.mjs";
 
 export async function prepareVersions(repo, channel) {
   const workspace = await getPackages(repo);
@@ -213,55 +211,10 @@ export async function publishCandidates(
   artifacts,
   registry,
   report = () => {},
-  { buildArtifacts } = {},
 ) {
   for (const name of packages.filter((name) => plan.packages[name]))
     await registry.checkTag(name, plan.packages[name], plan.channel);
-  // D17: Runtime builds share the runtime version and publish after runtime,
-  // before @nylorun/cli.
-  const runtimeVersion =
-    plan.packages.runtime ?? plan.compatibility?.runtime;
-  async function publishRuntimeBuilds() {
-    if (!buildArtifacts || !runtimeVersion) return;
-    for (const buildName of runtimeBuildPublishOrder()) {
-      const build = buildArtifacts[buildName];
-      if (!build?.path)
-        throw new Error(`Missing Runtime build artifact for ${buildName}.`);
-      if (build.version !== runtimeVersion)
-        throw new Error(
-          `Build ${buildName} version ${build.version} must equal runtime ${runtimeVersion}.`,
-        );
-      const short = buildName.replace(/^@nylorun\//, "");
-      await registry.checkTag(short, runtimeVersion, plan.channel);
-      const existing = await registry.lookup(short, runtimeVersion);
-      if (existing) {
-        if (build.integrity && existing.integrity !== build.integrity)
-          throw new Error(
-            `Published integrity conflict for ${buildName}@${runtimeVersion}.`,
-          );
-        report(
-          `${buildName}@${runtimeVersion}: already published with matching integrity`,
-        );
-      } else {
-        await registry.publish(short, build.path, plan.channel);
-        const verified = await registry.waitFor(short, runtimeVersion);
-        if (build.integrity && verified?.integrity !== build.integrity)
-          throw new Error(
-            `Registry verification failed for ${buildName}@${runtimeVersion}.`,
-          );
-        report(`${buildName}@${runtimeVersion}: published and verified`);
-      }
-      await registry.ensureTag(short, runtimeVersion, plan.channel);
-    }
-  }
-
-  let buildsPublished = false;
   for (const name of packages.filter((name) => plan.packages[name])) {
-    // Ensure builds land before CLI when runtime is an unchanged pin.
-    if (name === "cli" && !buildsPublished) {
-      await publishRuntimeBuilds();
-      buildsPublished = true;
-    }
     const artifact = artifacts[name];
     if (!artifact?.integrity)
       throw new Error(`Missing verified artifact for ${name}.`);
@@ -295,16 +248,8 @@ export async function publishCandidates(
       report(`${name}@${version}: published and verified`);
     }
     await registry.ensureTag(name, version, plan.channel);
-
-    if (name === "runtime" && !buildsPublished) {
-      await publishRuntimeBuilds();
-      buildsPublished = true;
-    }
   }
-  if (!buildsPublished) await publishRuntimeBuilds();
 }
-
-export { RUNTIME_BUILD_PLATFORMS, runtimeBuildPublishOrder };
 
 export async function verifyReleaseCommit(repo, sha) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? ""))

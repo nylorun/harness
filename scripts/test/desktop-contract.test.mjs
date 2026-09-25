@@ -19,7 +19,7 @@ test("J3: incompatible_host from Admin /health mismatch", async () => {
   await runIncompatibleHostCase();
 });
 
-test("J1–J4: desktop contract smoke (bootstrap, up, tenant, agents, failures, Origin)", async (t) => {
+test("J1–J4: desktop contract smoke (installed Runtime, up, tenant, agents, failures, Origin)", async (t) => {
   try {
     await access(join(root, "runtime/dist/host/main.js"));
     await access(join(root, "admin/dist/index.js"));
@@ -37,7 +37,5 @@ test("J1–J4: desktop contract smoke (bootstrap, up, tenant, agents, failures, 
       }
     },
   });
-  assert.equal(typeof result.build.version, "string");
-  assert.match(result.build.name, /^@nylorun\/runtime-/);
-  assert.match(result.registryUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.equal(typeof result.version, "string");
 });

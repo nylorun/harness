@@ -3,34 +3,26 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { LauncherError } from "../../src/launcher/errors.js";
-import { down, restart, run, up } from "../../src/launcher/lifecycle.js";
-import { ensureHostLayout, hostPaths } from "../../src/launcher/paths.js";
-import { forceKillHost, nodeBinaryPath } from "../../src/launcher/spawn.js";
-import { status } from "../../src/launcher/status.js";
-import { writeFakeBuild } from "./fixtures/fake-build.js";
 import {
-  currentPlatformArch,
-  removeRoot,
-  temporaryRoot,
-} from "./fixtures/registry.js";
+  down,
+  restart,
+  run,
+  up,
+  type LifecycleContext,
+} from "../../src/launcher/lifecycle.js";
+import { ensureHostLayout, hostPaths } from "../../src/launcher/paths.js";
+import { forceKillHost } from "../../src/launcher/spawn.js";
+import { status } from "../../src/launcher/status.js";
+import { writeFakeHost } from "./fixtures/fake-host.js";
+import { removeRoot, temporaryRoot } from "./fixtures/roots.js";
 
 const roots: string[] = [];
+const contexts: LifecycleContext[] = [];
 afterEach(async () => {
   // Best-effort: stop any Host left running under temp roots.
-  for (const root of [...roots]) {
+  for (const ctx of contexts.splice(0)) {
     try {
-      const paths = hostPaths(root);
-      const current = currentPlatformArch();
-      await down(
-        {
-          paths,
-          ...current,
-          registry: "http://127.0.0.1:9",
-          baselineEnv: { PATH: process.env.PATH },
-          lock: { pollMs: 20, waitMs: 5_000 },
-        },
-        { force: true },
-      );
+      await down(ctx, { force: true });
     } catch {
       /* ignore */
     }
@@ -42,28 +34,39 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(removeRoot));
 });
 
+/** A launcher context whose installed Runtime is `version` (fake Host stub). */
+async function installed(
+  paths: ReturnType<typeof hostPaths>,
+  version: string,
+  tenantSchemaMax = 1,
+): Promise<LifecycleContext> {
+  const dir = await temporaryRoot("nylorun-host-");
+  roots.push(dir);
+  const ctx: LifecycleContext = {
+    paths,
+    platform: process.platform,
+    nodeBinary: process.execPath,
+    hostEntry: await writeFakeHost(dir, { version }),
+    runtimeVersion: version,
+    tenantSchemaMax,
+    baselineEnv: { PATH: process.env.PATH, LANG: process.env.LANG },
+    lock: { pollMs: 20, waitMs: 10_000 },
+  };
+  contexts.push(ctx);
+  return ctx;
+}
+
 async function setup(version = "0.9.0-e2") {
   const root = await temporaryRoot();
   roots.push(root);
   const paths = hostPaths(root);
   await ensureHostLayout(paths);
-  const current = currentPlatformArch();
-  const source = await temporaryRoot("nylorun-build-");
-  roots.push(source);
-  await writeFakeBuild(source, { version, ...current });
-  const ctx = {
-    paths,
-    ...current,
-    registry: "http://127.0.0.1:9",
-    baselineEnv: { PATH: process.env.PATH, LANG: process.env.LANG },
-    lock: { pollMs: 20, waitMs: 10_000 },
-  };
-  return { root, paths, current, source, version, ctx };
+  return { root, paths, version, ctx: await installed(paths, version) };
 }
 
-it("E2-8/9: up creates host.json, installs, starts Host on build Node, writes state after ready", async () => {
-  const { paths, source, version, ctx, current } = await setup();
-  const result = await up(ctx, { version, port: 0, from: source });
+it("E2-8/9: up creates host.json, starts the Host on the launcher's Node, writes state after ready", async () => {
+  const { paths, version, ctx } = await setup();
+  const result = await up(ctx, { port: 0 });
   expect(result.started).toBe(true);
   expect(result.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   expect(result.pid).toBeGreaterThan(0);
@@ -75,21 +78,21 @@ it("E2-8/9: up creates host.json, installs, starts Host on build Node, writes st
   expect(config.runtimeVersion).toBe(version);
   expect(config.port).not.toBe(8787); // port 0 → free port
 
-  const again = await up(ctx, { version, from: source });
+  const again = await up(ctx);
   expect(again.started).toBe(false);
   expect(again.pid).toBe(result.pid);
 
-  const st = await status(paths, current);
+  const st = await status(paths, version);
   expect(st.state).toBe("running");
-  expect(nodeBinaryPath(join(paths.runtime, version), current.platform)).toContain(
-    join("node", "bin"),
-  );
+  expect(st.launcherVersion).toBe(version);
 });
 
-it("E2-8: up refuses foreign_port and host_unresponsive; version_required without pin", async () => {
-  const { paths, ctx } = await setup();
-  await expect(up(ctx, { port: 0 })).rejects.toMatchObject({
-    code: "version_required",
+it("E2-8: up refuses foreign_port and a missing Host entry", async () => {
+  const { ctx } = await setup();
+  await expect(
+    up({ ...ctx, hostEntry: join(ctx.paths.root, "missing.js") }, { port: 0 }),
+  ).rejects.toMatchObject({
+    code: "host_start_failed",
   } satisfies Partial<LauncherError>);
 
   // Foreign listener on an explicit port
@@ -106,7 +109,7 @@ it("E2-8: up refuses foreign_port and host_unresponsive; version_required withou
     });
   });
   try {
-    await expect(up(ctx, { version: "0.9.0-e2", port: foreignPort })).rejects.toMatchObject({
+    await expect(up(ctx, { port: foreignPort })).rejects.toMatchObject({
       code: "foreign_port",
     });
   } finally {
@@ -117,19 +120,7 @@ it("E2-8: up refuses foreign_port and host_unresponsive; version_required withou
 });
 
 it("E2-8: schema guard blocks up when tenant schema is newer", async () => {
-  const root = await temporaryRoot();
-  roots.push(root);
-  const paths = hostPaths(root);
-  await ensureHostLayout(paths);
-  const current = currentPlatformArch();
-  const version = "0.9.1-schema";
-  const source = await temporaryRoot("nylorun-build-");
-  roots.push(source);
-  await writeFakeBuild(source, {
-    version,
-    ...current,
-    tenantSchemaMax: 1,
-  });
+  const { paths, ctx } = await setup("0.9.1-schema");
   const tenantId = "tn_0123456789abcdefghjkmnpq";
   await mkdir(join(paths.tenants, tenantId), { recursive: true });
   await writeFile(
@@ -142,23 +133,14 @@ it("E2-8: schema guard blocks up when tenant schema is newer", async () => {
       schemaVersion: 99,
     }),
   );
-  const ctx = {
-    paths,
-    ...current,
-    registry: "http://127.0.0.1:9",
-    baselineEnv: { PATH: process.env.PATH },
-    lock: { pollMs: 20, waitMs: 10_000 },
-  };
-  await expect(up(ctx, { version, port: 0, from: source })).rejects.toMatchObject({
+  await expect(up(ctx, { port: 0 })).rejects.toMatchObject({
     code: "host_schema_newer",
   });
 });
 
 it("E2-10: down stops Host; active_work without --force; --force skips", async () => {
-  const { paths, source, version, ctx } = await setup("0.9.2-down");
-  // Rewrite build with sessions stub via env — inject through baseline won't work
-  // for child. Use POST /_stub/aggregate after start.
-  const started = await up(ctx, { version, port: 0, from: source });
+  const { paths, ctx } = await setup("0.9.2-down");
+  const started = await up(ctx, { port: 0 });
   await fetch(`${started.url}/_stub/aggregate`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -175,40 +157,33 @@ it("E2-10: down stops Host; active_work without --force; --force skips", async (
   expect(noop.stopped).toBe(false);
 });
 
-it("E2-11: restart verifies target before stop; downgrade_refused without flag", async () => {
-  const { paths, source, version, ctx, current } = await setup("0.9.3-a");
-  await up(ctx, { version, port: 0, from: source });
+it("E2-11: restart moves the Host onto the installed Runtime; downgrade_refused without flag", async () => {
+  const { paths, version, ctx } = await setup("0.9.3-a");
+  await up(ctx, { port: 0 });
 
-  const newer = "0.9.4-b";
-  const newerSource = await temporaryRoot("nylorun-build-");
-  roots.push(newerSource);
-  await writeFakeBuild(newerSource, { version: newer, ...current });
-
-  const upgraded = await restart(ctx, {
-    version: newer,
-    from: newerSource,
-    force: true,
-  });
+  // `npm install --global @nylorun/runtime@0.9.4-b`, then restart.
+  const newer = await installed(paths, "0.9.4-b");
+  const upgraded = await restart(newer, { force: true });
   expect(upgraded.started).toBe(true);
-  expect(upgraded.version).toBe(newer);
+  expect(upgraded.version).toBe("0.9.4-b");
   const config = JSON.parse(await readFile(paths.config, "utf8"));
-  expect(config.runtimeVersion).toBe(newer);
+  expect(config.runtimeVersion).toBe("0.9.4-b");
 
-  await expect(
-    restart(ctx, { version, from: source, force: true }),
-  ).rejects.toMatchObject({ code: "downgrade_refused" });
-
-  const downgraded = await restart(ctx, {
-    version,
-    from: source,
-    force: true,
-    allowDowngrade: true,
+  // Reinstalling the older Runtime must not silently take over the Host root.
+  await expect(restart(ctx, { force: true })).rejects.toMatchObject({
+    code: "downgrade_refused",
   });
+  await down(newer, { force: true });
+  await expect(up(ctx, { port: 0 })).rejects.toMatchObject({
+    code: "downgrade_refused",
+  });
+
+  const downgraded = await restart(ctx, { force: true, allowDowngrade: true });
   expect(downgraded.version).toBe(version);
 });
 
 it("E2-12: run emits ready then stops on signal", async () => {
-  const { source, version, ctx } = await setup("0.9.5-run");
+  const { version, ctx } = await setup("0.9.5-run");
   let signalHandler: ((s: NodeJS.Signals) => void) | undefined;
   const ready: unknown[] = [];
   const finished = run(
@@ -222,9 +197,7 @@ it("E2-12: run emits ready then stops on signal", async () => {
       },
     },
     {
-      version,
       port: 0,
-      from: source,
       onReady: (r) => ready.push(r),
     },
   );
@@ -240,11 +213,7 @@ it("E2-12: run emits ready then stops on signal", async () => {
   expect(result.version).toBe(version);
 });
 
-it("E2-14: forceKillHost and nodeBinaryPath cover Windows vs POSIX shapes", () => {
-  expect(nodeBinaryPath("/build", "win32")).toMatch(/node\.exe$/);
-  // join() uses the host OS separator even when the target platform is linux,
-  // so accept either slash on a Windows runner asserting a linux layout.
-  expect(nodeBinaryPath("/build", "linux")).toMatch(/bin[/\\]node$/);
+it("E2-14: forceKillHost tolerates a missing PID", () => {
   // POSIX path: killing a nonexistent PID must not throw.
   expect(() => forceKillHost(999_999_997, "linux")).not.toThrow();
 });

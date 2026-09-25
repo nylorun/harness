@@ -70,6 +70,13 @@ export async function createProject(
   }
   dependencies.log("Installing dependencies...");
   await stage("Installation", ["install", ...(options.yes ? ["--yes"] : [])]);
+  const missing = missingPrerequisites(dependencies, compatibility.runtime);
+  if (missing.length)
+    throw new CreationError(
+      `Project created. Before starting it, install the prerequisites:\n${missing
+        .map((line) => `  ${line}`)
+        .join("\n")}\nThen run:\ncd ${quote(destination)}\nnpm run dev`,
+    );
   dependencies.log(
     "Starting development. The first start sets up the model provider in the Runtime vault.",
   );
@@ -107,6 +114,27 @@ export async function createProject(
       );
     }
   }
+}
+
+/** The Runtime needs node:sqlite and Node 24 APIs. */
+const MIN_NODE_MAJOR = 24;
+
+/**
+ * Prerequisites the developer installs before running the Runtime. The
+ * creator only reports them; it never downloads Node or the Runtime.
+ */
+function missingPrerequisites(
+  dependencies: CreatorDependencies,
+  runtimeVersion: string,
+): string[] {
+  const missing: string[] = [];
+  if (!(Number(dependencies.nodeVersion.split(".")[0]) >= MIN_NODE_MAJOR))
+    missing.push(
+      `Node.js ${MIN_NODE_MAJOR} or newer (found ${dependencies.nodeVersion})`,
+    );
+  if (!dependencies.findOnPath("nylorun-runtime"))
+    missing.push(`npm install --global @nylorun/runtime@${runtimeVersion}`);
+  return missing;
 }
 
 function packageName(directory: string): string {

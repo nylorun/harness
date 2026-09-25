@@ -1,14 +1,20 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
+import { PROTOCOL_VERSION } from "@nylorun/agents";
 import { CliError } from "../errors.js";
-import { bootstrap } from "./bootstrap.js";
-import { newestBuild, type InstalledBuild } from "./builds.js";
 import {
   exitCodeForLauncherError,
 } from "./exit-codes.js";
 import { renderProgress, type ProgressEvent } from "./progress.js";
 import { runtimeVersion } from "./version.js";
+
+/** The launcher command `@nylorun/runtime` installs (npm bin). */
+export const LAUNCHER_BIN = "nylorun-runtime";
+
+/** The `nylorun-runtime --json` contract this CLI speaks (core LAUNCHER_PROTOCOL). */
+const LAUNCHER_PROTOCOL = 1;
 
 /** Resolve NYLORUN_HOME, an explicit home, or `~/.nylorun`. */
 export function resolveHome(home?: string): string {
@@ -45,9 +51,18 @@ export interface LauncherInvokeResult {
   stderr: string;
 }
 
+/** The installed Runtime a handle runs, as its `version` command reports it. */
+export interface InstalledRuntime {
+  /** `nylorun-runtime` found on PATH. */
+  readonly bin: string;
+  readonly version: string;
+  /** Node the Runtime reported (the Host runs on the same Node). */
+  readonly node: string;
+}
+
 export interface LauncherHandle {
   readonly home: string;
-  readonly build: InstalledBuild;
+  readonly runtime: InstalledRuntime;
   /**
    * Run a launcher command with `--json --home`. Progress events are rendered
    * to stderr by default. Returns parsed events and the process exit code.
@@ -75,19 +90,64 @@ export interface InvokeOptions {
 }
 
 export interface LauncherOptions {
-  /** Pin used when bootstrapping. Default: `runtimeVersion()`. */
-  version?: string;
-  registry?: string;
-  fetchImpl?: typeof fetch;
+  /** Environment for the launcher, including the PATH it is found on. */
   env?: NodeJS.ProcessEnv;
-  onProgress?: (event: ProgressEvent) => void;
-  /** Skip bootstrap when no build exists (tests). */
-  bootstrap?: typeof bootstrap;
+}
+
+/** Install command shown whenever the Runtime is missing or incompatible. */
+export function runtimeInstallCommand(): string {
+  return `npm install --global @nylorun/runtime@${runtimeVersion()}`;
+}
+
+/** Find `name` on PATH (with PATHEXT on Windows). */
+export function findOnPath(
+  name: string,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  const dirs = (env.PATH ?? env.Path ?? "").split(delimiter).filter(Boolean);
+  const extensions =
+    process.platform === "win32"
+      ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
+      : [""];
+  for (const dir of dirs) {
+    for (const extension of extensions) {
+      const candidate = join(dir, `${name}${extension.toLowerCase()}`);
+      try {
+        if (statSync(candidate).isFile()) return candidate;
+      } catch {
+        /* not here */
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
- * Resolve the newest installed build or bootstrap the CLI pin, then return a
- * handle that runs `nylorun-runtime` with `--json` (F1-3).
+ * npm links a bin to the package's JS file: a symlink on POSIX, a `.cmd` shim
+ * next to the package on Windows. Running that file on this Node avoids
+ * spawning `.cmd` shims, which Node refuses without a shell.
+ */
+function launcherScript(bin: string): string | undefined {
+  if (process.platform !== "win32") {
+    const real = realpathSync(bin);
+    return real.endsWith(".js") ? real : undefined;
+  }
+  const dir = dirname(bin);
+  const main = join("@nylorun", "runtime", "dist", "launcher", "main.js");
+  // Global prefix (`<prefix>/nylorun-runtime.cmd`) or project `.bin`.
+  for (const candidate of [
+    join(dir, "node_modules", main),
+    join(dir, "..", main),
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Find the installed Runtime's launcher on PATH and check it speaks this CLI's
+ * launcher and Host protocols. Never downloads or installs anything: a missing
+ * Runtime is a prerequisite error that names the install command.
  */
 export async function launcher(
   home: string,
@@ -95,30 +155,50 @@ export async function launcher(
 ): Promise<LauncherHandle> {
   const resolvedHome = resolve(home);
   const env = options.env ?? process.env;
-  let build = newestBuild(resolvedHome);
-  if (!build) {
-    const version = options.version ?? runtimeVersion();
-    const boot = options.bootstrap ?? bootstrap;
-    await boot(resolvedHome, version, {
-      ...(options.registry ? { registry: options.registry } : {}),
-      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
-      env,
-    });
-    build = newestBuild(resolvedHome);
-    if (!build) {
-      throw new CliError(
-        `Bootstrap finished but no Runtime build is installed under ${resolvedHome}.`,
-        1,
-      );
-    }
+  const bin = findOnPath(LAUNCHER_BIN, env);
+  if (!bin) {
+    throw new CliError(
+      `The Nylorun Runtime is not installed (no "${LAUNCHER_BIN}" on PATH).\nInstall it, then retry:\n  ${runtimeInstallCommand()}`,
+      1,
+    );
   }
-  return createHandle(resolvedHome, build, env);
+  const probe = await invokeLauncher(
+    bin,
+    resolvedHome,
+    ["version"],
+    { env, renderProgress: false },
+    false,
+  );
+  throwOnLauncherFailure(probe);
+  const info = probe.result ?? {};
+  const version =
+    typeof info.runtimeVersion === "string" ? info.runtimeVersion : "unknown";
+  const protocol = info.protocol as { min?: unknown; max?: unknown } | undefined;
+  const hostCompatible =
+    typeof protocol?.min === "number" &&
+    typeof protocol.max === "number" &&
+    protocol.min <= PROTOCOL_VERSION &&
+    PROTOCOL_VERSION <= protocol.max;
+  if (info.launcherProtocol !== LAUNCHER_PROTOCOL || !hostCompatible) {
+    throw new CliError(
+      `The installed Nylorun Runtime ${version} (${bin}) is not compatible with this CLI.\nInstall a compatible Runtime, then retry:\n  ${runtimeInstallCommand()}`,
+      1,
+    );
+  }
+  return createHandle(
+    resolvedHome,
+    {
+      bin,
+      version,
+      node: typeof info.node === "string" ? info.node : "unknown",
+    },
+    env,
+  );
 }
 
 function createHandle(
   home: string,
-  build: InstalledBuild,
+  runtime: InstalledRuntime,
   defaultEnv: NodeJS.ProcessEnv,
 ): LauncherHandle {
   const run = (
@@ -126,17 +206,43 @@ function createHandle(
     options: InvokeOptions = {},
     streaming: boolean,
   ): Promise<LauncherInvokeResult> =>
-    invokeLauncher(build.launcher, home, args, {
+    invokeLauncher(runtime.bin, home, args, {
       ...options,
       env: options.env ?? defaultEnv,
     }, streaming);
 
   return {
     home,
-    build,
+    runtime,
     invoke: (args, options) => run(args, options, false),
     invokeStreaming: (args, options) => run(args, options, true),
   };
+}
+
+/** Quote one argument for cmd.exe (only used for non-npm `.cmd` shims). */
+function quoteForCmd(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function spawnLauncher(
+  bin: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv | undefined,
+): ChildProcess {
+  const options = {
+    env: { ...env },
+    stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"],
+  };
+  const script = launcherScript(bin);
+  if (script) return spawn(process.execPath, [script, ...args], options);
+  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(bin)) {
+    // Windows runs .cmd files only through cmd.exe, which needs quoting.
+    return spawn(quoteForCmd(bin), args.map(quoteForCmd), {
+      ...options,
+      shell: true,
+    });
+  }
+  return spawn(bin, args, options);
 }
 
 async function invokeLauncher(
@@ -147,10 +253,7 @@ async function invokeLauncher(
   _streaming: boolean,
 ): Promise<LauncherInvokeResult> {
   const childArgs = ["--json", "--home", home, ...args];
-  const child = spawn(bin, childArgs, {
-    env: { ...options.env },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawnLauncher(bin, childArgs, options.env);
 
   const events: LauncherJsonEvent[] = [];
   let result: Record<string, unknown> | undefined;

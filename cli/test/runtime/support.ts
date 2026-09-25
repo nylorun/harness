@@ -1,83 +1,108 @@
 /**
  * Test helpers for CLI runtime tests.
- * Uses WS-E launcher fixtures; wires the workspace launcher into fake builds
- * so bootstrap / invoke exercise the real launcher without importing
- * `@nylorun/runtime` from CLI source.
+ * Installs a Runtime the way `npm install --global @nylorun/runtime` does: a
+ * `nylorun-runtime` bin on PATH whose launcher is the workspace launcher,
+ * started against a Host stub, without importing `@nylorun/runtime` from CLI
+ * source.
  */
-import { writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { writeFakeHost } from "../../../runtime/test/launcher/fixtures/fake-host.js";
 import {
-  writeFakeBuild,
-  type FakeBuildOptions,
-} from "../../../runtime/test/launcher/fixtures/fake-build.js";
-import {
-  currentPlatformArch,
-  packFakeBuildTarball,
   removeRoot,
-  startFakeRegistry,
   temporaryRoot,
-} from "../../../runtime/test/launcher/fixtures/registry.js";
+} from "../../../runtime/test/launcher/fixtures/roots.js";
+
+export { removeRoot, temporaryRoot };
 
 const repoRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../..",
 );
 
-export {
-  currentPlatformArch,
-  packFakeBuildTarball,
-  removeRoot,
-  startFakeRegistry,
-  temporaryRoot,
-  writeFakeBuild,
-};
-
-/** Absolute path to the workspace-compiled launcher entry. */
-export function workspaceLauncherMain(): string {
-  return join(repoRoot, "runtime/dist/launcher/main.js");
+export interface TestRuntime {
+  /** `nylorun-runtime` on PATH. */
+  bin: string;
+  /** process.env with the install's bin directory first on PATH. */
+  env: NodeJS.ProcessEnv;
 }
 
 /**
- * Write a fake build whose launcher.js delegates to the workspace launcher.
+ * Lay out a global npm install of Runtime `version` under `prefix`.
+ * `main` replaces the launcher script (for incompatible-launcher tests).
  */
-export async function writeCliTestBuild(
-  dir: string,
-  options: FakeBuildOptions,
-): Promise<Awaited<ReturnType<typeof writeFakeBuild>>> {
-  const build = await writeFakeBuild(dir, options);
-  const launcherUrl = pathToFileURL(workspaceLauncherMain()).href;
+export async function installTestRuntime(
+  prefix: string,
+  version: string,
+  options: { main?: string } = {},
+): Promise<TestRuntime> {
+  const windows = process.platform === "win32";
+  const packageDir = windows
+    ? join(prefix, "node_modules", "@nylorun", "runtime")
+    : join(prefix, "lib", "node_modules", "@nylorun", "runtime");
+  const launcherDir = join(packageDir, "dist", "launcher");
+  await mkdir(launcherDir, { recursive: true });
   await writeFile(
-    build.launcher,
-    `import { main } from ${JSON.stringify(launcherUrl)};
-const code = await main(process.argv.slice(2));
+    join(packageDir, "package.json"),
+    JSON.stringify({ name: "@nylorun/runtime", version, type: "module" }),
+  );
+  const hostEntry = await writeFakeHost(join(packageDir, "dist", "host"), {
+    version,
+  });
+  const commandsUrl = pathToFileURL(
+    join(repoRoot, "runtime/dist/launcher/commands.js"),
+  ).href;
+  const main = join(launcherDir, "main.js");
+  await writeFile(
+    main,
+    options.main ??
+      `#!/usr/bin/env node
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { runLauncher } from ${JSON.stringify(commandsUrl)};
+const env = process.env;
+const code = await runLauncher(process.argv.slice(2), {
+  home: env.NYLORUN_HOME || join(homedir(), ".nylorun"),
+  platform: process.platform,
+  nodeBinary: process.execPath,
+  nodeVersion: process.versions.node,
+  baselineEnv: { PATH: env.PATH },
+  sink: {
+    json: false,
+    stdout: (line) => process.stdout.write(line + "\\n"),
+    stderr: (line) => process.stderr.write(line + "\\n"),
+  },
+  lifecycle: {
+    hostEntry: ${JSON.stringify(hostEntry)},
+    runtimeVersion: ${JSON.stringify(version)},
+  },
+});
 process.exit(code);
 `,
+    { mode: 0o755 },
   );
-  return build;
-}
 
-export async function startRegistryWithCliBuild(version: string): Promise<{
-  url: string;
-  close: () => Promise<void>;
-  buildDir: string;
-  roots: string[];
-}> {
-  const roots: string[] = [];
-  const buildDir = await temporaryRoot("nylorun-cli-build-");
-  roots.push(buildDir);
-  await writeCliTestBuild(buildDir, {
-    version,
-    ...currentPlatformArch(),
-  });
-  const registry = await startFakeRegistry({ version, buildDir });
+  let binDir: string;
+  let bin: string;
+  if (windows) {
+    binDir = prefix;
+    bin = join(prefix, "nylorun-runtime.cmd");
+    await writeFile(
+      bin,
+      `@echo off\r\nnode "%~dp0node_modules\\@nylorun\\runtime\\dist\\launcher\\main.js" %*\r\n`,
+    );
+  } else {
+    binDir = join(prefix, "bin");
+    await mkdir(binDir, { recursive: true });
+    bin = join(binDir, "nylorun-runtime");
+    await symlink(main, bin);
+  }
   return {
-    url: registry.url,
-    buildDir,
-    roots,
-    close: async () => {
-      await registry.close();
-      await Promise.all(roots.map(removeRoot));
+    bin,
+    env: {
+      ...process.env,
+      PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
     },
   };
 }

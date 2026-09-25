@@ -35,4 +35,8 @@ export type CreatorDependencies = Readonly<{
     args: readonly string[],
     directory: string,
   ) => Promise<Process>;
+  /** `process.versions.node`: the Runtime needs Node 24 or newer. */
+  nodeVersion: string;
+  /** Path of `name` on PATH, or undefined (finds `nylorun-runtime`). */
+  findOnPath: (name: string) => string | undefined;
 }>;

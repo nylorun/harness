@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProject } from "../dist/project.js";
+import { createProject, CreationError } from "../dist/project.js";
 import { starterFiles } from "../dist/scaffold.js";
 import type { Compatibility, CreatorDependencies } from "../src/contracts.js";
 
@@ -95,6 +95,8 @@ describe("project creation", () => {
       remove: async () => undefined,
       write: async () => undefined,
       run: async () => ({ status: 0 }),
+      nodeVersion: "24.15.0",
+      findOnPath: () => "/usr/local/bin/nylorun-runtime",
     };
     await expect(
       createProject(
@@ -116,6 +118,8 @@ describe("project creation", () => {
       remove: async () => undefined,
       write: async () => undefined,
       run: async () => ({ status: 0 }),
+      nodeVersion: "24.15.0",
+      findOnPath: () => "/usr/local/bin/nylorun-runtime",
     };
     await expect(
       createProject(
@@ -152,6 +156,8 @@ it("renders a fresh project before installation and forwards browser choices", a
         commands.push([command, args, directory]);
         return { status: 0 };
       },
+      nodeVersion: "24.15.0",
+      findOnPath: () => "/usr/local/bin/nylorun-runtime",
     }
   );
   expect([...files.keys()].some((path) => path.endsWith("/agents/index.ts"))).toBe(
@@ -188,6 +194,10 @@ function fixture() {
     rename: vi.fn(async () => {}),
     write: vi.fn(async () => {}),
     run: vi.fn<CreatorDependencies["run"]>(async () => ({ status: 0 })),
+    nodeVersion: "24.15.0",
+    findOnPath: vi.fn<CreatorDependencies["findOnPath"]>(
+      () => "/usr/local/bin/nylorun-runtime",
+    ),
   };
 }
 const options = { directory: "my agent", studio: true, open: true, yes: false };
@@ -265,4 +275,23 @@ it("shows recovery instructions when development fails to spawn", async () => {
     "npm run dev"
   );
   expect(deps.run).toHaveBeenCalledTimes(2);
+});
+
+it("stops before development and names missing prerequisites; installs nothing", async () => {
+  const deps = fixture();
+  deps.nodeVersion = "22.19.0";
+  deps.findOnPath = vi.fn(() => undefined);
+  const error = await createProject(options, compatibility, deps).catch(
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(CreationError);
+  const message = (error as CreationError).message;
+  expect(message).toContain("Node.js 24 or newer (found 22.19.0)");
+  expect(message).toContain(
+    `npm install --global @nylorun/runtime@${compatibility.runtime}`,
+  );
+  expect(message).toContain("npm run dev");
+  expect(deps.findOnPath).toHaveBeenCalledWith("nylorun-runtime");
+  // Only the project's own dependencies were installed; dev never started.
+  expect(deps.run.mock.calls.map((call) => call[1])).toEqual([["install"]]);
 });

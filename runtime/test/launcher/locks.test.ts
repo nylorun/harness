@@ -2,18 +2,13 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { LauncherError } from "../../src/launcher/errors.js";
 import {
-  INSTALL_LOCK_WAIT_MS,
   LIFECYCLE_LOCK_WAIT_MS,
   recoverStaleLock,
   withProcessLock,
   writeProcessLockForTest,
 } from "../../src/launcher/locks.js";
-import {
-  ensureHostLayout,
-  hostPaths,
-  installLockPath,
-} from "../../src/launcher/paths.js";
-import { removeRoot, temporaryRoot } from "./fixtures/registry.js";
+import { ensureHostLayout, hostPaths } from "../../src/launcher/paths.js";
+import { removeRoot, temporaryRoot } from "./fixtures/roots.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -28,14 +23,14 @@ async function home() {
   return paths;
 }
 
-it("E1-3: install lock recovers stale PID and times out on a live holder", async () => {
+it("E1-3: process lock recovers stale PID and times out on a live holder", async () => {
   const paths = await home();
-  const lock = installLockPath(paths, "0.9.0-beta");
+  const lock = join(paths.root, ".test.lock");
   writeProcessLockForTest(lock, { pid: 999_999_999, startTime: "0" });
   recoverStaleLock(lock);
 
   let entered = false;
-  await withProcessLock(lock, INSTALL_LOCK_WAIT_MS, async () => {
+  await withProcessLock(lock, LIFECYCLE_LOCK_WAIT_MS, async () => {
     entered = true;
   });
   expect(entered).toBe(true);

@@ -1,9 +1,13 @@
 export { baselineEnv } from "./baseline.js";
 export { runtimeVersion } from "./version.js";
-export { bootstrap } from "./bootstrap.js";
-export type { BootstrapOptions, BootstrapResult } from "./bootstrap.js";
-export { launcher, throwOnLauncherFailure } from "./launcher.js";
+export {
+  findOnPath,
+  launcher,
+  runtimeInstallCommand,
+  throwOnLauncherFailure,
+} from "./launcher.js";
 export type {
+  InstalledRuntime,
   LauncherHandle,
   LauncherInvokeResult,
   LauncherJsonEvent,
@@ -21,4 +25,3 @@ export {
   exitCodeForLauncherError,
   exitCodeForStatusState,
 } from "./exit-codes.js";
-export { newestBuild, currentPlatformArch } from "./builds.js";
