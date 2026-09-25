@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { npmCli } from "../lib/repo.mjs";
+import { npmCli, run } from "../lib/repo.mjs";
 import { ProcessGroup } from "../lib/processes.mjs";
 import { availablePort } from "../lib/development.mjs";
 import { installRuntime } from "../lib/runtime-install.mjs";
@@ -38,11 +38,16 @@ export function publicCreatorEnvironment(environment, npmrc, port, extras = {}) 
 }
 
 /**
- * Persistent Host answers /ready before the project runner finishes
+ * `nylorun dev` prints its banner before the project runner finishes
  * registering seed agents. Poll discovery until `assistant` appears.
  */
-async function waitForSeedAgent(port, applicationKey, tenantId, timeoutMs = 30_000) {
-  const url = `http://127.0.0.1:${port}/v1/agents`;
+async function waitForSeedAgent(
+  hostUrl,
+  applicationKey,
+  tenantId,
+  timeoutMs = 60_000,
+) {
+  const url = new URL("/v1/agents", hostUrl);
   const headers = {
     authorization: `Bearer ${applicationKey}`,
     "Nylorun-Tenant": tenantId,
@@ -76,18 +81,21 @@ export async function publicCreatorSmoke(version, runtimeVersion) {
   const temporary = await mkdtemp(join(tmpdir(), "nylorun-published-"));
   const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-published-host-"));
   const home = await mkdtemp(join(tmpdir(), "nylorun-published-home-"));
+  const project = join(temporary, "application");
   const group = new ProcessGroup();
+  let environment;
+  let runtime;
   try {
     const port = await availablePort();
     const npmrc = join(temporary, ".npmrc");
     await writeFile(npmrc, "");
     await writeFile(npmrc + ".global", "");
-    const environment = publicCreatorEnvironment(process.env, npmrc, port, {
+    environment = publicCreatorEnvironment(process.env, npmrc, port, {
       NYLORUN_HOME: hostRoot,
       HOME: home,
       USERPROFILE: home,
     });
-    const runtime = await installRuntime(
+    runtime = await installRuntime(
       join(temporary, "runtime"),
       `@nylorun/runtime@${runtimeVersion}`,
       { env: environment },
@@ -101,23 +109,41 @@ export async function publicCreatorSmoke(version, runtimeVersion) {
         env: runtime.env(environment),
       },
     );
-    await child.ready(`http://127.0.0.1:${port}/ready`, 120_000);
+    // The Host picks its own port (host.json), so find it through the link
+    // `dev` writes before its banner.
+    await child.line(
+      (line) => line.includes("Ctrl-C stops this Project only"),
+      120_000,
+    );
     const link = JSON.parse(
-      await readFile(join(temporary, "application/.nylorun/link.json"), "utf8"),
+      await readFile(join(project, ".nylorun/link.json"), "utf8"),
     );
     const credentials = JSON.parse(
-      await readFile(
-        join(temporary, "application/.nylorun/credentials.json"),
-        "utf8",
-      ),
+      await readFile(join(project, ".nylorun/credentials.json"), "utf8"),
     );
     await waitForSeedAgent(
-      port,
+      link.hostUrl,
       credentials.applicationKey ?? credentials.serverKey,
       link.tenantId,
     );
   } finally {
     await group.close();
+    // The Host outlives `dev`; stop it before removing its root.
+    if (environment)
+      await run(
+        process.execPath,
+        [
+          join(project, "node_modules/@nylorun/cli/dist/cli.js"),
+          "runtime",
+          "down",
+          "--force",
+        ],
+        {
+          cwd: project,
+          env: runtime?.env(environment) ?? environment,
+          capture: true,
+        },
+      ).catch(() => {});
     await rm(temporary, { recursive: true, force: true });
     await rm(hostRoot, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });

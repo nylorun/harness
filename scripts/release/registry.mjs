@@ -2,31 +2,45 @@ import semver from "semver";
 import { setTimeout as sleep } from "node:timers/promises";
 import { npm } from "../lib/repo.mjs";
 
-async function view(spec, field) {
-  try {
-    return JSON.parse(
-      await npm(["view", spec, field, "--json"], { capture: true }),
-    );
-  } catch (error) {
-    let response;
+const REGISTRY = "https://registry.npmjs.org/";
+
+/**
+ * The package document, bypassing the registry CDN (`?write=true`, as npm's own
+ * write commands read it). `npm view` can serve a copy cached before this run
+ * published, which hid each new version for minutes.
+ */
+async function document(name) {
+  const url = new URL(
+    `${encodeURIComponent(`@nylorun/${name}`)}?write=true`,
+    REGISTRY,
+  );
+  for (let attempt = 1; ; attempt++) {
     try {
-      response = JSON.parse(error.stdout);
-    } catch {}
-    if (response?.error?.code === "E404") return undefined;
-    throw error;
+      const response = await fetch(url, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (response.status === 404) return undefined;
+      if (!response.ok)
+        throw new Error(`GET ${url} returned ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      if (attempt === 3) throw error;
+      await sleep(2000);
+    }
   }
 }
 
 export const registry = {
   async checkTag(name, version, channel) {
-    const tags = (await view(`@nylorun/${name}`, "dist-tags")) ?? {};
+    const tags = (await document(name))?.["dist-tags"] ?? {};
     if (tags[channel] && semver.gt(tags[channel], version))
       throw new Error(
         `Refusing to move ${name}'s ${channel} tag backward from ${tags[channel]} to ${version}.`,
       );
   },
   async lookup(name, version) {
-    const dist = await view(`@nylorun/${name}@${version}`, "dist");
+    const dist = (await document(name))?.versions?.[version]?.dist;
     return dist ? { integrity: dist.integrity } : undefined;
   },
   async publish(_name, path, channel) {
@@ -42,7 +56,7 @@ export const registry = {
     ]);
   },
   async waitFor(name, version, { sleep: pause = sleep } = {}) {
-    // npm can accept a publish before several minutes of registry processing.
+    // The registry usually lists an accepted publish within seconds; allow minutes.
     for (let attempt = 0; attempt < 120; attempt++) {
       const value = await this.lookup(name, version);
       if (value) return value;
@@ -54,7 +68,7 @@ export const registry = {
   },
   async ensureTag(name, version, channel, { sleep: pause = sleep } = {}) {
     for (let attempt = 0; attempt < 10; attempt++) {
-      const tags = (await view(`@nylorun/${name}`, "dist-tags")) ?? {};
+      const tags = (await document(name))?.["dist-tags"] ?? {};
       if (tags[channel] === version) return;
       if (tags[channel] && semver.gt(tags[channel], version))
         throw new Error(

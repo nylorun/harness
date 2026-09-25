@@ -62,6 +62,7 @@ jobs:
           path: .tmp/release-artifacts/
           include-hidden-files: true
           if-no-files-found: error
+      # Stored relative to studio/dist (the paths' common ancestor).
       - name: Upload Studio UI hosting artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -73,7 +74,8 @@ jobs:
   publish:
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Two registry waits (engines, then creator), each bounded at 10 min.
+    timeout-minutes: 40
     environment: npm
     permissions:
       contents: write
@@ -122,27 +124,17 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
+      # deploy-studio.mjs uses only Node built-ins and `npx firebase-tools`:
+      # no install or build, just the UI that `validate` built and packed.
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - run: npm install --global npm@11.15.0
-      - run: npm ci
+          package-manager-cache: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: studio-ui-bundle
-          path: .
-      - name: Ensure UI digest exists
-        run: |
-          test -d studio/dist/web
-          test -f studio/dist/bundle.tar
-          if [[ ! -f studio/dist/ui-digest.json ]]; then
-            npm run build --workspace @nylorun/core
-            npm run build --workspace @nylorun/agents
-            npm run build --workspace @nylorun/studio
-          fi
-          test -f studio/dist/ui-digest.json
+          path: studio/dist
+      - run: test -d studio/dist/web && test -f studio/dist/bundle.tar
       # Do not gate on secrets.* in `if` (GitHub rejects it). Always attempt auth;
       # deploy-studio.mjs soft-exits 78 when GOOGLE_APPLICATION_CREDENTIALS / FIREBASE_TOKEN missing.
       - name: Authenticate to Google Cloud (service account)

@@ -205,19 +205,52 @@ export async function releaseNotes(repo, name, version) {
   return lines.slice(start, end).join("\n").trim();
 }
 
-/** Registry boundary: retries may skip only byte-identical completed publications. */
+/**
+ * Registry boundary: retries may skip only byte-identical completed publications.
+ *
+ * Publish the engines back to back and wait for them together, then the
+ * creator, which is never published before its pins exist.
+ */
 export async function publishCandidates(
   plan,
   artifacts,
   registry,
   report = () => {},
 ) {
-  for (const name of packages.filter((name) => plan.packages[name]))
-    await registry.checkTag(name, plan.packages[name], plan.channel);
-  for (const name of packages.filter((name) => plan.packages[name])) {
-    const artifact = artifacts[name];
-    if (!artifact?.integrity)
+  const names = packages.filter((name) => plan.packages[name]);
+  await Promise.all(
+    names.map((name) =>
+      registry.checkTag(name, plan.packages[name], plan.channel),
+    ),
+  );
+  for (const name of names)
+    if (!artifacts[name]?.integrity)
       throw new Error(`Missing verified artifact for ${name}.`);
+  const engines = names.filter((name) => name !== "create-agent");
+  await publishWave(engines, plan, artifacts, registry, report);
+  if (names.includes("create-agent")) {
+    for (const engine of [
+      "core",
+      "harness",
+      "agents",
+      "admin",
+      "runtime",
+      "studio",
+      "cli",
+    ]) {
+      if (!(await registry.lookup(engine, plan.compatibility[engine])))
+        throw new Error(
+          `Creator pin is unavailable: ${engine}@${plan.compatibility[engine]}`,
+        );
+    }
+    await publishWave(["create-agent"], plan, artifacts, registry, report);
+  }
+}
+
+async function publishWave(names, plan, artifacts, registry, report) {
+  const pending = [];
+  for (const name of names) {
+    const artifact = artifacts[name];
     const version = plan.packages[name];
     const published = await registry.lookup(name, version);
     if (published) {
@@ -225,30 +258,24 @@ export async function publishCandidates(
         throw new Error(`Published integrity conflict for ${name}@${version}.`);
       report(`${name}@${version}: already published with matching integrity`);
     } else {
-      if (name === "create-agent") {
-        for (const engine of [
-          "core",
-          "harness",
-          "agents",
-          "admin",
-          "runtime",
-          "studio",
-          "cli",
-        ]) {
-          if (!(await registry.lookup(engine, plan.compatibility[engine])))
-            throw new Error(
-              `Creator pin is unavailable: ${engine}@${plan.compatibility[engine]}`,
-            );
-        }
-      }
       await registry.publish(name, artifact.path, plan.channel);
+      pending.push(name);
+    }
+  }
+  await Promise.all(
+    pending.map(async (name) => {
+      const version = plan.packages[name];
       const verified = await registry.waitFor(name, version);
-      if (verified?.integrity !== artifact.integrity)
+      if (verified?.integrity !== artifacts[name].integrity)
         throw new Error(`Registry verification failed for ${name}@${version}.`);
       report(`${name}@${version}: published and verified`);
-    }
-    await registry.ensureTag(name, version, plan.channel);
-  }
+    }),
+  );
+  await Promise.all(
+    names.map((name) =>
+      registry.ensureTag(name, plan.packages[name], plan.channel),
+    ),
+  );
 }
 
 export async function verifyReleaseCommit(repo, sha) {
