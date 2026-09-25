@@ -134,10 +134,18 @@ async function extractNodeArchive(archivePath, destination, { platform }) {
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
   if (platform === "win32") {
-    // Git Bash tar treats "C:" as a remote host unless --force-local is set.
+    // Node ships a .zip on Windows. Git Bash's GNU tar cannot extract zip
+    // ("This does not look like a tar archive") and also treats "C:" as a
+    // remote host. Use PowerShell Expand-Archive instead.
+    const psPath = (value) => value.replace(/'/g, "''");
     await run(
-      "tar",
-      ["--force-local", "-xf", archivePath, "-C", destination],
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Expand-Archive -LiteralPath '${psPath(archivePath)}' -DestinationPath '${psPath(destination)}' -Force`,
+      ],
       { capture: true },
     );
   } else {
