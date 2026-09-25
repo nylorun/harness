@@ -114,16 +114,34 @@ if (!hasSa && !hasToken) {
 runFirebaseDeploy(projectId);
 
 // Custom domain may still be pending; try verify against configured origin,
-// then fall back to the Firebase web.app host.
+// then fall back to the Firebase web.app host. Soft-succeed if only DNS is missing.
+let customDomainOk = false;
 try {
   await verifyLive(origin, version, prepared.sha256);
+  customDomainOk = true;
+  console.log(`CUSTOM_DOMAIN=connected origin=${origin}`);
 } catch (error) {
   const fallback = `https://${projectId}.web.app`;
   console.warn(
     `Verify against ${origin} failed (${error instanceof Error ? error.message : error}); trying ${fallback}`,
   );
-  await verifyLive(fallback, version, prepared.sha256);
-  console.warn(
-    `Deployed to ${fallback}. Custom domain ${origin} still needs DNS/SSL (Rahul handoff §2).`,
-  );
+  try {
+    await verifyLive(fallback, version, prepared.sha256);
+    console.warn(
+      `DNS_PENDING: Deployed and verified at ${fallback}. Custom domain ${origin} is not Connected yet — Rahul must finish DNS/SSL.`,
+    );
+    console.log(`DEPLOY_URL=${fallback}`);
+    console.log(`CUSTOM_DOMAIN=pending origin=${origin}`);
+    process.exit(0);
+  } catch (fallbackError) {
+    console.error(
+      `Deploy verification failed on both ${origin} and ${fallback}: ${
+        fallbackError instanceof Error ? fallbackError.message : fallbackError
+      }`,
+    );
+    process.exit(1);
+  }
+}
+if (customDomainOk) {
+  console.log(`DEPLOY_URL=${origin}`);
 }

@@ -1,0 +1,64 @@
+# Deploy Studio UI to Firebase Hosting only (no npm publish).
+# Used for the first Hosted Studio deploy and for retry after npm already published.
+name: Deploy Studio hosting
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build and deploy (branch, tag, or full SHA)
+        required: true
+        type: string
+        default: main
+permissions:
+  contents: read
+concurrency:
+  group: studio-hosting-deploy
+  cancel-in-progress: false
+jobs:
+  deploy-studio:
+    runs-on: ubuntu-latest
+    environment: studio
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'nylorun-oss-studio' }}
+      STUDIO_HOSTING_ORIGIN: https://local.nylorun.studio
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm ci
+      - name: Build Studio UI + pack-ui
+        run: |
+          npm run build --workspace @nylorun/core
+          npm run build --workspace @nylorun/agents
+          npm run build --workspace @nylorun/studio
+          test -d studio/dist/web
+          test -f studio/dist/bundle.tar
+          test -f studio/dist/ui-digest.json
+      - name: Authenticate to Google Cloud (service account)
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - name: Deploy Studio UI to Firebase Hosting
+        id: deploy
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: node studio/scripts/deploy-studio.mjs
+      - name: Summarize
+        if: always()
+        run: |
+          echo "### Studio hosting deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Ref: \`${{ inputs.ref }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Project: \`${{ env.FIREBASE_PROJECT_ID }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Custom origin: https://local.nylorun.studio (DNS may still be pending)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Fallback: https://${{ env.FIREBASE_PROJECT_ID }}.web.app" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Outcome: ${{ steps.deploy.outcome }}" >> "$GITHUB_STEP_SUMMARY"
