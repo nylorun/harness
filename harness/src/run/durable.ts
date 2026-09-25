@@ -39,8 +39,11 @@ export interface HostEffect {
   readonly turnId: string;
   readonly agentId: string;
   readonly manifestHash: string;
-  /** `delegation` journals when an agent used as a tool starts and settles; hosts record it and resolve it at once. */
-  readonly kind: "model" | "tool" | "hook" | "delegation";
+  /**
+   * `delegation` journals when an agent used as a tool starts and settles; hosts record it and resolve it at once.
+   * Flow effects: `agent`, `tool` (node), `fn`, `verify` — each carries `path`, `key`, and `iterations`.
+   */
+  readonly kind: "model" | "tool" | "hook" | "delegation" | "agent" | "fn" | "verify";
   /** Set on work for an agent used as a tool; `agentId` stays the session's root agent. */
   readonly agent?: AgentRef;
   readonly capabilityId?: string;
@@ -51,6 +54,12 @@ export interface HostEffect {
     readonly scope: HookScope;
     readonly capabilityIds: readonly string[];
   };
+  /** Workflow node path (flow effects). */
+  readonly path?: string;
+  /** Workflow node key without Map indices (flow effects). */
+  readonly key?: string;
+  /** Iteration vector of enclosing Loops, outermost first (e.g. `"3"`, `"2.1"`); `"-"` outside Loops. */
+  readonly iterations?: string;
   readonly input: unknown;
   readonly context: Record<string, unknown>;
 }

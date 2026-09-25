@@ -14,7 +14,10 @@ import { VaultModule } from "@/components/vault";
 import { AgentManifestPanel } from "@/components/agent-manifest-panel";
 import { EventDetails } from "@/components/event-details";
 import { EventTable } from "@/components/event-table";
+import { IterationTimeline } from "@/components/iteration-timeline";
 import { SessionModelPicker } from "@/components/session-model-picker";
+import { WorkflowLinkBanner } from "@/components/workflow-link-banner";
+import { WorkflowTree } from "@/components/workflow-tree";
 import {
   SidebarInset,
   SidebarProvider,
@@ -39,9 +42,51 @@ import {
   shortTenantId,
   type StudioTenantInfo,
 } from "@/config";
-import type { AgentManifest, Connection } from "@/studio-types";
+import type {
+  AgentManifest,
+  Connection,
+  StudioDefinition,
+} from "@/studio-types";
+import {
+  isWorkflowManifest,
+  iterationTimelineFromEvents,
+  linksFromEvents,
+  liveStatusFromEvents,
+  lookupWorkflowLink,
+  rememberWorkflowLinks,
+  treeFromManifest,
+  type IterationRecord,
+  type WorkflowManifest,
+  type WorkflowTreeNode,
+} from "@/workflow";
 
 export type { AgentManifest, Connection, SessionSummary } from "@/studio-types";
+
+function asStudioDefinition(raw: {
+  manifest: Record<string, unknown> & { id: string; name?: string };
+}): StudioDefinition {
+  const manifest = raw.manifest;
+  if (manifest.kind === "workflow") {
+    return {
+      id: String(manifest.id),
+      name: String(manifest.name ?? manifest.id),
+      kind: "workflow",
+      manifest: manifest as WorkflowManifest,
+    };
+  }
+  const capabilities = Array.isArray(manifest.capabilities)
+    ? (manifest.capabilities as {
+        id: string;
+        tools?: { name: string; description?: string }[];
+        hooks?: { at: "before" | "after"; scope: "turn" | "step" }[];
+      }[])
+    : [];
+  return {
+    id: String(manifest.id),
+    name: String(manifest.name ?? manifest.id),
+    manifest: { capabilities },
+  };
+}
 
 const base = () => location.origin + "/_studio/runtime";
 // SDK requests travel through a trusted local proxy; this public marker is not a Runtime credential.
@@ -118,11 +163,14 @@ function Workspace() {
       setConnection({
         status: "Running",
         url: "Local Runtime",
-        agents: definitions.agents.map((a) => ({
-          id: a.manifest.id,
-          name: a.manifest.name ?? a.manifest.id,
-          manifest: a.manifest,
-        })),
+        agents: definitions.agents.map((a) =>
+          asStudioDefinition({
+            manifest: a.manifest as unknown as Record<string, unknown> & {
+              id: string;
+              name?: string;
+            },
+          }),
+        ),
         sessionsByAgent: grouped,
       });
       setError("");
@@ -205,10 +253,12 @@ function Workspace() {
               <section key={a.id} className="mb-4 rounded-lg border p-4">
                 <h2 className="font-medium">{a.name}</h2>
                 <p className="my-2 text-sm text-muted-foreground">
-                  {a.manifest.capabilities
-                    .flatMap((c) => c.tools ?? [])
-                    .map((t) => t.name)
-                    .join(", ") || "Text agent"}
+                  {a.kind === "workflow" || a.manifest.kind === "workflow"
+                    ? "Workflow"
+                    : a.manifest.capabilities
+                        ?.flatMap((c) => c.tools ?? [])
+                        .map((t) => t.name)
+                        .join(", ") || "Text agent"}
                 </p>
                 <Button
                   onClick={() =>
@@ -239,14 +289,25 @@ function SessionWorkspace({
   tenantId?: string;
   refresh: () => Promise<void>;
 }) {
+  const workflowManifest = isWorkflowManifest(agent.manifest)
+    ? agent.manifest
+    : undefined;
+  const isWorkflow = workflowManifest !== undefined;
   const [events, setEvents] = useState<readonly StudioEvent[]>([]);
   const [content, setContent] = useState("");
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
-  const [activeTab, setActiveTab] = useState<"events" | "manifest">("events");
+  const [activeTab, setActiveTab] = useState<
+    "events" | "manifest" | "tree" | "iterations"
+  >(isWorkflow ? "tree" : "events");
   const [selectedEvent, setSelectedEvent] = useState<StudioEvent | undefined>();
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [selectedNode, setSelectedNode] = useState<WorkflowTreeNode | undefined>();
+  const [selectedIteration, setSelectedIteration] = useState<
+    IterationRecord | undefined
+  >();
+  const workflowLink = lookupWorkflowLink(sessionId);
 
   useEffect(() => {
     if (!tenantId) {
@@ -264,12 +325,16 @@ function SessionWorkspace({
       });
       const history = await current.history({ signal: abort.signal });
       if (abort.signal.aborted) return;
-      setEvents(
-        mergeStudioEvents(
-          [],
-          history.items.map((event) => ({ ...event, committed: true })),
-        ),
+      const loaded = mergeStudioEvents(
+        [],
+        history.items.map((event) => ({ ...event, committed: true })),
       );
+      setEvents(loaded);
+      if (isWorkflow) {
+        rememberWorkflowLinks(
+          linksFromEvents(loaded, sessionId, { workflowAgentId: agent.id }),
+        );
+      }
       const inspect = await current.inspect(abort.signal);
       setStatus(inspect.status);
       await refresh();
@@ -277,9 +342,17 @@ function SessionWorkspace({
         cursor: history.cursor ?? undefined,
         signal: abort.signal,
       })) {
-        setEvents((previous) =>
-          mergeStudioEvents(previous, [{ ...event, committed: false }]),
-        );
+        setEvents((previous) => {
+          const next = mergeStudioEvents(previous, [
+            { ...event, committed: false },
+          ]);
+          if (isWorkflow) {
+            rememberWorkflowLinks(
+              linksFromEvents(next, sessionId, { workflowAgentId: agent.id }),
+            );
+          }
+          return next;
+        });
         if (event.type.startsWith("turn.")) {
           setStatus(event.type.slice(5));
           void refresh();
@@ -289,13 +362,15 @@ function SessionWorkspace({
       if (!abort.signal.aborted) setError(String(e));
     });
     return () => abort.abort();
-  }, [sessionId, agent.id, refresh, tenantId]);
+  }, [sessionId, agent.id, refresh, tenantId, isWorkflow]);
 
   useEffect(() => {
     setSelectedEvent(undefined);
     setDetailsOpen(false);
-    setActiveTab("events");
-  }, [sessionId]);
+    setSelectedNode(undefined);
+    setSelectedIteration(undefined);
+    setActiveTab(isWorkflow ? "tree" : "events");
+  }, [sessionId, isWorkflow]);
 
   const busy =
     sending || ["loading", "running", "runnable", "waiting"].includes(status);
@@ -335,25 +410,43 @@ function SessionWorkspace({
     setDetailsOpen(true);
   };
   const changeTab = (value: string): void => {
-    const nextTab = value as "events" | "manifest";
+    const nextTab = value as "events" | "manifest" | "tree" | "iterations";
     setActiveTab(nextTab);
-    if (nextTab === "manifest") setDetailsOpen(false);
+    if (nextTab !== "events") setDetailsOpen(false);
   };
   const showDetails =
     activeTab === "events" && detailsOpen && selectedEvent !== undefined;
 
+  const chronological = [...events].reverse();
+  const liveByPath = liveStatusFromEvents(chronological);
+  const tree =
+    workflowManifest !== undefined
+      ? treeFromManifest(workflowManifest)
+      : undefined;
+  const iterations =
+    workflowManifest !== undefined
+      ? iterationTimelineFromEvents(chronological)
+      : [];
+
   // Newest-first in the Events table; chat stays chronological.
-  const chatEvents = [...events].reverse();
+  const chatEvents = chronological;
 
   return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="min-h-0 flex-1 overflow-hidden"
-    >
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {workflowLink && !workflowManifest ? (
+        <WorkflowLinkBanner link={workflowLink} />
+      ) : null}
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="min-h-0 flex-1 overflow-hidden"
+      >
       <ResizablePanel defaultSize={showDetails ? 34 : 42} minSize={28}>
         <section className="flex h-full min-h-0 flex-col overflow-hidden">
           <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
             <Badge variant="outline">{status}</Badge>
+            {workflowManifest ? (
+              <Badge variant="secondary">workflow</Badge>
+            ) : null}
             <span className="truncate font-mono text-xs text-muted-foreground">
               {sessionId}
             </span>
@@ -513,6 +606,22 @@ function SessionWorkspace({
         >
           <div className="flex h-12 shrink-0 items-end border-b bg-background px-4">
             <TabsPrimitive.List className="flex h-full items-end gap-5">
+              {workflowManifest ? (
+                <>
+                  <TabsPrimitive.Trigger
+                    value="tree"
+                    className="border-b-2 border-transparent px-0 pb-3 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground"
+                  >
+                    Tree
+                  </TabsPrimitive.Trigger>
+                  <TabsPrimitive.Trigger
+                    value="iterations"
+                    className="border-b-2 border-transparent px-0 pb-3 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground"
+                  >
+                    Iterations
+                  </TabsPrimitive.Trigger>
+                </>
+              ) : null}
               <TabsPrimitive.Trigger
                 value="events"
                 className="border-b-2 border-transparent px-0 pb-3 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground"
@@ -523,10 +632,49 @@ function SessionWorkspace({
                 value="manifest"
                 className="border-b-2 border-transparent px-0 pb-3 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground"
               >
-                Agent Manifest
+                {workflowManifest ? "Manifest" : "Agent Manifest"}
               </TabsPrimitive.Trigger>
             </TabsPrimitive.List>
           </div>
+          {tree ? (
+            <TabsPrimitive.Content
+              value="tree"
+              className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none"
+            >
+              <WorkflowTree
+                root={tree}
+                liveByPath={liveByPath}
+                selectedPath={selectedNode?.path}
+                onSelect={setSelectedNode}
+              />
+              {selectedNode ? (
+                <p className="shrink-0 border-t px-4 py-2 font-mono text-xs text-muted-foreground">
+                  {selectedNode.path}
+                  {selectedNode.kind === "item" || selectedNode.kind === "map"
+                    ? " · item drill-down"
+                    : ""}
+                  {liveByPath.get(selectedNode.path)?.agentSessionId
+                    ? ` · agent session ${liveByPath.get(selectedNode.path)?.agentSessionId}`
+                    : ""}
+                </p>
+              ) : null}
+            </TabsPrimitive.Content>
+          ) : null}
+          {workflowManifest ? (
+            <TabsPrimitive.Content
+              value="iterations"
+              className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none"
+            >
+              <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+                <h2 className="text-sm font-medium">Iteration timeline</h2>
+              </div>
+              <IterationTimeline
+                rows={iterations}
+                selected={selectedIteration}
+                onSelect={setSelectedIteration}
+              />
+            </TabsPrimitive.Content>
+          ) : null}
           <TabsPrimitive.Content
             value="events"
             className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none"
@@ -560,5 +708,6 @@ function SessionWorkspace({
         </>
       ) : null}
     </ResizablePanelGroup>
+    </div>
   );
 }

@@ -1,7 +1,4 @@
-import {
-  type ServerResponse,
-  type IncomingMessage,
-} from "node:http";
+import { type ServerResponse, type IncomingMessage } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   mkdirSync,
@@ -33,21 +30,55 @@ import {
   type ExecutorScope,
   type SessionCommand,
   type LiveEvent,
+  DefinitionDocumentSchema,
 } from "@nylorun/core/contracts";
 import {
   createDurableCheckpoint,
+  createFlowCheckpoint,
   runDurable,
+  runFlowDurable,
+  agentTurnValue,
   type DurableCheckpoint,
   type DurableSessionTool,
+  type FlowCheckpoint,
   type HostEffect,
   type EffectResolution,
 } from "@nylorun/harness/run";
+import {
+  aggregateWaits,
+  cancelSiblingWork,
+  countActiveFlowWork,
+  deriveAgentEffectSessionId,
+  emitLoopActionEvents,
+  fenceWorkflowActions,
+  foreignInteractionConflict,
+  isFlowEffect,
+  isFlowToolEffect,
+  isWorkflowManifest,
+  planCancelCascade,
+  reconcilePendingAgentEffects,
+  reofferOrphanedFnVerifyClaims,
+  wakeForQueuedEffects,
+  wakeLinkedWorkflow,
+} from "../core/flow-host.js";
+import {
+  mayDispatchMore,
+  resolveFlowLimits,
+  type FlowLimits,
+} from "../core/limits.js";
+import {
+  allowedManifestHashes,
+  rebaseTurnState,
+  resolveMessageManifest,
+  type TurnManifestStore,
+} from "../core/turn-manifest.js";
 import { hashManifest } from "@nylorun/core/compatibility";
 import {
   delegateManifest,
   schemaFromJSON,
   type AgentManifest,
   type JsonObject,
+  type JsonValue,
 } from "@nylorun/core/define";
 import { Store, canonical } from "../core/store.js";
 import {
@@ -58,7 +89,12 @@ import {
 } from "../core/executors.js";
 import { hostModelCatalog } from "../model/catalog.js";
 import { piModel } from "../model/pi-model.js";
-import { scriptedModel, gatewayModel, toolFixtureModel, type ModelProvider } from "../core/provider.js";
+import {
+  scriptedModel,
+  gatewayModel,
+  toolFixtureModel,
+  type ModelProvider,
+} from "../core/provider.js";
 import { scrub } from "../redact.js";
 import { createKekFile, readVaultKek } from "../vault/kek.js";
 import { QuarantineError } from "./quarantine-error.js";
@@ -68,11 +104,7 @@ import {
 } from "./principals.js";
 import { resetTenant } from "./reset.js";
 import { buildTenantStatus, seedTenantConfig } from "./status.js";
-import type {
-  TenantConfig,
-  TenantHandle,
-  TenantSummary,
-} from "./types.js";
+import type { TenantConfig, TenantHandle, TenantSummary } from "./types.js";
 import type { TenantEnvelope } from "@nylorun/core/contracts";
 import { VaultError } from "../vault/error.js";
 import { VaultService, type AuthorizeResult } from "../vault/service.js";
@@ -80,6 +112,13 @@ import { McpPool, serversOf } from "../mcp/pool.js";
 import { SandboxManager, sandboxCapabilityOf } from "../sandbox/manager.js";
 import { defaultSandboxBackends } from "../sandbox/select.js";
 import type { SandboxBackend } from "../sandbox/types.js";
+import { owningSandboxSessionId, sandboxSpecOf } from "../sandbox/share.js";
+import {
+  SandboxRouteError,
+  handleActionSandboxTool,
+  handleSessionSandboxTool,
+  validateSandboxAttach,
+} from "../core/sandbox-routes.js";
 import type {
   McpDiagnostic,
   McpSnapshot,
@@ -109,23 +148,30 @@ interface Session {
   id: string;
   agentId: string;
   ownerUserId: string;
+  /** Session pin — the manifest the session was created with. */
   manifest: any;
   manifestHash: string;
+  /** Validated turn-manifest variants, keyed by hash (loops.md §4.2). */
+  variants?: Record<string, AgentManifest>;
   implementationVersion: string;
   info?: any;
   status: string;
   activeTurnId: string | null;
-  checkpoint?: DurableCheckpoint;
+  checkpoint?: DurableCheckpoint | FlowCheckpoint;
   state?: any;
   turnStartState?: any;
   waits?: unknown;
   error?: string;
+  /** Last completed turn output (for linked agent → workflow settle). */
+  lastOutput?: JsonValue;
   creation: unknown;
   vaultIds?: readonly string[];
   credentialSelections?: readonly CredentialSelection[];
   pluginRoots?: Readonly<Record<string, string>>;
   mcpSnapshot?: McpSnapshot;
   mcpDiagnostics?: readonly McpDiagnostic[];
+  /** Session id that keys the shared sandbox; absent means this session owns it. */
+  sandboxOwnerId?: string;
 }
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -135,6 +181,14 @@ class HttpError extends Error {
 const fail = (status: number, message: string): never => {
   throw new HttpError(status, message);
 };
+/** AbortSignal tied to the HTTP request being closed by the client. */
+function requestAborted(request: IncomingMessage): AbortSignal {
+  const controller = new AbortController();
+  request.on("close", () => {
+    if (!request.complete) controller.abort();
+  });
+  return controller.signal;
+}
 class OpaqueAuthError extends Error {
   readonly status = 404;
   readonly body = OPAQUE_NOT_FOUND;
@@ -162,6 +216,50 @@ function sessionToolsOf(
       ? {}
       : { outputSchema: tool.outputSchema }),
   }));
+}
+
+/** Turn-manifest store backed by the session's `variants` map (no schema change). */
+function variantStore(session: Session): TurnManifestStore {
+  return {
+    get(hash) {
+      return session.variants?.[hash];
+    },
+    put(hash, manifest) {
+      session.variants = { ...(session.variants ?? {}), [hash]: manifest };
+    },
+  };
+}
+
+/** Manifest this turn's checkpoint is pinned to (session pin or a stored variant). */
+function turnManifestOf(session: Session): AgentManifest {
+  const hash = session.checkpoint?.manifestHash;
+  if (!hash || hash === session.manifestHash) return session.manifest;
+  return session.variants?.[hash] ?? session.manifest;
+}
+
+/** Wrap a linked agent turn so the Loop learns the turn's manifest (SD-I4 pin stays on session). */
+function linkedAgentOutput(
+  session: Session,
+  output: JsonValue | undefined
+): JsonValue {
+  if (isWorkflowManifest(session.manifest)) return output ?? null;
+  return agentTurnValue(
+    output ?? null,
+    turnManifestOf(session)
+  ) as unknown as JsonValue;
+}
+
+function rebaseSessionState(session: Session, turnHash: string): void {
+  const allowed = allowedManifestHashes({
+    pinnedHash: session.manifestHash,
+    variantHashes: Object.keys(session.variants ?? {}),
+  });
+  const next = rebaseTurnState({
+    state: session.state,
+    turnManifestHash: turnHash,
+    isAllowedHash: (hash) => allowed.has(hash),
+  });
+  if (next !== session.state) session.state = next;
 }
 function mcpToolOf(
   session: Session,
@@ -281,11 +379,12 @@ export class TenantRuntime implements TenantHandle {
   private readonly modelProvider: ModelProvider;
   private readonly useVaultModel: boolean;
   private readonly createKekIfMissing: boolean;
+  private readonly flowLimits: FlowLimits;
   readonly envelope: TenantEnvelope;
   private constructor(
     private readonly config: TenantConfig,
     hooks: TenantOpenHooks,
-    envelope: TenantEnvelope,
+    envelope: TenantEnvelope
   ) {
     this.envelope = envelope;
     if (
@@ -293,6 +392,10 @@ export class TenantRuntime implements TenantHandle {
       (!Number.isFinite(config.leaseMs) || config.leaseMs <= 0)
     )
       throw new Error("leaseMs must be finite and positive");
+    this.flowLimits = resolveFlowLimits({
+      flow: config.flow,
+      env: config.flowEnv,
+    });
     if (
       (config.model.kind === "fixture" || config.model.kind === "scripted") &&
       config.mode === "shared"
@@ -319,7 +422,7 @@ export class TenantRuntime implements TenantHandle {
           "locked",
           "Another Runtime owns this Tenant database",
           "nylorun tenant status",
-          { lockPath: this.lockPath, lockPid: oldPid },
+          { lockPath: this.lockPath, lockPid: oldPid }
         );
       } catch (error) {
         if (error instanceof QuarantineError) throw error;
@@ -347,7 +450,7 @@ export class TenantRuntime implements TenantHandle {
         throw new QuarantineError(
           "kek-missing",
           "Vault key-encryption key is missing for ciphertext in this Tenant",
-          "restore the vault-kek file beside tenant.sqlite",
+          "restore the vault-kek file beside tenant.sqlite"
         );
       }
       this.store = store;
@@ -370,14 +473,14 @@ export class TenantRuntime implements TenantHandle {
         ...(row.principalId === undefined
           ? {}
           : { principalId: row.principalId }),
-      })),
+      }))
     );
 
     this.vault = new VaultService(
       this.store.db,
       (fn) => this.store.tx(fn),
       () => this.ensureKek(),
-      config.vaultFetch ?? globalThis.fetch,
+      config.vaultFetch ?? globalThis.fetch
     );
     this.mcp = new McpPool({
       pluginData: paths.pluginData,
@@ -396,7 +499,7 @@ export class TenantRuntime implements TenantHandle {
       emit: (sessionId, turnId, type, payload) => {
         if (this.closed) return;
         const event = this.store.tx(() =>
-          this.store.event(sessionId, turnId, type, payload),
+          this.store.event(sessionId, turnId, type, payload)
         );
         this.publish(event);
       },
@@ -435,7 +538,7 @@ export class TenantRuntime implements TenantHandle {
           this.store.put("effects", effect.request.effectId, effect);
           const sess = this.store.get<Session>(
             "sessions",
-            effect.request.sessionId,
+            effect.request.sessionId
           );
           if (
             sess &&
@@ -452,19 +555,31 @@ export class TenantRuntime implements TenantHandle {
     });
     this.retireLegacyHooks();
     this.expireClaims();
+    // Orphaned fn/verify claims from a prior process: re-offer immediately.
+    this.store.tx(() => {
+      reofferOrphanedFnVerifyClaims(this.store);
+    });
+    this.notify();
     this.timer = setInterval(
       () => this.expireClaims(),
-      Math.min(config.leaseMs ?? 30000, 5000),
+      Math.min(config.leaseMs ?? 30000, 5000)
     );
     this.timer.unref();
     for (const sess of this.store.all<Session>("sessions"))
       if (sess.status === "running" || sess.status === "runnable")
         this.schedule(sess.id);
+    this.store.tx(() => {
+      reconcilePendingAgentEffects({
+        store: this.store,
+        schedule: (sid) => this.schedule(sid),
+        publish: (e) => this.publish(e),
+      });
+    });
   }
 
   static async open(
     config: TenantConfig,
-    hooks: TenantOpenHooks = {},
+    hooks: TenantOpenHooks = {}
   ): Promise<TenantRuntime> {
     const envelope = readEnvelope(config);
     return new TenantRuntime(config, hooks, envelope);
@@ -501,18 +616,25 @@ export class TenantRuntime implements TenantHandle {
    */
   private retireLegacyHooks(): void {
     this.store.tx(() => {
-      for (const action of this.store.all<{ actionId: string; kind: string; status: string }>(
-        "actions"
-      ))
+      for (const action of this.store.all<{
+        actionId: string;
+        kind: string;
+        status: string;
+      }>("actions"))
         if (
-          (action.kind === "beforeModelCall" || action.kind === "afterModelCall") &&
+          (action.kind === "beforeModelCall" ||
+            action.kind === "afterModelCall") &&
           (action.status === "pending" || action.status === "claimed")
         ) {
           action.status = "cancelled";
           this.store.put("actions", action.actionId, action);
         }
       for (const s of this.store.all<Session>("sessions"))
-        if (s.activeTurnId && s.manifest?.manifestSchemaVersion !== 4) {
+        if (
+          s.activeTurnId &&
+          !isWorkflowManifest(s.manifest) &&
+          s.manifest?.manifestSchemaVersion !== 4
+        ) {
           this.store.event(s.id, s.activeTurnId, "turn.failed", {
             error: {
               code: "execution.incompatible",
@@ -535,8 +657,12 @@ export class TenantRuntime implements TenantHandle {
           action.status === "claimed" &&
           Date.parse(action.leaseExpiresAt!) <= Date.now()
         ) {
-          if (action.kind === "hook") {
-            // Hooks are pure by contract, so a lost claim is simply delivered again.
+          if (
+            action.kind === "hook" ||
+            action.kind === "fn" ||
+            action.kind === "verify"
+          ) {
+            // Hooks, fn and verify are pure / repeat-safe; a lost claim is offered again.
             // The next claim bumps the generation, which fences any late result.
             action.status = "pending";
             action.claimId = null;
@@ -582,18 +708,37 @@ export class TenantRuntime implements TenantHandle {
     const controller = new AbortController();
     this.running.set(id, controller);
     try {
-      await this.prepareMcp(id, controller.signal);
+      // prepareMcp mutates the session's mcpSnapshot; read current after it.
+      if (!isWorkflowManifest(this.session(id).manifest))
+        await this.prepareMcp(id, controller.signal);
       const current = this.session(id);
-      const result = await runDurable({
-        manifest: current.manifest,
-        checkpoint: current.checkpoint!,
-        signal: controller.signal,
-        sessionTools: sessionToolsOf(current.mcpSnapshot),
-        host: {
-          resolveEffect: (e) => this.resolveEffect(e, controller.signal),
-        },
-      });
+      const host = {
+        resolveEffect: (e: HostEffect) =>
+          this.resolveEffect(e, controller.signal),
+      };
+      if (!isWorkflowManifest(current.manifest) && current.checkpoint) {
+        rebaseSessionState(current, current.checkpoint.manifestHash);
+        const cp = current.checkpoint as DurableCheckpoint;
+        current.checkpoint = { ...cp, state: current.state };
+        this.store.tx(() => this.store.put("sessions", id, current));
+      }
+      const result = isWorkflowManifest(current.manifest)
+        ? await runFlowDurable({
+            manifest: current.manifest,
+            checkpoint: current.checkpoint as FlowCheckpoint,
+            signal: controller.signal,
+            host,
+            limits: this.flowLimits,
+          })
+        : await runDurable({
+            manifest: turnManifestOf(current),
+            checkpoint: current.checkpoint as DurableCheckpoint,
+            signal: controller.signal,
+            sessionTools: sessionToolsOf(current.mcpSnapshot),
+            host,
+          });
       let event: LiveEvent | undefined;
+      const siblingCancelIds: string[] = [];
       this.store.tx(() => {
         const current = this.session(id);
         if (
@@ -604,17 +749,34 @@ export class TenantRuntime implements TenantHandle {
         // A result can arrive during concurrent action persistence. Preserve the runnable marker.
         const resumeRequested = current.status === "runnable";
         if (result.status === "waiting" || result.status === "uncertain") {
-          current.status = resumeRequested
-            ? "runnable"
-            : current.status === "uncertain"
-            ? "uncertain"
-            : result.status;
-          current.waits = { effectIds: result.effectIds };
+          const linkedWaits = isWorkflowManifest(current.manifest)
+            ? aggregateWaits({
+                store: this.store,
+                workflowSessionId: id,
+              })
+            : [];
+          if (linkedWaits.length > 0 && !resumeRequested) {
+            current.status = "paused";
+            current.waits = linkedWaits;
+          } else {
+            current.status = resumeRequested
+              ? "runnable"
+              : current.status === "uncertain"
+              ? "uncertain"
+              : result.status;
+            current.waits =
+              linkedWaits.length > 0
+                ? linkedWaits
+                : { effectIds: result.effectIds };
+          }
         } else if ("result" in result) {
-          current.state =
-            result.status === "failed"
-              ? current.turnStartState
-              : result.result.state;
+          const flow = isWorkflowManifest(current.manifest);
+          if (!flow) {
+            current.state =
+              result.status === "failed"
+                ? current.turnStartState
+                : (result.result as any).state;
+          }
           current.checkpoint = result.checkpoint;
           this.store.put(
             "checkpoints",
@@ -626,6 +788,25 @@ export class TenantRuntime implements TenantHandle {
             result.status === "paused"
               ? (result.result as any).pending
               : undefined;
+          if (result.status === "completed")
+            current.lastOutput = (result.result as any).output;
+          // Fail-fast: cancel pending Parallel/Map siblings before clearing the turn.
+          if (
+            result.status === "failed" &&
+            flow &&
+            "cancelEffectIds" in result &&
+            Array.isArray(result.cancelEffectIds) &&
+            result.cancelEffectIds.length > 0 &&
+            s.activeTurnId
+          ) {
+            const cancelResult = cancelSiblingWork({
+              store: this.store,
+              workflowSessionId: id,
+              turnId: s.activeTurnId,
+              cancelEffectIds: result.cancelEffectIds,
+            });
+            siblingCancelIds.push(...cancelResult.agentSessionIds);
+          }
           if (result.status !== "paused") current.activeTurnId = null;
           event = this.store.event(
             id,
@@ -649,6 +830,9 @@ export class TenantRuntime implements TenantHandle {
                   error: {
                     code: (result.result as any).error?.code,
                     message: (result.result as any).error?.message,
+                    ...((result.result as any).error?.path
+                      ? { path: (result.result as any).error.path }
+                      : {}),
                   },
                 }
               : {}
@@ -656,7 +840,64 @@ export class TenantRuntime implements TenantHandle {
         }
         this.store.put("sessions", id, current);
       });
-      if (event) this.publish(event);
+      for (const agentId of siblingCancelIds) {
+        try {
+          this.command(
+            agentId,
+            {
+              type: "cancel",
+              requestId: `flow-sibling-${id}-${agentId}`,
+              idempotencyKey: `flow-sibling-cancel:${id}:${agentId}:${s.activeTurnId}`,
+              reason: "sibling branch failed",
+            },
+            {
+              kind: "application",
+              principalId: "flow-host",
+            }
+          );
+        } catch {
+          /* agent may already be terminal */
+        }
+      }
+      if (event) {
+        this.publish(event);
+        if (event.type === "turn.completed" || event.type === "turn.failed") {
+          this.store.tx(() => {
+            wakeLinkedWorkflow({
+              agentSessionId: id,
+              store: this.store,
+              output:
+                event!.type === "turn.completed"
+                  ? linkedAgentOutput(
+                      this.session(id),
+                      (event!.payload as { output?: JsonValue }).output
+                    )
+                  : undefined,
+              failed: event!.type === "turn.failed",
+              error:
+                event!.type === "turn.failed"
+                  ? String(
+                      (event!.payload as { message?: string }).message ?? ""
+                    )
+                  : undefined,
+              schedule: (sid) => this.schedule(sid),
+              publish: (e) => this.publish(e),
+            });
+          });
+        }
+        if (event.type === "turn.cancelled") {
+          this.store.tx(() => {
+            wakeLinkedWorkflow({
+              agentSessionId: id,
+              store: this.store,
+              cancelled: true,
+              error: "Agent turn was cancelled",
+              schedule: (sid) => this.schedule(sid),
+              publish: (e) => this.publish(e),
+            });
+          });
+        }
+      }
     } catch (error) {
       let event: LiveEvent | undefined;
       this.store.tx(() => {
@@ -682,7 +923,21 @@ export class TenantRuntime implements TenantHandle {
         current.activeTurnId = null;
         this.store.put("sessions", id, current);
       });
-      if (event) this.publish(event);
+      if (event) {
+        this.publish(event);
+        this.store.tx(() => {
+          wakeLinkedWorkflow({
+            agentSessionId: id,
+            store: this.store,
+            failed: true,
+            error: String(
+              (event!.payload as { message?: string }).message ?? ""
+            ),
+            schedule: (sid) => this.schedule(sid),
+            publish: (e) => this.publish(e),
+          });
+        });
+      }
     } finally {
       this.running.delete(id);
       if (
@@ -693,8 +948,7 @@ export class TenantRuntime implements TenantHandle {
     }
   }
   private invokeModel(request: HostEffect, signal: AbortSignal) {
-    if (!this.useVaultModel)
-      return this.modelProvider(request, signal);
+    if (!this.useVaultModel) return this.modelProvider(request, signal);
     const adapter = piModel({
       root: this.config.paths.home,
       readHostModel: () => this.vault.readHostModel(),
@@ -727,15 +981,51 @@ export class TenantRuntime implements TenantHandle {
       if (existing) {
         if (canonical(existing.request) !== canonical(request))
           throw new Error("Effect identity request drift");
-        return existing.status === "completed"
-          ? { status: "completed", outcome: existing.outcome }
-          : {
-              status:
-                existing.status === "uncertain" ||
-                existing.status === "invoking"
-                  ? "uncertain"
-                  : "pending",
-            };
+        if (existing.status === "completed")
+          return { status: "completed", outcome: existing.outcome };
+        if (request.kind === "agent" && existing.status === "pending") {
+          const agentSessionId = existing.agentSessionId as string | undefined;
+          if (agentSessionId) {
+            const agent = this.store.get<Session>("sessions", agentSessionId);
+            if (agent?.status === "completed") {
+              const outcome = {
+                value: linkedAgentOutput(agent, agent.lastOutput ?? null),
+              };
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+              return { status: "completed", outcome };
+            }
+            if (agent?.status === "failed") {
+              const outcome = {
+                value: {
+                  kind: "failed",
+                  code: "agent.failed",
+                  message: agent.error ?? "Agent turn failed",
+                },
+              };
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+              return { status: "completed", outcome };
+            }
+          }
+        }
+        return {
+          status:
+            existing.status === "uncertain" || existing.status === "invoking"
+              ? "uncertain"
+              : "pending",
+        };
+      }
+      if (
+        request.kind === "agent" ||
+        request.kind === "fn" ||
+        request.kind === "verify" ||
+        isFlowToolEffect(request)
+      ) {
+        // Handled outside the agent-manifest path below.
+        return { status: "pending", __flow: true } as any;
       }
       if (request.kind === "delegation") {
         // Lifecycle points of an agent used as a tool: journaled once, so replays never re-emit.
@@ -756,12 +1046,18 @@ export class TenantRuntime implements TenantHandle {
       }
       const agentManifest = manifestFor(s.manifest, request.agent);
       if (!agentManifest)
-        throw new Error(`Agent '${request.agent?.id ?? ""}' is not used as a tool`);
+        throw new Error(
+          `Agent '${request.agent?.id ?? ""}' is not used as a tool`
+        );
       const mcpTool =
         request.kind === "tool" ? mcpToolOf(s, request) : undefined;
       const sandboxTool =
         request.kind === "tool" && !mcpTool
-          ? sandboxCapabilityOf(agentManifest, request.capabilityId, request.toolName)
+          ? sandboxCapabilityOf(
+              agentManifest,
+              request.capabilityId,
+              request.toolName
+            )
           : undefined;
       this.store.put("effects", request.effectId, {
         request,
@@ -810,7 +1106,9 @@ export class TenantRuntime implements TenantHandle {
               capabilityId: request.capabilityId!,
               toolName: request.toolName!,
               ...(tool?.inputSchema ? { inputSchema: tool.inputSchema } : {}),
-              ...(tool?.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+              ...(tool?.outputSchema
+                ? { outputSchema: tool.outputSchema }
+                : {}),
             };
       this.store.put("actions", action.actionId, action);
       event = this.store.event(s.id, s.activeTurnId, "action.pending", {
@@ -824,14 +1122,17 @@ export class TenantRuntime implements TenantHandle {
     });
     if (event) this.publish(event);
     if (notify) this.notify();
+    if (resolution && (resolution as any).__flow && isFlowEffect(request)) {
+      return this.resolveNewFlowEffect(request, signal);
+    }
     if (!invoke) return resolution!;
     try {
       const value =
         invoke === "mcp"
           ? await this.callMcpTool(request)
           : invoke === "sandbox"
-            ? await this.callSandboxTool(request, signal)
-            : await this.invokeModel(request, signal);
+          ? await this.callSandboxTool(request, signal)
+          : await this.invokeModel(request, signal);
       return this.store.tx(() => {
         const s = this.session(request.sessionId);
         if (
@@ -864,20 +1165,309 @@ export class TenantRuntime implements TenantHandle {
       return { status: "uncertain" };
     }
   }
+
+  /** Journal and dispatch a new flow effect (agent / tool node / fn / verify). */
+  private async resolveNewFlowEffect(
+    request: HostEffect,
+    signal: AbortSignal
+  ): Promise<EffectResolution> {
+    if (signal.aborted) throw new Error("Turn cancelled");
+    const existing = this.store.get("effects", request.effectId);
+    if (existing) {
+      if (existing.status === "completed")
+        return { status: "completed", outcome: existing.outcome };
+      if (existing.status === "queued") {
+        // Fall through to dispatch when a concurrency slot is free.
+      } else if (request.kind === "agent") {
+        const agentSessionId = existing.agentSessionId as string | undefined;
+        if (agentSessionId) {
+          const agent = this.store.get<Session>("sessions", agentSessionId);
+          if (agent?.status === "completed") {
+            const outcome = {
+              value: linkedAgentOutput(agent, agent.lastOutput ?? null),
+            };
+            this.store.tx(() => {
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+            });
+            return { status: "completed", outcome };
+          }
+          if (agent?.status === "cancelled") {
+            const outcome = {
+              value: {
+                kind: "failed" as const,
+                code: "agent.cancelled",
+                message: agent.error ?? "Agent turn was cancelled",
+              },
+            };
+            this.store.tx(() => {
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+            });
+            return { status: "completed", outcome };
+          }
+          if (agent?.status === "failed") {
+            const outcome = {
+              value: {
+                kind: "failed" as const,
+                code: "agent.failed",
+                message: agent.error ?? "Agent turn failed",
+              },
+            };
+            this.store.tx(() => {
+              existing.status = "completed";
+              existing.outcome = outcome;
+              this.store.put("effects", request.effectId, existing);
+            });
+            return { status: "completed", outcome };
+          }
+        }
+        return { status: "pending" };
+      } else {
+        return { status: "pending" };
+      }
+    }
+
+    const active = countActiveFlowWork(
+      this.store,
+      request.sessionId,
+      request.turnId
+    );
+    if (!mayDispatchMore(active, this.flowLimits)) {
+      if (!existing || existing.status !== "queued") {
+        this.store.tx(() => {
+          this.store.put("effects", request.effectId, {
+            request,
+            status: "queued",
+          });
+        });
+      }
+      return { status: "pending" };
+    }
+
+    if (
+      request.kind === "fn" ||
+      request.kind === "verify" ||
+      isFlowToolEffect(request)
+    ) {
+      let event: LiveEvent | undefined;
+      let started: LiveEvent | undefined;
+      this.store.tx(() => {
+        const s = this.session(request.sessionId);
+        this.store.put("effects", request.effectId, {
+          request,
+          status: "pending",
+        });
+        const action =
+          request.kind === "fn" || request.kind === "verify"
+            ? ({
+                actionId: request.effectId,
+                sessionId: request.sessionId,
+                turnId: request.turnId,
+                agentId: request.agentId,
+                manifestHash: request.manifestHash,
+                implementationVersion: s.implementationVersion,
+                input: request.input as any,
+                context: request.context,
+                status: "pending" as const,
+                generation: 0,
+                claimId: null,
+                leaseExpiresAt: null,
+                kind: request.kind,
+                path: request.path!,
+                key: request.key!,
+              } satisfies Action)
+            : ({
+                actionId: request.effectId,
+                sessionId: request.sessionId,
+                turnId: request.turnId,
+                agentId: request.agentId,
+                manifestHash: request.manifestHash,
+                implementationVersion: s.implementationVersion,
+                input: request.input as any,
+                context: request.context,
+                status: "pending" as const,
+                generation: 0,
+                claimId: null,
+                leaseExpiresAt: null,
+                kind: "tool" as const,
+                path: request.path!,
+                key: request.key!,
+              } satisfies Action);
+        this.store.put("actions", action.actionId, action);
+        if (isFlowToolEffect(request)) {
+          started = this.store.event(s.id, s.activeTurnId, "node.started", {
+            path: request.path!,
+            kind: "tool",
+            key: request.key!,
+            ...(request.iterations !== undefined
+              ? { iterations: request.iterations }
+              : {}),
+          });
+        }
+        event = this.store.event(s.id, s.activeTurnId, "action.pending", {
+          actionId: action.actionId,
+          kind: action.kind,
+          path: action.path,
+          key: action.key,
+          input: action.input,
+        });
+      });
+      if (started) this.publish(started);
+      if (event) this.publish(event);
+      this.notify();
+      return { status: "pending" };
+    }
+
+    // agent effect: create linked session + message via the public contract path
+    const body = request.input as {
+      agentId: string;
+      input: JsonValue;
+      path: string;
+      manifest?: AgentManifest;
+    };
+    const path = body.path ?? request.path!;
+    const workflow = this.session(request.sessionId);
+    const agentSessionId = deriveAgentEffectSessionId(
+      workflow.id,
+      path,
+      request
+    );
+    const iterations = request.iterations ?? "-";
+    const n = Number(request.context.n ?? iterations.split(".")[0] ?? 1);
+
+    this.store.tx(() => {
+      this.store.put("effects", request.effectId, {
+        request,
+        status: "pending",
+        agentSessionId,
+      });
+      this.store.put("links", agentSessionId, {
+        workflowSessionId: workflow.id,
+        path,
+        effectId: request.effectId,
+        turnId: request.turnId,
+      });
+    });
+
+    if (!this.store.get<Session>("sessions", agentSessionId)) {
+      const definition =
+        this.store.get("definitions", body.agentId) ??
+        fail(404, "Definition not found");
+      const sandboxOwnerId =
+        sandboxSpecOf(workflow.manifest) || workflow.sandboxOwnerId
+          ? owningSandboxSessionId(workflow, (sid) =>
+              this.store.get<Session>("sessions", sid)
+            )
+          : undefined;
+      const created: Session = {
+        id: agentSessionId,
+        agentId: body.agentId,
+        ownerUserId: workflow.ownerUserId,
+        manifest: definition.manifest,
+        manifestHash: definition.manifestHash,
+        implementationVersion: definition.implementationVersion,
+        status: "idle",
+        activeTurnId: null,
+        creation: {
+          requestId: `flow-put-${request.effectId}`,
+          agentId: body.agentId,
+          ownerUserId: workflow.ownerUserId,
+          ...(sandboxOwnerId ? { sandbox: { session: sandboxOwnerId } } : {}),
+        },
+        vaultIds: workflow.vaultIds,
+        credentialSelections: workflow.credentialSelections,
+        pluginRoots: definition.pluginRoots ?? {},
+        ...(sandboxOwnerId ? { sandboxOwnerId } : {}),
+      };
+      this.store.tx(() => this.store.put("sessions", agentSessionId, created));
+    }
+
+    const idempotencyKey = `${request.turnId}:${path}:${iterations}`;
+    const messageInput = body.input;
+    const messageCommand: SessionCommand =
+      typeof messageInput === "string"
+        ? {
+            type: "message",
+            content: messageInput,
+            requestId: `flow-${request.effectId}`,
+            idempotencyKey,
+            ...(body.manifest ? { manifest: body.manifest } : {}),
+          }
+        : {
+            type: "message",
+            data: messageInput,
+            requestId: `flow-${request.effectId}`,
+            idempotencyKey,
+            ...(body.manifest ? { manifest: body.manifest } : {}),
+          };
+    const accepted = this.command(agentSessionId, messageCommand, {
+      kind: "application",
+      principalId: "flow-host",
+    }) as { turnId: string | null };
+
+    const events: LiveEvent[] = [];
+    this.store.tx(() => {
+      const s = this.session(request.sessionId);
+      const agentSession = this.session(agentSessionId);
+      events.push(
+        this.store.event(s.id, s.activeTurnId, "loop.iteration", {
+          path: String(request.context.loopPath ?? path.split("/")[0]),
+          n,
+          sessionId: agentSessionId,
+          turnId: accepted.turnId ?? undefined,
+          manifestHash: agentSession.checkpoint?.manifestHash,
+        })
+      );
+      events.push(
+        this.store.event(s.id, s.activeTurnId, "node.agent", {
+          path,
+          iterations,
+          sessionId: agentSessionId,
+          turnId: accepted.turnId,
+        })
+      );
+    });
+    for (const e of events) this.publish(e);
+
+    // May already be settled if the agent was fast / replayed.
+    const agent = this.session(agentSessionId);
+    if (agent.status === "completed") {
+      const outcome = {
+        value: linkedAgentOutput(agent, agent.lastOutput ?? null),
+      };
+      this.store.tx(() => {
+        this.store.put("effects", request.effectId, {
+          request,
+          status: "completed",
+          outcome,
+          agentSessionId,
+        });
+      });
+      return { status: "completed", outcome };
+    }
+    return { status: "pending" };
+  }
+
   private scope(request: IncomingMessage): AuthScope {
     const header = request.headers.authorization;
     const token = header?.startsWith("Bearer ") ? header.slice(7) : "";
     if (!token || !header?.startsWith("Bearer ")) {
-      this.config.logger.warn("credential rejected", { reason: "missing_bearer" });
+      this.config.logger.warn("credential rejected", {
+        reason: "missing_bearer",
+      });
       return failOpaque();
     }
     const tokenHash = hashToken(token);
     const principal = findPrincipalByTokenHash(this.store.db, tokenHash);
-    if (principal)
-      return { kind: "application", principalId: principal.id };
+    if (principal) return { kind: "application", principalId: principal.id };
     const executor = this.registry.find(tokenHash);
     if (!executor) {
-      this.config.logger.warn("credential rejected", { reason: "unknown_token" });
+      this.config.logger.warn("credential rejected", {
+        reason: "unknown_token",
+      });
       return failOpaque();
     }
     return { kind: "executor", executor };
@@ -889,6 +1479,14 @@ export class TenantRuntime implements TenantHandle {
   private requireApplication(scope: AuthScope): string {
     if (scope.kind === "application") return scope.principalId;
     return fail(403, "Application credential required");
+  }
+  private sandboxRouteDeps() {
+    return {
+      sandbox: this.sandbox,
+      session: (id: string) => this.session(id),
+      lookup: (id: string) => this.store.get<Session>("sessions", id),
+      getAction: (id: string) => this.store.get<Action>("actions", id),
+    };
   }
   private async body(request: IncomingMessage): Promise<unknown> {
     let data = "";
@@ -908,6 +1506,8 @@ export class TenantRuntime implements TenantHandle {
     scope: AuthScope
   ): unknown {
     let event: LiveEvent | undefined;
+    const extraEvents: LiveEvent[] = [];
+    const cascadeCancelIds: string[] = [];
     let schedule = false;
     const response = this.store.tx(() => {
       const s = this.session(id);
@@ -962,6 +1562,44 @@ export class TenantRuntime implements TenantHandle {
           kind: action.kind,
           result: command.outcome.value,
         });
+        if (action.kind === "verify") {
+          const verdict = command.outcome.value as {
+            pass?: boolean;
+            feedback?: string;
+            data?: unknown;
+            kind?: string;
+          };
+          if (verdict?.kind !== "failed") {
+            extraEvents.push(
+              this.store.event(id, s.activeTurnId, "loop.verified", {
+                path: String(action.context?.loopPath ?? action.path ?? ""),
+                n: Number(action.context?.n ?? 1),
+                pass: Boolean(verdict?.pass),
+                ...(verdict?.feedback !== undefined
+                  ? { feedback: verdict.feedback }
+                  : {}),
+                ...(verdict?.data !== undefined ? { data: verdict.data } : {}),
+              })
+            );
+          }
+        } else if (action.kind === "fn" && action.context?.role === "decide") {
+          const decision = command.outcome.value as {
+            input?: unknown;
+            output?: unknown;
+            agent?: unknown;
+          };
+          extraEvents.push(
+            this.store.event(id, s.activeTurnId, "loop.decided", {
+              path: String(action.context?.loopPath ?? action.path ?? ""),
+              n: Number(action.context?.n ?? 1),
+              next:
+                "output" in decision && !("input" in decision)
+                  ? "output"
+                  : "input",
+              patched: Boolean(decision.agent),
+            })
+          );
+        }
         const receipt = {
           status: "accepted",
           turnId: s.activeTurnId,
@@ -970,22 +1608,50 @@ export class TenantRuntime implements TenantHandle {
         };
         prior.receipt = receipt;
         this.store.put("effects", action.actionId, prior);
+        if (isWorkflowManifest(s.manifest) && s.activeTurnId) {
+          wakeForQueuedEffects({
+            store: this.store,
+            workflowSessionId: id,
+            turnId: s.activeTurnId,
+            limits: this.flowLimits,
+            schedule: (sid) => {
+              schedule = true;
+              void sid;
+            },
+          });
+        }
       } else if (command.type === "cancel") {
         const cancelledTurnId = s.activeTurnId;
+        const workflowCancel = isWorkflowManifest(s.manifest);
+        const cascade = workflowCancel
+          ? planCancelCascade({
+              store: this.store,
+              workflowSessionId: id,
+              turnId: cancelledTurnId,
+            })
+          : null;
         s.status = "cancelled";
-        for (const a of this.store.all<Action>("actions"))
-          if (
-            a.sessionId === id &&
-            a.turnId === cancelledTurnId &&
-            ["pending", "claimed"].includes(a.status)
-          ) {
-            // Claimed work may already have an external effect. Preserve it for reconciliation.
-            a.status = a.status === "claimed" ? "uncertain" : "cancelled";
-            this.store.put("actions", a.actionId, a);
-            const effect = this.store.get("effects", a.actionId);
-            effect.status = a.status;
-            this.store.put("effects", a.actionId, effect);
-          }
+        if (workflowCancel) {
+          fenceWorkflowActions({
+            store: this.store,
+            workflowSessionId: id,
+            turnId: cancelledTurnId,
+          });
+        } else {
+          for (const a of this.store.all<Action>("actions"))
+            if (
+              a.sessionId === id &&
+              a.turnId === cancelledTurnId &&
+              ["pending", "claimed"].includes(a.status)
+            ) {
+              // Claimed work may already have an external effect. Preserve it for reconciliation.
+              a.status = a.status === "claimed" ? "uncertain" : "cancelled";
+              this.store.put("actions", a.actionId, a);
+              const effect = this.store.get("effects", a.actionId);
+              effect.status = a.status;
+              this.store.put("effects", a.actionId, effect);
+            }
+        }
         for (const effect of this.store.all("effects"))
           if (
             effect.request.sessionId === id &&
@@ -1006,20 +1672,65 @@ export class TenantRuntime implements TenantHandle {
         s.checkpoint = undefined;
         s.waits = undefined;
         s.error = undefined;
+        // Cascade: cancel linked agent sessions deepest-first (after fencing this session).
+        if (cascade) {
+          for (const agentId of cascade.agentSessionIds) {
+            const agent = this.store.get<Session>("sessions", agentId);
+            if (
+              !agent ||
+              !agent.activeTurnId ||
+              ["idle", "completed", "failed", "cancelled"].includes(
+                agent.status
+              )
+            )
+              continue;
+            cascadeCancelIds.push(agentId);
+          }
+        }
       } else {
         if (command.type === "message") {
           if (!["idle", "completed", "failed", "cancelled"].includes(s.status))
             fail(409, "Session has active or unresolved work");
           s.turnStartState = s.state;
           s.activeTurnId = randomUUID();
-          s.checkpoint = createDurableCheckpoint({
-            manifest: s.manifest,
-            sessionId: id,
-            turnId: s.activeTurnId,
-            input: command.content,
-            state: s.state,
-            info: s.info,
-          });
+          if (isWorkflowManifest(s.manifest)) {
+            const input: JsonValue =
+              "content" in command
+                ? command.content
+                : (command.data as JsonValue);
+            s.checkpoint = createFlowCheckpoint({
+              manifest: s.manifest,
+              sessionId: id,
+              turnId: s.activeTurnId,
+              input,
+            });
+          } else {
+            // Optional message.manifest: validate as variant, pin by hash, apply this turn only.
+            const resolved = resolveMessageManifest({
+              pinned: s.manifest,
+              pinnedHash: s.manifestHash,
+              messageManifest: command.manifest,
+              store: variantStore(s),
+            });
+            if (!resolved.ok) {
+              fail(400, resolved.message);
+            } else {
+              rebaseSessionState(s, resolved.hash);
+              s.checkpoint = createDurableCheckpoint({
+                manifest: resolved.manifest,
+                sessionId: id,
+                turnId: s.activeTurnId,
+                input:
+                  "content" in command
+                    ? command.content
+                    : typeof command.data === "string"
+                    ? command.data
+                    : JSON.stringify(command.data),
+                state: s.state,
+                info: s.info,
+              });
+            }
+          }
         } else {
           if (s.status !== "paused" || !s.state || !s.activeTurnId)
             fail(409, "Session is not awaiting a response");
@@ -1046,8 +1757,23 @@ export class TenantRuntime implements TenantHandle {
                   interactionId: command.interactionId,
                   value: command.value,
                 };
+          if (isWorkflowManifest(s.manifest)) {
+            // Approvals owned by linked agent sessions must be answered there (WF-R52).
+            const conflict = foreignInteractionConflict({
+              store: this.store,
+              workflowSessionId: id,
+              interactionId: command.interactionId,
+            });
+            if (conflict) fail(409, conflict.message);
+            // Workflow-owned interactions (tool-node / verify) resume on this session once
+            // the flow engine supports pause segments; tracer root Loop has none yet.
+            fail(
+              409,
+              "Workflow sessions do not accept approve/respond on the root without a pending interaction"
+            );
+          }
           s.checkpoint = createDurableCheckpoint({
-            manifest: s.manifest,
+            manifest: turnManifestOf(s),
             sessionId: id,
             turnId: s.activeTurnId!,
             input: input as any,
@@ -1082,7 +1808,41 @@ export class TenantRuntime implements TenantHandle {
       return response;
     });
     if (event) this.publish(event);
+    for (const extra of extraEvents) this.publish(extra);
     if (input.type === "cancel") this.running.get(id)?.abort();
+    // Cascade cancel linked agents deepest-first under existing fencing (WF-R53).
+    for (const agentId of cascadeCancelIds) {
+      try {
+        this.command(
+          agentId,
+          {
+            type: "cancel",
+            requestId: `flow-cascade-${id}-${agentId}`,
+            idempotencyKey: `flow-cascade-cancel:${id}:${agentId}`,
+            reason: "workflow cancelled",
+          },
+          scope
+        );
+      } catch {
+        /* agent may already be terminal */
+      }
+    }
+    // Direct cancel of a linked agent fails that node with agent.cancelled (WF-R54).
+    if (input.type === "cancel") {
+      const link = this.store.get("links", id);
+      if (link) {
+        this.store.tx(() => {
+          wakeLinkedWorkflow({
+            agentSessionId: id,
+            store: this.store,
+            cancelled: true,
+            error: "Agent turn was cancelled",
+            schedule: (sid) => this.schedule(sid),
+            publish: (e) => this.publish(e),
+          });
+        });
+      }
+    }
     if (schedule) this.schedule(id);
     return response;
   }
@@ -1114,7 +1874,7 @@ export class TenantRuntime implements TenantHandle {
   async handle(
     request: IncomingMessage,
     response: ServerResponse,
-    _url?: URL,
+    _url?: URL
   ): Promise<void> {
     const json = (value: unknown, status = 200) => {
       const payload = JSON.stringify(value);
@@ -1162,11 +1922,37 @@ export class TenantRuntime implements TenantHandle {
             actions: this.store
               .all<Action>("actions")
               .filter(
-                (a) => a.status === "pending" && a.agentId === scope.executor.agentId
+                (a) =>
+                  a.status === "pending" && a.agentId === scope.executor.agentId
               ),
           });
         const actionId = path[2];
         if (!actionId) fail(404, "Action not found");
+        if (
+          method === "POST" &&
+          path[3] === "sandbox" &&
+          path[4] &&
+          path.length === 5
+        ) {
+          const action =
+            this.store.get<Action>("actions", actionId) ??
+            fail(404, "Action not found");
+          this.scoped(scope, action);
+          try {
+            const outcome = await handleActionSandboxTool(
+              this.sandboxRouteDeps(),
+              actionId,
+              path[4],
+              await this.body(request),
+              requestAborted(request)
+            );
+            return json(outcome);
+          } catch (error) {
+            if (error instanceof SandboxRouteError)
+              fail(error.status, error.message);
+            throw error;
+          }
+        }
         const body = await this.body(request);
         let event: LiveEvent | undefined;
         const result = this.store.tx(() => {
@@ -1245,9 +2031,7 @@ export class TenantRuntime implements TenantHandle {
           await this.dispatchVault(scope, method, path, url, request)
         );
       if (path[1] === "tenant")
-        return json(
-          await this.dispatchTenant(scope, method, path, request)
-        );
+        return json(await this.dispatchTenant(scope, method, path, request));
       const principalId = this.requireApplication(scope);
       if (path[1] === "executors" && path.length === 2 && method === "GET")
         return json({
@@ -1282,7 +2066,10 @@ export class TenantRuntime implements TenantHandle {
           new Set(body.executors.map((e) => e.token)).size !==
             body.executors.length
         )
-          fail(400, "Executor registrations must be unique per agent and token");
+          fail(
+            400,
+            "Executor registrations must be unique per agent and token"
+          );
         const updatedAt = new Date().toISOString();
         const records = body.executors.map((executor) => ({
           agentId: executor.agentId,
@@ -1301,7 +2088,10 @@ export class TenantRuntime implements TenantHandle {
             fail(409, "Executor tokens must be unique");
           // A token hash may not appear in both principals and executors (D3).
           if (applicationHashes.includes(record.tokenHash))
-            fail(400, "Executor tokens require independent credentials and an agent id");
+            fail(
+              400,
+              "Executor tokens require independent credentials and an agent id"
+            );
         }
         // Persist the whole batch first; the in-memory registry must never run ahead of SQLite.
         this.store.tx(() => {
@@ -1331,7 +2121,10 @@ export class TenantRuntime implements TenantHandle {
           if (replacedByDifferent)
             this.config.logger.warn(
               "executor registration replaced by different application credential",
-              { agentId: record.agentId, previousPrincipalId: previous.principalId },
+              {
+                agentId: record.agentId,
+                previousPrincipalId: previous.principalId,
+              }
             );
           return {
             agentId: record.agentId,
@@ -1394,10 +2187,10 @@ export class TenantRuntime implements TenantHandle {
       ) {
         const body = PutAgentRequestSchema.parse(await this.body(request));
         if (body.manifest.id !== path[2]) fail(400, "Agent id mismatch");
-        AgentManifestSchema.parse(body.manifest);
+        DefinitionDocumentSchema.parse(body.manifest);
         const definition = {
           ...body,
-          manifestHash: hashManifest(body.manifest),
+          manifestHash: hashManifest(body.manifest as any),
         };
         this.store.tx(() => {
           this.store.put("definitions", path[2]!, definition);
@@ -1414,47 +2207,65 @@ export class TenantRuntime implements TenantHandle {
           const body = PutSessionRequestSchema.parse(await this.body(request));
           const vaultIds = body.vaultIds ?? [];
           const credentialSelections = body.credentialSelections ?? [];
+          const prior = this.store.get<Session>("sessions", id);
+          const definition =
+            prior === undefined || body.sandbox
+              ? this.store.get<{
+                  manifest: unknown;
+                  manifestHash: string;
+                  implementationVersion: string;
+                  pluginRoots?: Record<string, string>;
+                }>("definitions", body.agentId) ??
+                fail(404, "Definition not found")
+              : undefined;
+          const sandboxOwnerId = body.sandbox
+            ? validateSandboxAttach(
+                body,
+                (definition ?? prior)!.manifest as never,
+                (sid) => this.store.get<Session>("sessions", sid)
+              )
+            : undefined;
           const result = this.store.tx(() => {
             this.vault.assertAttachment(
               body.ownerUserId,
               vaultIds,
               credentialSelections
             );
-            const prior = this.store.get<Session>("sessions", id);
-            if (prior) {
-              if (sessionIdentity(prior.creation) !== sessionIdentity(body))
+            const existing = this.store.get<Session>("sessions", id);
+            if (existing) {
+              if (sessionIdentity(existing.creation) !== sessionIdentity(body))
                 fail(
                   409,
                   "Session already exists with different creation parameters"
                 );
-              prior.vaultIds = vaultIds;
-              prior.credentialSelections = credentialSelections;
-              prior.creation = body;
-              this.store.put("sessions", id, prior);
+              existing.vaultIds = vaultIds;
+              existing.credentialSelections = credentialSelections;
+              existing.creation = body;
+              if (sandboxOwnerId !== undefined)
+                existing.sandboxOwnerId = sandboxOwnerId;
+              this.store.put("sessions", id, existing);
               this.vault.recordAttachment(id, vaultIds);
-              return prior;
+              return existing;
             }
-            const definition =
-              this.store.get("definitions", body.agentId) ??
-              fail(404, "Definition not found");
-            const s: Session = {
+            const created: Session = {
               id,
               agentId: body.agentId,
               ownerUserId: body.ownerUserId,
-              manifest: definition.manifest,
-              manifestHash: definition.manifestHash,
-              implementationVersion: definition.implementationVersion,
+              manifest: definition!.manifest,
+              manifestHash: definition!.manifestHash,
+              implementationVersion: definition!.implementationVersion,
               info: body.info,
               status: "idle",
               activeTurnId: null,
               creation: body,
               vaultIds,
               credentialSelections,
-              pluginRoots: definition.pluginRoots ?? {},
+              pluginRoots: definition!.pluginRoots ?? {},
+              ...(sandboxOwnerId !== undefined ? { sandboxOwnerId } : {}),
             };
-            this.store.put("sessions", id, s);
+            this.store.put("sessions", id, created);
             this.vault.recordAttachment(id, vaultIds);
-            return s;
+            return created;
           });
           return json(this.view(result));
         }
@@ -1467,7 +2278,11 @@ export class TenantRuntime implements TenantHandle {
             : undefined);
         if (method === "GET" && path[3] === "items")
           return json(
-            this.store.history(id, cursor, url.searchParams.get("agent") ?? undefined)
+            this.store.history(
+              id,
+              cursor,
+              url.searchParams.get("agent") ?? undefined
+            )
           );
         if (method === "GET" && path[3] === "events") {
           const history = this.store.history(id, cursor);
@@ -1483,6 +2298,28 @@ export class TenantRuntime implements TenantHandle {
             );
           return;
         }
+        if (
+          method === "POST" &&
+          path[3] === "sandbox" &&
+          path[4] &&
+          path.length === 5
+        ) {
+          this.requireApplication(scope);
+          try {
+            const outcome = await handleSessionSandboxTool(
+              this.sandboxRouteDeps(),
+              id,
+              path[4],
+              await this.body(request),
+              requestAborted(request)
+            );
+            return json(outcome);
+          } catch (error) {
+            if (error instanceof SandboxRouteError)
+              fail(error.status, error.message);
+            throw error;
+          }
+        }
       }
       fail(404, "Route not found");
     } catch (error) {
@@ -1495,7 +2332,9 @@ export class TenantRuntime implements TenantHandle {
         return;
       }
       const status =
-        error instanceof HttpError || error instanceof VaultError
+        error instanceof HttpError ||
+        error instanceof VaultError ||
+        error instanceof SandboxRouteError
           ? error.status
           : (error as any)?.name === "ZodError" ||
             (error as Error)?.message === "Invalid cursor"
@@ -1525,16 +2364,26 @@ export class TenantRuntime implements TenantHandle {
       activeTurnId: s.activeTurnId,
       vaultIds: s.vaultIds ?? [],
       credentialSelections: s.credentialSelections ?? [],
+      sandboxOwnerId: s.sandboxOwnerId ?? null,
       mcpSnapshot: s.mcpSnapshot ?? null,
       mcpDiagnostics: s.mcpDiagnostics ?? [],
-      waits: Array.isArray(s.waits)
-        ? s.waits.map((call: any) => ({
-            invocationId: call.invocationId,
-            interaction: call.interaction,
-            wait: call.wait,
-            status: call.status,
-          }))
-        : s.waits,
+      waits: (() => {
+        if (isWorkflowManifest(s.manifest)) {
+          const aggregated = aggregateWaits({
+            store: this.store,
+            workflowSessionId: s.id,
+          });
+          if (aggregated.length > 0) return aggregated;
+        }
+        return Array.isArray(s.waits)
+          ? s.waits.map((call: any) => ({
+              invocationId: call.invocationId,
+              interaction: call.interaction,
+              wait: call.wait,
+              status: call.status,
+            }))
+          : s.waits;
+      })(),
       error: s.error,
       actions: this.store
         .all<Action>("actions")
@@ -1629,8 +2478,11 @@ export class TenantRuntime implements TenantHandle {
     );
     if (!capability)
       throw new Error(`'${request.toolName ?? ""}' is not a sandbox tool`);
+    const ownerId = owningSandboxSessionId(s, (id) =>
+      this.store.get<Session>("sessions", id)
+    );
     return this.sandbox.run(
-      { id: s.id, activeTurnId: s.activeTurnId, manifest: s.manifest },
+      { id: ownerId, activeTurnId: s.activeTurnId, manifest: s.manifest },
       capability,
       request.toolName as never,
       request.input,
@@ -1663,7 +2515,7 @@ export class TenantRuntime implements TenantHandle {
       throw new QuarantineError(
         "kek-missing",
         "Vault key-encryption key is required",
-        "restore the vault-kek file beside tenant.sqlite",
+        "restore the vault-kek file beside tenant.sqlite"
       );
     this.kek = createKekFile(this.kekPath);
     return this.kek;
@@ -1715,7 +2567,7 @@ export class TenantRuntime implements TenantHandle {
             this.executorStreams.clear();
           },
         },
-        body.scope,
+        body.scope
       );
       // Reset leaves the Tenant open for new work.
       this.closing = false;
@@ -1728,12 +2580,9 @@ export class TenantRuntime implements TenantHandle {
       method === "PUT"
     ) {
       const body = SeedTenantConfigRequestSchema.parse(
-        await this.body(request),
+        await this.body(request)
       );
-      return seedTenantConfig(
-        { store: this.store, vault: this.vault },
-        body,
-      );
+      return seedTenantConfig({ store: this.store, vault: this.vault }, body);
     }
     if (path[2] === "models" && path.length === 3 && method === "GET")
       return hostModelCatalog();
@@ -1812,10 +2661,10 @@ export class TenantRuntime implements TenantHandle {
   summary(): TenantSummary {
     const sessions = this.store.all<Session>("sessions");
     const runningSessions = sessions.filter(
-      (sess) => sess.status === "running" || sess.status === "runnable",
+      (sess) => sess.status === "running" || sess.status === "runnable"
     ).length;
     const connectedExecutors = [...this.executorStreams.values()].filter(
-      (set) => set.size > 0,
+      (set) => set.size > 0
     ).length;
     const pendingActions = this.store
       .all<Action>("actions")
@@ -1834,12 +2683,15 @@ export class TenantRuntime implements TenantHandle {
 
   async drain(
     activeWork: "drain" | "cancel",
-    timeoutMs = 30_000,
+    timeoutMs = 30_000
   ): Promise<void> {
     this.closing = true;
     if (activeWork === "cancel") {
       for (const sess of this.store.all<Session>("sessions"))
-        if (sess.activeTurnId && ["running", "runnable", "paused"].includes(sess.status))
+        if (
+          sess.activeTurnId &&
+          ["running", "runnable", "paused"].includes(sess.status)
+        )
           this.command(
             sess.id,
             {
@@ -1851,7 +2703,7 @@ export class TenantRuntime implements TenantHandle {
             {
               kind: "application",
               principalId: "drain",
-            },
+            }
           );
     }
     const deadline = Date.now() + timeoutMs;
@@ -1878,7 +2730,9 @@ export class TenantRuntime implements TenantHandle {
 
 function readEnvelope(config: TenantConfig): TenantEnvelope {
   if (existsSync(config.paths.envelope)) {
-    return JSON.parse(readFileSync(config.paths.envelope, "utf8")) as TenantEnvelope;
+    return JSON.parse(
+      readFileSync(config.paths.envelope, "utf8")
+    ) as TenantEnvelope;
   }
   const now = new Date().toISOString();
   return {
@@ -1897,16 +2751,26 @@ function readEnvelope(config: TenantConfig): TenantEnvelope {
 export async function openTenantRuntime(
   config: TenantConfig,
   // TENANTS-CCR: optional hooks for tests until TenantConfig grows them
-  hooks?: TenantOpenHooks,
+  hooks?: TenantOpenHooks
 ): Promise<TenantHandle> {
   return TenantRuntime.open(config, hooks ?? {});
 }
 
-
 /** What an action runs, for events: a tool name, or a hook point and its capabilities. */
 function actionTarget(action: Action) {
+  if (action.kind === "hook")
+    return {
+      hook: action.hook,
+      ...(action.agent ? { agent: action.agent } : {}),
+    };
+  if (action.kind === "tool" && "toolName" in action)
+    return {
+      toolName: action.toolName,
+      ...(action.agent ? { agent: action.agent } : {}),
+    };
   return {
-    ...(action.kind === "hook" ? { hook: action.hook } : { toolName: action.toolName }),
+    path: action.path,
+    key: action.key,
     ...(action.agent ? { agent: action.agent } : {}),
   };
 }

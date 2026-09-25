@@ -7,6 +7,7 @@ import { randomBytes } from "node:crypto";
 import {
   PROTOCOL_HEADER,
   PROTOCOL_VERSION,
+  PROTOCOL_FEATURES,
   TENANT_HEADER,
   newTenantId,
 } from "@nylorun/core/compatibility";
@@ -46,7 +47,7 @@ export type StartTestTenantOptions = Partial<TenantConfig> & {
  * Minimal in-process HTTP shim over \`openTenantRuntime\` for runtime tests (§5.5).
  */
 export async function startTestTenant(
-  options: StartTestTenantOptions = {},
+  options: StartTestTenantOptions = {}
 ): Promise<{
   url: string;
   tenantId: string;
@@ -126,6 +127,8 @@ export async function startTestTenant(
     model,
     childEnv,
     ...(options.leaseMs === undefined ? {} : { leaseMs: options.leaseMs }),
+    ...(options.flow === undefined ? {} : { flow: options.flow }),
+    ...(options.flowEnv === undefined ? {} : { flowEnv: options.flowEnv }),
     ...(options.vaultFetch === undefined
       ? {}
       : { vaultFetch: options.vaultFetch }),
@@ -144,9 +147,9 @@ export async function startTestTenant(
       Buffer.isBuffer(options.vaultKek)
         ? options.vaultKek.toString("base64") + "\n"
         : options.vaultKek.endsWith("\n")
-          ? options.vaultKek
-          : options.vaultKek + "\n",
-      { mode: 0o600 },
+        ? options.vaultKek
+        : options.vaultKek + "\n",
+      { mode: 0o600 }
     );
     hooks.vaultKek = options.vaultKek;
   } else if (!existsSync(paths.kek)) {
@@ -155,6 +158,26 @@ export async function startTestTenant(
 
   const handle = await openTenantRuntime(config, hooks);
   const server = createServer((req, res) => {
+    // SDK Transport probes /health for protocol compatibility (Host normally serves this).
+    if (req.url === "/health" || req.url?.startsWith("/health?")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          status: "ok",
+          service: "nylorun-runtime",
+          version: "test",
+          protocol: {
+            min: PROTOCOL_VERSION,
+            max: PROTOCOL_VERSION,
+            features: [...PROTOCOL_FEATURES],
+          },
+          coreVersion: "test",
+          hostId: "host_test",
+          pid: process.pid,
+        })
+      );
+      return;
+    }
     void handle.handle(req, res);
   });
   await new Promise<void>((resolve, reject) => {
@@ -181,7 +204,9 @@ export async function startTestTenant(
     });
     if (!response.ok)
       throw new Error(
-        `Failed to seed test executors: ${response.status} ${await response.text()}`,
+        `Failed to seed test executors: ${
+          response.status
+        } ${await response.text()}`
       );
   }
 

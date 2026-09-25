@@ -46,8 +46,8 @@
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build",
     "check": "npm run build && node scripts/check-package.mjs && npm test",
-    "test": "npm run build:server && node --experimental-strip-types --test test/*.test.ts scripts/event-presentation.test.mjs",
-    "test:events": "node --experimental-strip-types --test scripts/event-presentation.test.mjs",
+    "test": "npm run build:server && node --experimental-strip-types --test test/*.test.ts scripts/*.test.mjs",
+    "test:events": "node --experimental-strip-types --test scripts/event-presentation.test.mjs scripts/workflow-*.test.mjs scripts/iteration-timeline.test.mjs scripts/bundle-boundaries.test.mjs",
     "typecheck": "node ../scripts/check-typescript-version.mjs && tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "clean": "node -e \"import('node:fs').then(({rmSync})=>rmSync('dist',{recursive:true,force:true}))\"",
     "prepack": "npm run build"

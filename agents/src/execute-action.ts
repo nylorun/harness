@@ -1,15 +1,21 @@
 import {
   delegateOf,
   implementationsFor,
+  isBuiltWorkflow,
   isToolError,
   normalizeToolDefinition,
   normalizedSchemasFor,
   runHookPoint,
+  type BoundToolDefinition,
   type BuiltAgent,
+  type BuiltWorkflow,
   type JsonValue,
   type ToolExecutionContext,
+  type WorkflowBinding,
 } from "@nylorun/core/define";
 import type { Action, ActionOutcome } from "@nylorun/core/contracts";
+import type { ActionSandbox } from "./sandbox/client.js";
+
 class Suspend {
   constructor(readonly outcome: unknown) {}
 }
@@ -17,12 +23,37 @@ const object = (value: unknown): Record<string, any> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, any>)
     : {};
+
+export type ExecutableDefinition = BuiltAgent | BuiltWorkflow;
+
+export type ExecuteActionOptions = {
+  /** Claim-scoped sandbox client; omitted when the session has no sandbox. */
+  readonly sandbox?: ActionSandbox;
+};
+
 /** Executes code only after a host-issued claim. No engine dependency. */
 export async function executeAction(
   action: Action,
-  root: BuiltAgent,
-  signal: AbortSignal
+  root: ExecutableDefinition,
+  signal: AbortSignal,
+  options: ExecuteActionOptions = {},
 ): Promise<ActionOutcome> {
+  const sandbox = options.sandbox;
+  if (action.kind === "fn" || action.kind === "verify") {
+    if (!isBuiltWorkflow(root))
+      throw new Error(`Action ${action.kind} requires a workflow definition`);
+    return executeWorkflowFn(action, root.getBinding(), signal, sandbox);
+  }
+  if (isBuiltWorkflow(root)) {
+    if (action.kind === "tool" && "key" in action && typeof action.key === "string")
+      return executeWorkflowTool(
+        action as Extract<Action, { kind: "tool" }> & { key: string },
+        root.getBinding(),
+        signal,
+        sandbox,
+      );
+    throw new Error(`Unsupported action kind ${action.kind} on workflow`);
+  }
   // Work for an agent used as a tool runs that agent's code, served from the root's binding.
   const agent = action.agent ? delegatedAgent(root, action.agent.id) : root;
   const ref = action.agent ?? { id: root.id, path: root.id };
@@ -37,12 +68,55 @@ export async function executeAction(
         ),
       },
     };
+  if (action.kind !== "tool" || !("capabilityId" in action))
+    throw new Error(`Unsupported action kind ${action.kind}`);
   const impl = implementationsFor(agent)[action.capabilityId];
   if (!impl) throw new Error(`No capability ${action.capabilityId}`);
   const raw = impl.tools?.[action.toolName];
   if (!raw) throw new Error("Missing tool implementation");
   const tool = normalizeToolDefinition(raw);
-  const schemas = normalizedSchemasFor(tool);
+  return runTool(action, tool, ref, signal, sandbox);
+}
+
+async function executeWorkflowTool(
+  action: Extract<Action, { kind: "tool" }> & { key: string },
+  binding: WorkflowBinding,
+  signal: AbortSignal,
+  sandbox: ActionSandbox | undefined,
+): Promise<ActionOutcome> {
+  const impl = binding.nodes[action.key];
+  if (!impl || impl.kind !== "tool")
+    throw new Error(`No tool implementation for key ${action.key}`);
+  const path =
+    "path" in action && typeof action.path === "string" ? action.path : action.key;
+  return runTool(
+    action,
+    impl.tool,
+    { id: action.agentId, path },
+    signal,
+    sandbox,
+  );
+}
+
+async function runTool(
+  action: Extract<Action, { kind: "tool" }>,
+  raw: BoundToolDefinition | Parameters<typeof normalizeToolDefinition>[0],
+  ref: { id: string; path: string; delegationId?: string },
+  signal: AbortSignal,
+  sandbox: ActionSandbox | undefined,
+): Promise<ActionOutcome> {
+  const tool =
+    "execute" in raw && typeof raw.execute === "function" && "inputSchema" in raw
+      ? (raw as BoundToolDefinition)
+      : normalizeToolDefinition(raw as Parameters<typeof normalizeToolDefinition>[0]);
+  const schemas =
+    "inputSchema" in tool && tool.inputSchema && "validate" in tool.inputSchema
+      ? {
+          inputSchema: tool.inputSchema,
+          outputSchema:
+            "outputSchema" in tool ? tool.outputSchema : undefined,
+        }
+      : normalizedSchemasFor(tool as Parameters<typeof normalizedSchemasFor>[0]);
   const input = schemas.inputSchema.validate(action.input);
   if (!input.ok)
     return {
@@ -92,7 +166,7 @@ export async function executeAction(
       },
     });
   };
-  const context: ToolExecutionContext = {
+  const context: ToolExecutionContext & { sandbox?: ActionSandbox } = {
     executionId: String(ctx.executionId ?? action.sessionId),
     turnId: String(ctx.turnId ?? action.turnId),
     stepId: String(ctx.stepId ?? ""),
@@ -104,6 +178,7 @@ export async function executeAction(
     session: { id: action.sessionId },
     agent: ref,
     ...(ctx.resume ? { resume: ctx.resume as any } : {}),
+    ...(sandbox ? { sandbox } : {}),
     state: {
       get: (key) => state[key],
       set: (key, value) => {
@@ -141,15 +216,19 @@ export async function executeAction(
   };
   try {
     signal.throwIfAborted();
-    if (tool.approval && !gateApproved) {
-      const approval = await tool.approval(input.value);
-      if (approval)
+    const approval =
+      "approval" in tool ? (tool as BoundToolDefinition).approval : undefined;
+    if (approval && !gateApproved) {
+      const result = await approval(input.value);
+      if (result)
         throw new Suspend({
           kind: "interaction-required",
           interaction: {
             kind: "approval",
             prompt:
-              typeof approval === "string" ? approval : `Approve ${tool.name}?`,
+              typeof result === "string"
+                ? result
+                : `Approve ${"name" in tool ? tool.name : "tool"}?`,
           },
           token: durableToken({ approvalGate: true }),
         });
@@ -157,7 +236,12 @@ export async function executeAction(
     }
     if (resume.kind === "approval" && resume.approved === false)
       return { value: { kind: "denied", reason: "Approval denied" } };
-    const value = await tool.execute!(input.value, context);
+    const execute =
+      "execute" in tool && typeof tool.execute === "function"
+        ? tool.execute
+        : undefined;
+    if (!execute) throw new Error("Missing tool implementation");
+    const value = await execute(input.value, context);
     const tagged = object(value);
     let outcome: any;
     if (
@@ -197,6 +281,52 @@ export async function executeAction(
     };
   }
 }
+
+async function executeWorkflowFn(
+  action: Extract<Action, { kind: "fn" | "verify" }>,
+  binding: WorkflowBinding,
+  signal: AbortSignal,
+  sandbox: ActionSandbox | undefined,
+): Promise<ActionOutcome> {
+  const impl = binding.nodes[action.key];
+  if (!impl || impl.kind !== action.kind)
+    throw new Error(`No ${action.kind} implementation for key ${action.key}`);
+  signal.throwIfAborted();
+  try {
+    // Verify may receive a tool-like context later (L3/L4); tracer passes input only.
+    const value =
+      action.kind === "verify"
+        ? await (impl.fn as (args: unknown, ctx?: unknown) => unknown)(
+            action.input,
+            {
+              signal,
+              info: action.context.info,
+              session: { id: action.sessionId },
+              ...(sandbox ? { sandbox } : {}),
+              step: async <T>(_name: string, fn: () => Promise<T> | T) => fn(),
+              approve: async () => {
+                throw new Error("Approvals in verify are not available in the tracer");
+              },
+              ask: async () => {
+                throw new Error("ask in verify is not available in the tracer");
+              },
+              progress() {},
+            },
+          )
+        : await (impl.fn as (args: unknown) => unknown)(action.input);
+    return { value };
+  } catch (error) {
+    if (signal.aborted) throw signal.reason;
+    return {
+      value: {
+        kind: "failed",
+        code: action.kind === "verify" ? "loop.verify-failed" : "fn.failed",
+        message: message(error),
+      },
+    };
+  }
+}
+
 function delegatedAgent(root: BuiltAgent, id: string): BuiltAgent {
   for (const capability of Object.values(implementationsFor(root))) {
     const child = delegateOf(capability.tools?.[id])?.agent;

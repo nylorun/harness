@@ -26,6 +26,17 @@ export {
   AgentBuilder,
   AgentBuildError,
   AgentLifecycleError,
+  Loop,
+  Chain,
+  Switch,
+  Parallel,
+  Map,
+  VerdictSchema,
+  isVerdict,
+  withInstructions,
+  withoutTools,
+  WorkflowBuildError,
+  isBuiltWorkflow,
   capability,
   tool,
   defineSchema,
@@ -35,6 +46,18 @@ export type {
   AgentOptions,
   AgentManifest,
   BuiltAgent,
+  BuiltWorkflow,
+  LoopOptions,
+  LoopDecideArgs,
+  LoopVerifyArgs,
+  LoopDecision,
+  ChainOptions,
+  SwitchOptions,
+  ParallelOptions,
+  MapOptions,
+  Verdict,
+  WorkflowBinding,
+  WorkflowManifest,
   ToolDefinition,
   ToolExecutionContext,
   ToolOutcome,
@@ -57,9 +80,18 @@ export type {
   VaultInfo,
 } from "@nylorun/core/contracts";
 export { AgentsClient, SessionClient, createClient } from "./client.js";
-export type { AgentSource, SessionView, CommandOptions } from "./client.js";
+export type {
+  AgentSource,
+  SessionView,
+  CommandOptions,
+  SessionSandbox,
+} from "./client.js";
 export { connectAgents } from "./executor.js";
 export type { ConnectOptions, AgentConnection } from "./executor.js";
+export type {
+  ExecuteActionOptions,
+  ExecutableDefinition,
+} from "./execute-action.js";
 export { resolveConnection, ConnectionError } from "./connection.js";
 export type { ResolvedConnection } from "./connection.js";
 export { deriveExecutorToken } from "./derived-credentials.js";
@@ -92,4 +124,12 @@ export type {
   SandboxCapability,
   SandboxCapabilityOptions,
   SandboxOptions,
+  ActionSandbox,
+  ActionSandboxToolResult,
+  CreateActionSandboxOptions,
+} from "./sandbox/index.js";
+export {
+  createActionSandbox,
+  definitionDeclaresSandbox,
+  isActionSandboxTool,
 } from "./sandbox/index.js";

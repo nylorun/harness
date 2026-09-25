@@ -172,6 +172,48 @@ export {
 } from "./definition/schema.js";
 export { implementationsFor, bindingFromAgent } from "./definition/binding.js";
 export type { AgentBinding } from "./definition/binding.js";
+export {
+  Loop,
+  Chain,
+  Switch,
+  Parallel,
+  Map,
+  VerdictSchema,
+  isVerdict,
+  withInstructions,
+  withoutTools,
+  WorkflowBuildError,
+  isSlot,
+  isBuiltWorkflow,
+} from "./definition/workflow/index.js";
+export type {
+  BuiltWorkflow,
+  OutputOf,
+  InputOf,
+  LoopOptions,
+  LoopRunnable,
+  LoopVerify,
+  LoopVerifyFn,
+  LoopDecideFn,
+  LoopVerifyArgs,
+  LoopDecideArgs,
+  LoopDecision,
+  ChainOptions,
+  ChainStep,
+  ChainResults,
+  ChainSlot,
+  SwitchOptions,
+  SwitchCases,
+  ParallelOptions,
+  ParallelBranches,
+  MapOptions,
+  MapOver,
+  Slot,
+  SlotInputArgs,
+  WorkflowRunnable,
+} from "./definition/workflow/index.js";
+export { isVariantOf } from "./definition/variant.js";
+export type { Verdict, WorkflowBinding, WorkflowManifest } from "./types/workflow.js";
 export type {
   BoundMiddleware,
   BoundToolDefinition,

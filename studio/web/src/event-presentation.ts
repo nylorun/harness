@@ -48,6 +48,16 @@ const LABELS: Readonly<Record<string, string>> = {
   "effect.uncertain": "Effect uncertain",
   "delegation.started": "Delegation started",
   "delegation.completed": "Delegation completed",
+  "node.started": "Node started",
+  "node.completed": "Node completed",
+  "node.failed": "Node failed",
+  "node.agent": "Node agent",
+  "switch.selected": "Switch selected",
+  "map.items": "Map items",
+  "loop.iteration": "Loop iteration",
+  "loop.waiting": "Loop waiting",
+  "loop.verified": "Loop verified",
+  "loop.decided": "Loop decided",
 };
 
 /** The agent used as a tool that an event belongs to; undefined for the session's root agent. */
@@ -132,6 +142,33 @@ export function eventSummary(event: Pick<LiveEvent, "type" | "payload">): string
         payload.message,
         text(payload.effectId, "Effect became uncertain."),
       );
+    case "node.started":
+      return `${text(payload.path, "node")} · ${text(payload.kind, "started")}`;
+    case "node.completed":
+      return `${text(payload.path, "node")} completed`;
+    case "node.failed": {
+      const error = record(payload.error);
+      return `${text(payload.path, "node")}: ${text(error.message, text(error.code, "failed"))}`;
+    }
+    case "node.agent":
+      return `${text(payload.path, "node")} → ${text(payload.sessionId, "session")}`;
+    case "switch.selected":
+      return `${text(payload.path, "switch")} → ${text(payload.case, "case")}`;
+    case "map.items":
+      return `${text(payload.path, "map")}: ${String(payload.count ?? 0)} items`;
+    case "loop.iteration":
+      return `${text(payload.path, "loop")} #${String(payload.n ?? "?")}`;
+    case "loop.waiting":
+      return `${text(payload.path, "loop")} #${String(payload.n ?? "?")} waiting`;
+    case "loop.verified":
+      return `${text(payload.path, "loop")} #${String(payload.n ?? "?")}: ${
+        payload.pass === true ? "pass" : "fail"
+      }`;
+    case "loop.decided":
+      return `${text(payload.path, "loop")} #${String(payload.n ?? "?")} → ${text(
+        payload.next,
+        "?",
+      )}${payload.patched === true ? " (patched)" : ""}`;
     default:
       return compact(event.payload);
   }
