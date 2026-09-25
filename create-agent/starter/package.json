@@ -21,7 +21,7 @@
     "@nylorun/cli": "{{CLI_VERSION}}",
     "@nylorun/studio": "{{STUDIO_VERSION}}",
     "@types/node": "^22.18.0",
-    "tsx": "^4.20.6",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
 }
