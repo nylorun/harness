@@ -40,8 +40,9 @@ other packages.
 
 **Prerequisites**: What a developer installs before using the Runtime: Node 24
 or newer, and `@nylorun/runtime` (`npm install --global @nylorun/runtime`, or a
-project devDependency). No client downloads either; a missing prerequisite is
-an error naming the install command.
+project devDependency), on macOS or Linux; Windows developers use WSL2. No
+client downloads either; a missing prerequisite is an error naming the install
+command.
 _Avoid_: "bootstrap" for installing the Runtime.
 
 **Local Host settings**: `host.json` and `host-credentials.json` in the Host

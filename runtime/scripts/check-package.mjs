@@ -11,7 +11,7 @@ if (!readFileSync("dist/launcher/main.js", "utf8").startsWith("#!/usr/bin/env no
   throw new Error("dist/launcher/main.js must start with a node shebang.");
 const cache = mkdtempSync(join(tmpdir(), "nylorun-runtime-pack-"));
 const output = execFileSync(
-  process.platform === "win32" ? "npm.cmd" : "npm",
+  "npm",
   ["pack", "--dry-run", "--json", "--ignore-scripts"],
   { encoding: "utf8", env: { ...process.env, npm_config_cache: cache } },
 );

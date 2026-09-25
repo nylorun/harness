@@ -57,16 +57,12 @@ export async function main(
 }
 
 const entry = process.argv[1];
-// Windows argv paths use backslashes; normalize before suffix checks so the
-// npm `.cmd` shim (`node.exe …\launcher\main.js`) still counts as the entry.
-// POSIX npm installs link `bin/nylorun-runtime` to this file.
-const normalizedEntry = entry?.replaceAll("\\", "/");
+// npm installs link `bin/nylorun-runtime` to this file.
 const isEntry =
-  normalizedEntry !== undefined &&
-  (normalizedEntry.endsWith("launcher/main.ts") ||
-    normalizedEntry.endsWith("launcher/main.js") ||
-    normalizedEntry.endsWith("nylorun-runtime") ||
-    normalizedEntry.endsWith("nylorun-runtime.cmd"));
+  entry !== undefined &&
+  (entry.endsWith("launcher/main.ts") ||
+    entry.endsWith("launcher/main.js") ||
+    entry.endsWith("nylorun-runtime"));
 
 if (isEntry) {
   main().then((code) => {

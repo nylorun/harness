@@ -5,7 +5,9 @@ only among Nylorun packages — it runs the installed Runtime's **launcher** as 
 process and never imports `@nylorun/runtime`. Vocabulary:
 [runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
 
-Prerequisites, installed by the developer (the CLI never downloads them):
+Prerequisites, installed by the developer (the CLI never downloads them). On
+Windows, install them inside [WSL2](https://learn.microsoft.com/windows/wsl/install); native Windows is not
+supported.
 
 ```sh
 node --version                            # 24 or newer

@@ -19,7 +19,7 @@ export function npmCli() {
       .split(delimiter)
       .flatMap((path) => [
         join(path, "node_modules/npm/bin/npm-cli.js"),
-        ...(process.platform === "win32" ? [] : [join(path, "npm")]),
+        join(path, "npm"),
       ]),
   ];
   const found = candidates.find((path) => path && existsSync(path));

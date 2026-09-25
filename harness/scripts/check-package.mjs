@@ -66,12 +66,11 @@ for (const file of sourceFiles("src").filter((path) => path.endsWith(".ts"))) {
 
 const cache = mkdtempSync(join(tmpdir(), "nylo-harness-pack-"));
 try {
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const npm = "npm";
   const output = execFileSync(npm, ["pack", "--json", "--dry-run", "--ignore-scripts"], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: { ...process.env, npm_config_cache: cache },
-    shell: process.platform === "win32",
   });
   const files = JSON.parse(output)[0].files.map((entry) => entry.path);
   const allowed = (path) =>

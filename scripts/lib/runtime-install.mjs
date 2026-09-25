@@ -35,7 +35,7 @@ export async function installRuntime(
       ],
       { capture: true, env },
     );
-    bin = process.platform === "win32" ? prefix : join(prefix, "bin");
+    bin = join(prefix, "bin");
   } else {
     await writeFile(
       join(prefix, "package.json"),

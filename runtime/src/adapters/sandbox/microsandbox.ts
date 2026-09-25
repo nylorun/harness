@@ -48,7 +48,6 @@ function platformReason(): string | undefined {
       return "no usable /dev/kvm (enable KVM or nested virtualisation)";
     }
   }
-  if (process.platform === "win32") return "not yet enabled on Windows";
   return `unsupported platform ${process.platform}`;
 }
 

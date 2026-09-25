@@ -26,7 +26,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { readFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { openBrowser } from "./browser.js";
 import { fileURLToPath } from "node:url";
 
 export type StudioTenant = Readonly<{ id: string; name: string }>;
@@ -119,19 +119,6 @@ function reject(
   extraHeaders: Readonly<Record<string, string>> = {},
 ): void {
   json(response, status, { error: { message } }, extraHeaders);
-}
-
-function browser(address: string): void {
-  const command =
-    process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? "cmd"
-        : "xdg-open";
-  const args =
-    process.platform === "win32" ? ["/c", "start", "", address] : [address];
-  const child = spawn(command, args, { detached: true, stdio: "ignore" });
-  child.unref();
 }
 
 function loopbackHosts(port: number): ReadonlySet<string> {
@@ -511,7 +498,7 @@ export async function startStudio(
     get tenant() {
       return studioTenant;
     },
-    open: () => browser(launchUrl),
+    open: () => openBrowser(launchUrl),
     close: async () => {
       await Promise.all(
         bound.servers.map(

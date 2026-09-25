@@ -11,7 +11,7 @@ if (readFileSync("LICENSE", "utf8") !== readFileSync("../LICENSE", "utf8"))
 const cache = mkdtempSync(join(tmpdir(), "nylorun-create-agent-pack-"));
 try {
   const output = execFileSync(
-    process.platform === "win32" ? "npm.cmd" : "npm",
+    "npm",
     ["pack", "--json", "--dry-run", "--ignore-scripts"],
     { encoding: "utf8", env: { ...process.env, npm_config_cache: cache } },
   );

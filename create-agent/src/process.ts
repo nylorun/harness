@@ -10,26 +10,15 @@ export class CreationCancelled extends Error {
   }
 }
 
-/**
- * Run the npm that launched this creator. `npm create` sets npm_execpath, which
- * avoids the Windows `.cmd` shim (Node rejects spawning it without a shell).
- * Arguments are fixed literals, so the shell fallback carries no injection risk.
- */
+/** Run the npm that launched this creator (`npm create` sets npm_execpath). */
 function npmInvocation(args: readonly string[]): {
   command: string;
   args: string[];
-  shell: boolean;
 } {
   const execPath = process.env.npm_execpath;
   if (execPath && /\.[cm]?js$/u.test(execPath))
-    return {
-      command: process.execPath,
-      args: [execPath, ...args],
-      shell: false,
-    };
-  if (process.platform === "win32")
-    return { command: "npm.cmd", args: [...args], shell: true };
-  return { command: "npm", args: [...args], shell: false };
+    return { command: process.execPath, args: [execPath, ...args] };
+  return { command: "npm", args: [...args] };
 }
 
 /** Own npm and its descendants, including authentication started by a script. */
@@ -41,14 +30,11 @@ export async function runCommand(
 ): Promise<Process> {
   signal.throwIfAborted();
   const invocation =
-    command === "npm"
-      ? npmInvocation(args)
-      : { command, args: [...args], shell: false };
+    command === "npm" ? npmInvocation(args) : { command, args: [...args] };
   const child = spawn(invocation.command, invocation.args, {
     cwd: directory,
     stdio: "inherit",
-    detached: process.platform !== "win32",
-    shell: invocation.shell,
+    detached: true,
   });
   let shutdown: Promise<void> | undefined;
   const stop = (requested: NodeJS.Signals) => {
@@ -83,18 +69,6 @@ export async function runCommand(
 
   async function stopTree(requested: NodeJS.Signals): Promise<void> {
     if (!child.pid) return;
-    if (process.platform === "win32") {
-      await new Promise<void>((resolve) => {
-        const killer = spawn(
-          "taskkill",
-          ["/pid", String(child.pid), "/T", "/F"],
-          { stdio: "ignore" },
-        );
-        killer.once("error", () => resolve());
-        killer.once("close", () => resolve());
-      });
-      return;
-    }
     const send = (value: NodeJS.Signals | 0) => {
       try {
         process.kill(-child.pid!, value);

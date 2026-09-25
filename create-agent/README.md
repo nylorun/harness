@@ -1,7 +1,8 @@
 # @nylorun/create-agent
 
 Install the prerequisites first (the creator checks them and never installs
-them):
+them). On Windows, work inside [WSL2](https://learn.microsoft.com/windows/wsl/install); native Windows is not
+supported.
 
 ```sh
 node --version                                 # 24 or newer
