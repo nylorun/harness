@@ -4,6 +4,7 @@
  */
 import {
   isSandboxToolName,
+  type SandboxManifest,
   type SandboxToolName,
 } from "@nylorun/core/define";
 import type { Action } from "@nylorun/core/contracts";
