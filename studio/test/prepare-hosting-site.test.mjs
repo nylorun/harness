@@ -40,9 +40,11 @@ test("prepareHostingSite builds /v/<version>/, welcome root, and keeps I12 immut
     assert.ok(readFileSync(join(outDir, "v", version, "index.html")));
     assert.ok(readFileSync(join(outDir, "v", version, "bundle.tar")));
     const root = readFileSync(join(outDir, "index.html"), "utf8");
-    assert.match(root, /welcome to Nylorun Studio/i);
+    assert.match(root, /Nylorun Studio/);
     assert.match(root, /welcome\.css/);
     assert.match(root, /local network access/i);
+    assert.match(root, /target="_blank"/);
+    assert.doesNotMatch(root, /Hey\s*[—-]|welcome to/i);
     assert.ok(readFileSync(join(outDir, "welcome.css")));
     assert.ok(readFileSync(join(outDir, "welcome.js")));
     const manifest = JSON.parse(readFileSync(join(outDir, "versions.json"), "utf8"));
@@ -64,7 +66,7 @@ test("prepareHostingSite builds /v/<version>/, welcome root, and keeps I12 immut
     });
     assert.match(
       readFileSync(join(againDir, "index.html"), "utf8"),
-      /welcome to Nylorun Studio/i,
+      /Nylorun Studio/,
     );
     assert.ok(readFileSync(join(againDir, "v", version, "index.html")));
   } finally {
