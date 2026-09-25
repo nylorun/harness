@@ -240,7 +240,7 @@ test("AC4/I4: OPTIONS CORS for hosted origin; evil origin gets 403 without Allow
         );
         assert.equal(
           ok.headers.get("access-control-allow-headers"),
-          "authorization, content-type, accept, last-event-id",
+          "authorization, content-type, accept, last-event-id, nylorun-tenant, nylorun-protocol",
         );
         assert.equal(
           ok.headers.get("access-control-allow-private-network"),

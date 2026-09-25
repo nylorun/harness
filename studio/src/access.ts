@@ -56,7 +56,7 @@ export function preflightHeaders(
     "access-control-allow-origin": origin,
     "access-control-allow-methods": "GET, PUT, POST, DELETE",
     "access-control-allow-headers":
-      "authorization, content-type, accept, last-event-id",
+      "authorization, content-type, accept, last-event-id, nylorun-tenant, nylorun-protocol",
     "access-control-allow-private-network": "true",
     vary: "Origin",
     "access-control-max-age": "600",
