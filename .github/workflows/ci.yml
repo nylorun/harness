@@ -58,13 +58,12 @@ jobs:
           if [[ -n "$changed" ]]; then
             npm run release:check -- --built
           fi
-  test:
+  # WS-H packed-package acceptance (H1–H9) under a temporary Host root.
+  acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
@@ -74,18 +73,18 @@ jobs:
             examples/package-lock.json
       - run: npm install --global npm@11.15.0
       - run: npm run setup
-      - run: npm run test:tooling
       - run: node scripts/acceptance/tenants.mjs
-  # J5: desktop contract smoke on the three desktop operating systems. It
-  # installs @nylorun/runtime like a developer (npm, onto PATH), then runs the
-  # launcher up / status / down. Launcher unit tests cover per-OS process
-  # handling (process groups vs taskkill, .cmd shims).
-  desktop-contract:
+  # Desktop OSes: J5 desktop contract (installs @nylorun/runtime like a
+  # developer, then runs its launcher), launcher unit tests (process groups vs
+  # taskkill, .cmd shims) and supervisor tooling. Linux runs all of these in
+  # `check` via the workspace tests and test:tooling.
+  desktop:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -102,7 +101,8 @@ jobs:
       - run: npm run build --workspace @nylorun/agents
       - run: npm run build --workspace @nylorun/admin
       - run: npm run build --workspace @nylorun/runtime
-      - run: node --test scripts/test/desktop-contract.test.mjs
+      - name: Desktop contract
+        run: node --test scripts/test/desktop-contract.test.mjs
       - name: Launcher unit tests
         shell: bash
         run: |
@@ -111,27 +111,16 @@ jobs:
           else
             npm test --workspace @nylorun/runtime -- test/launcher
           fi
-  supervisor:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .node-version
-          cache: npm
-      - run: npm install --global npm@11.15.0
-      - run: npm ci
-      - run: node --test scripts/test/processes.test.mjs scripts/test/development.test.mjs scripts/test/release.test.mjs scripts/test/version-policy.test.mjs
+      - name: Supervisor and release tooling
+        run: node --test scripts/test/processes.test.mjs scripts/test/development.test.mjs scripts/test/release.test.mjs scripts/test/version-policy.test.mjs
+  # Newest Node line with its bundled npm, as a consumer would run it.
   consumers:
     strategy:
       fail-fast: false
       matrix:
-        node: [24.15.0, 26.x]
+        node: [26.x]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -143,20 +132,12 @@ jobs:
       - run: npm run check --workspaces
   ci:
     if: always()
-    needs: [check, test, desktop-contract, supervisor, consumers]
+    needs: [check, acceptance, desktop, consumers]
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI job to pass
-        env:
-          CHECK_RESULT: ${{ needs.check.result }}
-          TEST_RESULT: ${{ needs.test.result }}
-          DESKTOP_CONTRACT_RESULT: ${{ needs.desktop-contract.result }}
-          SUPERVISOR_RESULT: ${{ needs.supervisor.result }}
-          CONSUMERS_RESULT: ${{ needs.consumers.result }}
-        shell: bash
-        run: |
-          [[ "$CHECK_RESULT" == success ]]
-          [[ "$TEST_RESULT" == success ]]
-          [[ "$DESKTOP_CONTRACT_RESULT" == success ]]
-          [[ "$SUPERVISOR_RESULT" == success ]]
-          [[ "$CONSUMERS_RESULT" == success ]]
+        if: >-
+          contains(needs.*.result, 'failure') ||
+          contains(needs.*.result, 'cancelled') ||
+          contains(needs.*.result, 'skipped')
+        run: exit 1
