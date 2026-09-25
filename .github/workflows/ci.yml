@@ -33,9 +33,6 @@ jobs:
     runs-on: ubuntu-latest
     # Bound the job so a wedged runner cannot block the PR matrix indefinitely.
     timeout-minutes: 45
-    env:
-      # ubuntu-latest ships Google Chrome; no Playwright browser download needed.
-      NYLORUN_CHROME_PATH: /usr/bin/google-chrome
     steps:
       - uses: actions/checkout@v6
         with:
@@ -49,6 +46,9 @@ jobs:
             examples/package-lock.json
       - run: npm install --global npm@11.15.0
       - run: npm run setup
+      # Playwright's own Chromium: the runner's Google Chrome left Studio's
+      # message box disabled in the starter smoke (#128).
+      - run: npx playwright-core install --with-deps chromium
       - name: Smoke starter
         # Healthy smoke is ~2–4 min; in-process deadline is 15m. Keep Actions
         # above that so the script can report its own abort reason.
