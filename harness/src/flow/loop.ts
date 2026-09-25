@@ -1,5 +1,5 @@
-import { HarnessError } from "@nylorun/core/define";
-import type { JsonValue, Verdict, WorkflowManifest } from "@nylorun/core/define";
+import { HarnessError, isVariantOf } from "@nylorun/core/define";
+import type { AgentManifest, JsonValue, Verdict, WorkflowManifest } from "@nylorun/core/define";
 import type { WorkflowLoopNode, WorkflowNode } from "@nylorun/core";
 import type { DurableHost } from "../run/durable.js";
 import { HostSuspension } from "../loop/host-suspension.js";
@@ -18,7 +18,44 @@ type LoopHistoryEntry = {
 };
 
 type Decision =
-  { readonly input: JsonValue; readonly agent?: unknown } | { readonly output: JsonValue };
+  { readonly input: JsonValue; readonly agent?: AgentManifest } | { readonly output: JsonValue };
+
+/** Host may wrap agent-effect outcomes so the Loop learns the turn's manifest. */
+export const AGENT_TURN_MARKER = "__nylorunAgentTurn" as const;
+
+export type AgentTurnValue = {
+  readonly [AGENT_TURN_MARKER]: 1;
+  readonly output: JsonValue;
+  readonly agent: AgentManifest;
+};
+
+export function agentTurnValue(output: JsonValue, agent: AgentManifest): AgentTurnValue {
+  return { [AGENT_TURN_MARKER]: 1, output, agent };
+}
+
+function readAgentTurn(value: unknown): {
+  output: JsonValue;
+  agent?: AgentManifest;
+} {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as AgentTurnValue)[AGENT_TURN_MARKER] === 1 &&
+    "output" in value &&
+    "agent" in value
+  ) {
+    return {
+      output: (value as AgentTurnValue).output,
+      agent: (value as AgentTurnValue).agent,
+    };
+  }
+  return { output: value as JsonValue };
+}
+
+function invalidAgent(path: string, message: string): never {
+  throw new FlowNodeError({ code: "loop.invalid-agent", message, path });
+}
 
 /**
  * Interpret a root Loop node. Returns effects only; the host journals outcomes.
@@ -72,7 +109,7 @@ export async function runLoop(options: {
 
 /**
  * Nested or root Loop body: run → verify → decide until `{ output }` or stop.
- * Patching (`decision.agent`) is L5 — ignored here beyond validating presence.
+ * Agent turn pinning / decide patches (`decision.agent`) are L5.
  */
 export async function runLoopNode(
   ctx: FlowContext,
@@ -84,6 +121,10 @@ export async function runLoopNode(
   let currentInput: JsonValue = input;
   const history: LoopHistoryEntry[] = [];
   const loopInput = input;
+  const runIsAgent = "agent" in loop.run;
+  // Session pin (first turn's manifest) and the patch carried within this run.
+  let pinnedAgent: AgentManifest | undefined;
+  let currentAgent: AgentManifest | undefined;
 
   for (;;) {
     if (ctx.signal?.aborted)
@@ -93,9 +134,34 @@ export async function runLoopNode(
     const iterations = ctx.iterationsString();
 
     try {
-      const runOutput = await runNode(ctx, loop.run, runPath(path, loop.run), currentInput, {
-        ownerInput: loopInput,
-      });
+      let runOutput: JsonValue;
+
+      if (runIsAgent) {
+        const agentId = loop.run.agent;
+        const agentPath = runPath(path, loop.run);
+        const rawAgent = await ctx.effect(
+          "agent",
+          {
+            agentId,
+            input: currentInput,
+            path: agentPath,
+            ...(currentAgent ? { manifest: currentAgent } : {}),
+          },
+          { path: agentPath, key: nodeKeyOf(agentPath), iterations },
+          { loopPath: path, n: iteration },
+        );
+        const turned = readAgentTurn(rawAgent);
+        runOutput = turned.output;
+        if (turned.agent) {
+          // First turn establishes the session pin; later turns may be variants.
+          pinnedAgent ??= turned.agent;
+          currentAgent = turned.agent;
+        }
+      } else {
+        runOutput = await runNode(ctx, loop.run, runPath(path, loop.run), currentInput, {
+          ownerInput: loopInput,
+        });
+      }
 
       const verdict = await runVerify(ctx, loop.verify, path, {
         input: loopInput,
@@ -113,6 +179,7 @@ export async function runLoopNode(
             iteration,
             input: loopInput,
             history,
+            ...(currentAgent ? { agent: currentAgent } : {}),
           },
           { path, key: `${nodeKeyOf(path)}/decide`, iterations },
           { loopPath: path, n: iteration, role: "decide" },
@@ -147,9 +214,26 @@ export async function runLoopNode(
           "Decide returned neither input nor output",
         );
 
-      // L5 owns turn-manifest patches; `{ agent }` is accepted but not applied here.
+      const next = decision as {
+        readonly input: JsonValue;
+        readonly agent?: AgentManifest;
+      };
+
+      if (next.agent !== undefined) {
+        if (!runIsAgent) {
+          invalidAgent(path, "Decide returned agent but Loop.run is not an agent");
+        }
+        if (pinnedAgent && !isVariantOf(next.agent, pinnedAgent)) {
+          invalidAgent(
+            path,
+            "Decide returned a manifest that is not a variant of the pinned agent",
+          );
+        }
+        currentAgent = next.agent;
+      }
+
       history.push({ iteration, output: runOutput, verdict });
-      currentInput = decision.input as JsonValue;
+      currentInput = next.input;
       iteration += 1;
     } finally {
       ctx.iterations.pop();

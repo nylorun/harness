@@ -77,4 +77,5 @@ export type {
 } from "./durable.js";
 export type { FlowCheckpoint } from "../flow/checkpoint.js";
 export type { FlowDurableResult, FlowRunResult } from "../flow/types.js";
+export { agentTurnValue, AGENT_TURN_MARKER, type AgentTurnValue } from "../flow/loop.js";
 export type { ModelAdapter, ModelCandidate, ModelCall, ModelRequest } from "@nylorun/core/define";
