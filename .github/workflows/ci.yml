@@ -132,7 +132,16 @@ jobs:
           "$LAUNCHER" --home "$NYLORUN_HOME" --json status
           "$LAUNCHER" --home "$NYLORUN_HOME" --json down --force
       - name: Launcher unit tests
-        run: npm test --workspace @nylorun/runtime -- test/launcher
+        shell: bash
+        run: |
+          # Windows occasionally aborts a vitest fork worker mid-lifecycle
+          # (exit 3221226505 / STATUS_STACK_BUFFER_OVERRUN) after tests passed.
+          # Unrelated to Studio; serialize + retry to absorb the flake.
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            npm test --workspace @nylorun/runtime -- test/launcher --pool=forks --maxWorkers=1 --retry=2
+          else
+            npm test --workspace @nylorun/runtime -- test/launcher
+          fi
   # darwin-x64 (macos-13) is omitted from required CI: GitHub-hosted macos-13
   # capacity has been unavailable for hours on #110 (forever-queued legs block
   # merge). Re-add when macos-13 runners are obtainable; darwin-arm64 remains.

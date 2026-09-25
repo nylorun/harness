@@ -253,6 +253,11 @@ try {
   ).json();
   assert.equal(hello.studioProtocol, 1);
   assert.equal(hello.mode, "local");
+  assert.equal(
+    hello.runtime?.compatible,
+    true,
+    `Studio hello runtime incompatible: ${hello.runtime?.message ?? "(no message)"}`,
+  );
   assert.ok(!JSON.stringify(hello).includes(credentials.applicationKey));
   assert.ok(!JSON.stringify(hello).includes("executor"));
   // Token gate (I3): unauthenticated /_studio/* → 401 before allowlist 404.
@@ -283,8 +288,27 @@ try {
   const page = await browser.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto(launchUrl);
-  await page.getByRole("button", { name: "New session", exact: true }).click();
+  assert.match(
+    launchUrl,
+    /^http:\/\/127\.0\.0\.1:\d+\/v\/[^/#]+\/#/,
+    `local --local-ui launchUrl must be versioned on 127.0.0.1: ${launchUrl}`,
+  );
+  await page.goto(launchUrl, { waitUntil: "domcontentloaded" });
+  try {
+    await page
+      .getByRole("button", { name: "New session", exact: true })
+      .click({ timeout: 30_000 });
+  } catch (error) {
+    const text = await page.locator("body").innerText().catch(() => "(no body)");
+    await mkdir(join(root, ".tmp/release-local"), { recursive: true });
+    await page.screenshot({
+      path: join(root, ".tmp/release-local/studio-boot-fail.png"),
+      fullPage: true,
+    });
+    throw new Error(
+      `New session missing after goto ${launchUrl}\nURL now: ${page.url()}\npageerrors: ${JSON.stringify(errors)}\nbody:\n${text.slice(0, 2000)}\n${error instanceof Error ? error.message : error}`,
+    );
+  }
   await page
     .getByRole("textbox", { name: "Message" })
     .fill("Look up order demo-123");

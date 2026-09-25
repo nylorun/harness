@@ -483,8 +483,14 @@ export async function startStudio(
   };
 
   const bound = await listenForStudio(handle, options.port);
-  origin = `http://localhost:${bound.port}`;
-  if (ui === "local") allowedOrigins.add(origin);
+  // Proxy always binds loopback; advertise 127.0.0.1 so the local dashboard is
+  // same-origin with proxy-client fetches (PROXY_HOST). localhost↔127.0.0.1 is
+  // cross-origin and breaks headless Chromium (LNA / CORS) in create-agent smoke.
+  origin = `http://127.0.0.1:${bound.port}`;
+  if (ui === "local") {
+    allowedOrigins.add(origin);
+    allowedOrigins.add(`http://localhost:${bound.port}`);
+  }
   const address = origin;
   const fragment = pairingFragment({
     protocol: STUDIO_PROTOCOL,
