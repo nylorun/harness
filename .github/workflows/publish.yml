@@ -181,31 +181,31 @@ jobs:
             npm run build --workspace @nylorun/studio
           fi
           test -f studio/dist/ui-digest.json
+      # Do not gate on secrets.* in `if` (GitHub rejects it). Always attempt auth;
+      # deploy-studio.mjs soft-exits 78 when GOOGLE_APPLICATION_CREDENTIALS / FIREBASE_TOKEN missing.
       - name: Authenticate to Google Cloud (service account)
         id: auth
         continue-on-error: true
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       - name: Deploy Studio UI to Firebase Hosting
         id: deploy
+        continue-on-error: true
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: node studio/scripts/deploy-studio.mjs
-        continue-on-error: true
       - name: Report deploy outcome
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        if: always()
         run: |
           if [[ "${{ steps.deploy.outcome }}" == "success" ]]; then
             echo "Studio hosting deploy succeeded."
             exit 0
           fi
-          if [[ -n "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" || -n "$FIREBASE_TOKEN" ]]; then
-            echo "deploy-studio failed while credentials were configured" >&2
-            exit 1
+          if [[ "${{ steps.auth.outcome }}" != "success" ]]; then
+            echo "::warning::Studio Firebase auth unavailable (Environment 'studio' secret missing or invalid)."
+            echo "npm publish already completed; retry hosting via Deploy Studio hosting (no npm)."
+            exit 0
           fi
-          echo "::warning::Studio Firebase credentials not in Environment 'studio' yet."
-          echo "Rahul: complete hosted-studio-firebase-handoff.md (DNS + FIREBASE_SERVICE_ACCOUNT)."
-          echo "npm publish already completed; hosting can be retried alone."
+          echo "deploy-studio failed while auth succeeded" >&2
+          exit 1
