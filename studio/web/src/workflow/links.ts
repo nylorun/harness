@@ -1,8 +1,9 @@
 import { payloadOf, type EventLike, type WorkflowLink } from "./types.ts";
 
 /**
- * Build agent↔workflow links from `node.agent` / `loop.iteration` events and
- * optional Runtime links-index records (fixtures when the public API is absent).
+ * Build agent↔workflow links from `node.agent` events and optional Runtime
+ * links-index records (fixtures when the public API is absent).
+ * Path is the agent node path (workflows.md §7).
  */
 export function linksFromEvents(
   events: readonly EventLike[],
@@ -11,7 +12,7 @@ export function linksFromEvents(
 ): ReadonlyMap<string, WorkflowLink> {
   const links = new Map<string, WorkflowLink>();
   for (const event of events) {
-    if (event.type !== "node.agent" && event.type !== "loop.iteration") continue;
+    if (event.type !== "node.agent") continue;
     const payload = payloadOf(event);
     const sessionId =
       typeof payload.sessionId === "string" ? payload.sessionId : undefined;

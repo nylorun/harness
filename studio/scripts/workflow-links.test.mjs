@@ -38,7 +38,7 @@ test("SD-P9/WF-C10: linksFromEvents builds agent→workflow links", () => {
   const link = workflowLinkFor("sess-coder", links);
   assert.deepEqual(link, {
     workflowSessionId: "wf-session-1",
-    path: "fix-tests",
+    path: "fix-tests/coder",
     workflowAgentId: "fix-tests",
   });
 });
