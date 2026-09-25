@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CirclePlus,
   Database,
+  GitBranch,
   KeyRound,
   LoaderCircle,
   ServerOff,
@@ -128,7 +129,11 @@ function AgentNavigation({
       <SidebarMenuItem>
         <SidebarMenuButton asChild isActive={agent.id === activeAgentId} tooltip={agent.name}>
           <Link to={agentPath(agent.id)}>
-            <Bot />
+            {agent.kind === "workflow" || agent.manifest.kind === "workflow" ? (
+              <GitBranch />
+            ) : (
+              <Bot />
+            )}
             <span>{agent.name}</span>
           </Link>
         </SidebarMenuButton>
@@ -262,7 +267,7 @@ export function AppSidebar({
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Agents</SidebarGroupLabel>
+          <SidebarGroupLabel>Agents & workflows</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {connection.agents.map((agent) => (
