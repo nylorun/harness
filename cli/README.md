@@ -15,14 +15,16 @@ nylorun runtime restart            # restart onto the CLI's pinned Runtime build
 nylorun runtime run                # attached foreground Host
 nylorun dev [entry]                # up → link/create Tenant → tsx watch entry
 nylorun dev --ephemeral            # temporary Host root + one Tenant
+nylorun dev --local-ui             # also start Studio with a local dashboard
+nylorun studio [--local-ui]        # start Studio (launch URL + proxy token)
 nylorun configure                  # replace model credential on the linked Tenant
 nylorun tenant list|delete|status|reset
 nylorun doctor sandbox             # sandbox backend via Tenant API
 ```
 
-Removed in this release: `nylorun serve`, `nylorun studio` (use `nylorun-studio`),
-and the in-process Project runner. Production `start` is
+`nylorun serve` remains removed. Production `start` is
 `node dist/src/main.js` with `connectAgents` in the application.
+`--local-ui` cannot be combined with `--no-studio`.
 
 ## Runtime builds and the launcher
 
@@ -36,7 +38,10 @@ launcher contract.
 `@nylorun/admin` when the Project has no link, writes format-1 link +
 credentials, and spawns `tsx watch <entry>` with
 `NYLORUN_RUNTIME_URL`, `NYLORUN_TENANT` and `NYLORUN_SERVER_KEY`. The ready
-banner hints `Studio: npm run studio`. Ctrl-C stops the child; the Host stays up.
+banner hints `Studio: npm run studio`, or prints the Studio `launchUrl` when
+started with `--local-ui`. Ctrl-C stops the child; the Host stays up.
+`nylorun studio` resolves `@nylorun/studio`, supplies `cacheDir` from the Host
+root (`NYLORUN_HOME` / `~/.nylorun`, never cwd), and prints `launchUrl`.
 
 ## Host root, Tenants and Project link
 

@@ -118,7 +118,7 @@ beforeEach(async () => {
   );
 });
 
-async function fixture(app = true) {
+async function fixture(app = true, studio = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "nylorun-dev-")));
   roots.push(root);
   await writeFile(
@@ -149,12 +149,42 @@ setInterval(()=>{}, 1000);
 `,
     );
   }
+  if (studio) {
+    await mkdir(join(root, "node_modules/@nylorun/studio"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(root, "node_modules/@nylorun/studio/package.json"),
+      '{"type":"module","exports":"./index.js"}',
+    );
+    await writeFile(
+      join(root, "node_modules/@nylorun/studio/index.js"),
+      `
+import { writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
+export async function startStudio(options) {
+  writeFileSync(join(projectRoot, 'studio.json'), JSON.stringify(options));
+  const timer = setInterval(() => {}, 1000);
+  return {
+    address: 'http://localhost:4161',
+    launchUrl: 'http://localhost:4161/#studio=1&port=4161&token=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    close: async () => {
+      clearInterval(timer);
+      writeFileSync(join(projectRoot, 'studio-stopped'), 'yes');
+    },
+  };
+}
+`,
+    );
+  }
   await mkdir(join(root, "src"), { recursive: true });
   await writeFile(join(root, "src/main.ts"), `console.log("main");\n`);
   return root;
 }
 
-it("F2-1: preflight requires tsx only (no Studio) and defaults entry", async () => {
+it("F2-1: preflight requires tsx; --local-ui requires Studio", async () => {
   const root = await fixture(false);
   const previous = process.cwd();
   try {
@@ -163,17 +193,34 @@ it("F2-1: preflight requires tsx only (no Studio) and defaults entry", async () 
   } finally {
     process.chdir(previous);
   }
-  const withTsx = await fixture(true);
+  const withTsx = await fixture(true, false);
   try {
     process.chdir(withTsx);
     expect(developmentPreflight([])).toMatchObject({
       entry: "src/main.ts",
       ephemeral: false,
+      localUi: false,
+      studio: false,
     });
     expect(developmentPreflight(["agents/index.ts"]).entry).toBe(
       "agents/index.ts",
     );
-    expect(() => developmentPreflight(["--no-studio"])).toThrow(/Usage:/);
+    expect(() => developmentPreflight(["--local-ui"])).toThrow(
+      "Install @nylorun/studio",
+    );
+    expect(() =>
+      developmentPreflight(["--local-ui", "--no-studio"]),
+    ).toThrow(/cannot be combined/);
+  } finally {
+    process.chdir(previous);
+  }
+  const withStudio = await fixture(true, true);
+  try {
+    process.chdir(withStudio);
+    expect(developmentPreflight(["--local-ui"])).toMatchObject({
+      localUi: true,
+      studio: true,
+    });
   } finally {
     process.chdir(previous);
   }
@@ -198,25 +245,71 @@ it("rejects removed --global via CLI", async () => {
   expect(output).toContain("--global was removed");
 });
 
-it("F2-5: serve and studio commands are removed", async () => {
-  const root = await fixture();
-  for (const command of ["serve", "studio"] as const) {
-    const child = spawn(process.execPath, [cli, command], {
+it("F2-5: serve command remains removed; studio is restored", async () => {
+  const root = await fixture(true, true);
+  const serve = spawn(process.execPath, [cli, "serve"], {
+    cwd: root,
+    env: { ...process.env, NYLORUN_HOME: homeRef.value },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  processes.push(serve);
+  let serveOut = "";
+  serve.stdout?.on("data", (chunk) => (serveOut += String(chunk)));
+  serve.stderr?.on("data", (chunk) => (serveOut += String(chunk)));
+  expect(
+    await new Promise<number | null>((resolve) =>
+      serve.once("close", (code) => resolve(code)),
+    ),
+  ).toBe(2);
+  expect(serveOut).toMatch(/removed/);
+
+  const studio = spawn(
+    process.execPath,
+    [cli, "studio", "--no-open", "--local-ui"],
+    {
       cwd: root,
-      env: { ...process.env, NYLORUN_HOME: homeRef.value },
+      env: {
+        ...process.env,
+        NYLORUN_HOME: homeRef.value,
+        NYLORUN_RUNTIME_URL: "http://127.0.0.1:9876",
+        NYLORUN_SERVER_KEY: "ab".repeat(32),
+        NYLORUN_TENANT: tenantId,
+      },
       stdio: ["ignore", "pipe", "pipe"],
-    });
-    processes.push(child);
-    let output = "";
-    child.stdout?.on("data", (chunk) => (output += String(chunk)));
-    child.stderr?.on("data", (chunk) => (output += String(chunk)));
-    expect(
-      await new Promise<number | null>((resolve) =>
-        child.once("close", (code) => resolve(code)),
-      ),
-    ).toBe(2);
-    expect(output).toMatch(/removed/);
-  }
+    },
+  );
+  processes.push(studio);
+  let studioOut = "";
+  studio.stdout?.on("data", (chunk) => (studioOut += String(chunk)));
+  studio.stderr?.on("data", (chunk) => (studioOut += String(chunk)));
+  await new Promise<void>((resolve, reject) => {
+    const deadline = Date.now() + 10_000;
+    const tick = () => {
+      if (studioOut.includes("Studio")) {
+        resolve();
+        return;
+      }
+      if (Date.now() > deadline)
+        reject(new Error(`studio output: ${studioOut}`));
+      else setTimeout(tick, 50);
+    };
+    tick();
+  });
+  expect(studioOut).toMatch(/Studio\s+http:\/\/localhost:4161\/#studio=1/);
+  const options = JSON.parse(
+    await readFile(join(root, "studio.json"), "utf8"),
+  ) as {
+    ui?: string;
+    cacheDir?: string;
+    open: boolean;
+  };
+  expect(options).toMatchObject({
+    ui: "local",
+    open: false,
+    cacheDir: homeRef.value,
+  });
+  studio.kill("SIGTERM");
+  await new Promise((resolve) => studio.once("close", resolve));
 });
 
 it(
@@ -254,6 +347,72 @@ it(
             expect(logs.some((line) => line.includes("(started; stays running)"))).toBe(
               true,
             );
+            resolve();
+            return;
+          } catch (error) {
+            if (Date.now() > deadline) reject(error);
+            else setTimeout(tick, 50);
+          }
+        };
+        void tick();
+      });
+    } finally {
+      console.log = original;
+      const { execSync } = await import("node:child_process");
+      try {
+        execSync(
+          `pkill -f ${JSON.stringify(join(root, "node_modules/tsx/cli.js"))} || true`,
+        );
+      } catch {
+        /* ignore */
+      }
+      await Promise.race([
+        runPromise,
+        new Promise((resolve) => setTimeout(resolve, 3_000)),
+      ]);
+    }
+  },
+);
+
+it(
+  "dev --local-ui starts Studio with launchUrl and cacheDir",
+  { timeout: 15_000 },
+  async () => {
+    const root = await fixture(true, true);
+    const logs: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    const runPromise = develop({
+      projectRoot: root,
+      home: homeRef.value,
+      flags: ["--local-ui", "--no-open"],
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const deadline = Date.now() + 10_000;
+        const tick = async () => {
+          try {
+            const options = JSON.parse(
+              await readFile(join(root, "studio.json"), "utf8"),
+            ) as {
+              ui?: string;
+              cacheDir?: string;
+              open: boolean;
+            };
+            expect(options).toMatchObject({
+              ui: "local",
+              open: false,
+              cacheDir: homeRef.value,
+            });
+            expect(
+              logs.some((line) =>
+                line.includes(
+                  "Studio        http://localhost:4161/#studio=1",
+                ),
+              ),
+            ).toBe(true);
             resolve();
             return;
           } catch (error) {

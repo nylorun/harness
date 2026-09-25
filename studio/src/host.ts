@@ -5,7 +5,7 @@ import {
   studioCorsHeaders,
   type AuthorizeResult,
 } from "./access.js";
-import { packagedWebRoot, serveLocalUi } from "./local-ui.js";
+import { resolveLocalUiRoot, serveLocalUi } from "./local-ui.js";
 import {
   HOSTED_ORIGIN,
   STUDIO_PROTOCOL,
@@ -38,7 +38,7 @@ export type StudioOptions = Readonly<{
   open?: boolean;
   /** Dashboard delivery mode. Default `"local"` until Hosted Studio I2. */
   ui?: StudioMode;
-  /** Reserved for local-mode bundle cache (WS-4). */
+  /** Host data directory for local-mode bundle cache (design §10). */
   cacheDir?: string;
   /** Non-public: one extra allowed Origin for repository Vite development. */
   extraOrigin?: string;
@@ -317,7 +317,6 @@ export async function startStudio(
   options: StudioOptions = {},
 ): Promise<StudioHost> {
   const ui: StudioMode = options.ui ?? "local";
-  const webRoot = ui === "local" ? packagedWebRoot() : undefined;
   const token = mintToken();
   const requestedAgentServerUrl =
     options.runtimeUrl === undefined
@@ -347,14 +346,22 @@ export async function startStudio(
   )
     throw new Error("extraOrigin must be a non-empty origin string");
 
+  const webRoot =
+    ui === "local"
+      ? await resolveLocalUiRoot({
+          version: PROXY_VERSION,
+          ...(options.cacheDir === undefined
+            ? {}
+            : { cacheDir: options.cacheDir }),
+        })
+      : undefined;
+
   let origin = "";
   let agentServerUrl = requestedAgentServerUrl;
   const studioTenant = Object.freeze({ id: tenant.id, name: tenant.name });
   const allowedOrigins = new Set<string>();
   if (ui === "hosted") allowedOrigins.add(HOSTED_ORIGIN);
   if (options.extraOrigin) allowedOrigins.add(options.extraOrigin);
-  // cacheDir is accepted for API stability; bundle download lands in WS-4.
-  void options.cacheDir;
 
   const handle = (request: IncomingMessage, response: ServerResponse): void => {
     void (async () => {

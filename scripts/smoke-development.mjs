@@ -1,8 +1,8 @@
 /**
  * G7 development smoke: packed create-agent starter against a local-registry
- * Runtime build — `npm run dev`, separate `nylorun-studio`, then
+ * Runtime build — `npm run dev`, separate `nylorun studio`, then
  * `npm run build` + `npm start` (`node dist/src/main.js`) with Project link env.
- * No `nylorun serve`.
+ * No `nylorun serve`. Hosted Studio: token from launchUrl; probe `/_studio/hello`.
  */
 import assert from "node:assert/strict";
 import {
@@ -32,7 +32,29 @@ let registry;
 const readyLine = (l) =>
   l.includes("Ready") || l.includes("Ctrl-C stops this Project only");
 const hostLine = (l) => /^\s*Host\s+http/.test(l);
-const studioOnLine = (l) => /^Studio on http/.test(l);
+const studioLaunchLine = (l) =>
+  /^Studio\s+https?:\/\//.test(l) || /^Studio on http/.test(l);
+
+function tokenFromLaunchUrl(launchUrl) {
+  const hashIndex = launchUrl.indexOf("#");
+  assert.ok(hashIndex >= 0, `launchUrl missing fragment: ${launchUrl}`);
+  const params = new URLSearchParams(launchUrl.slice(hashIndex + 1));
+  const token = params.get("token");
+  assert.ok(token && /^[A-Za-z0-9_-]{43}$/.test(token), "launchUrl token");
+  return token;
+}
+
+function proxyOriginFromLaunchUrl(launchUrl) {
+  // Local: http://localhost:<port>/#…  Hosted: https://local.nylorun.studio/#…&port=
+  if (launchUrl.startsWith("https://local.nylorun.studio")) {
+    const hashIndex = launchUrl.indexOf("#");
+    const params = new URLSearchParams(launchUrl.slice(hashIndex + 1));
+    const port = params.get("port");
+    assert.ok(port, "hosted launchUrl missing port");
+    return `http://127.0.0.1:${port}`;
+  }
+  return new URL(launchUrl).origin.replace("localhost", "127.0.0.1");
+}
 
 try {
   const built = await localRuntimeBuild({
@@ -121,13 +143,12 @@ try {
     NYLORUN_DEV_MODEL: "fixture",
   };
 
-  const studioBin = join(project, "node_modules/@nylorun/studio/dist/cli.js");
   const cliBin = join(project, "node_modules/@nylorun/cli/dist/cli.js");
 
   const dev = group.start(
     "dev",
     process.execPath,
-    [cliBin, "dev", "--ephemeral"],
+    [cliBin, "dev", "--ephemeral", "--no-studio"],
     { cwd: project, env },
   );
   await dev.line(hostLine, 120_000);
@@ -135,12 +156,29 @@ try {
   const studio = group.start(
     "studio",
     process.execPath,
-    [studioBin, "--no-open"],
+    [cliBin, "studio", "--no-open", "--local-ui"],
     { cwd: project, env },
   );
-  const studioBanner = await studio.line(studioOnLine, 90_000);
-  const studioUrl = studioBanner.replace(/^Studio on\s+/, "").trim();
-  assert.match(await (await fetch(studioUrl)).text(), /<div id="root">/);
+  const studioBanner = await studio.line(studioLaunchLine, 90_000);
+  const launchUrl = studioBanner.replace(/^Studio(?:\s+on)?\s+/, "").trim();
+  const token = tokenFromLaunchUrl(launchUrl);
+  const proxyOrigin = proxyOriginFromLaunchUrl(launchUrl);
+
+  // I1: unauthenticated GET / still serves local SPA (or hosted landing).
+  const rootPage = await fetch(proxyOrigin);
+  assert.equal(rootPage.status, 200, "GET / must be reachable without a token");
+  assert.match(await rootPage.text(), /<!doctype html>/i);
+
+  const unauthorized = await fetch(`${proxyOrigin}/_studio/hello`);
+  assert.equal(unauthorized.status, 401, "hello without token must be 401");
+
+  const hello = await fetch(`${proxyOrigin}/_studio/hello`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(hello.status, 200, "hello with token");
+  const helloBody = await hello.json();
+  assert.equal(helloBody.studioProtocol, 1);
+  assert.equal(helloBody.mode, "local");
   await studio.stop();
   await dev.stop();
 
@@ -199,7 +237,7 @@ try {
   );
 
   console.log(
-    "Development smoke passed: starter via local-registry build, nylorun dev, nylorun-studio, npm start (node dist/src/main.js), no serve.",
+    "Development smoke passed: starter via local-registry build, nylorun dev, nylorun studio --local-ui (token + hello), npm start (node dist/src/main.js), no serve.",
   );
 } finally {
   await group.close();
