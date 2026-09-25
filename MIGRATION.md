@@ -69,8 +69,9 @@ on the next write.
 
 #### 2. Studio is a separate package binary
 
-Move `@nylorun/cli` and `@nylorun/studio` to `devDependencies`. Point `studio`
-at Studio's own binary (`nylorun-studio`), not `nylorun studio`.
+Move `@nylorun/cli` and `@nylorun/studio` to `devDependencies`. Point the npm
+`studio` script at Studio's own binary (`nylorun-studio`). The Project-aware
+`nylorun studio` command remains available from the CLI for direct use.
 
 Before:
 
@@ -295,9 +296,9 @@ No npm release or deployment is performed by this migration.
 
 > **Superseded for application scripts and Studio:** the [Runtime Clients
 > section](#runtime-clients-and-admin-api-breaking-beta) replaces `nylorun
-> serve` / `nylorun studio` with `npm start` (`node dist/src/main.js`) and
-> `nylorun-studio`. Keep the rest of this section only for historical
-> session-first / Tenants-era upgrades that already applied it.
+> serve` with `npm start` (`node dist/src/main.js`) and points the generated
+> npm script at `nylorun-studio`. Keep the rest of this section only for
+> historical session-first / Tenants-era upgrades that already applied it.
 
 Upgrade the harness, SDK, Runtime, Studio, and creator as the tested compatible set in `create-agent/compatibility.json`. This migration changes public entry points and the session protocol.
 
@@ -306,7 +307,7 @@ Upgrade the harness, SDK, Runtime, Studio, and creator as the tested compatible 
 3. `nylorun start` was removed in favor of `nylorun serve [entry]` for the compiled build. **That `serve` command is itself removed** in Runtime Clients — use `node dist/src/main.js` / `nylorun dev` (see steps 1–4 above). The Runtime Host remains its own persistent process: `nylorun runtime up` / `down` / `status`, with Host root `NYLORUN_HOME` / `~/.nylorun` and a Project link under `.nylorun/`.
 4. Update custom applications to SDK `createClient` and session commands with stable idempotency keys. Trusted servers supply `ownerUserId`; input text uses `content`. Pass `tenant` (see Runtime Tenants section above).
 5. Custom connected executors use `connectAgents({ agents, runtime: { url, key, tenant } })`. Prefer application-mode `connectAgents({ agents })` with derived tokens (Runtime Clients). The local CLI no longer writes executor tokens into Project credentials.
-6. Studio uses canonical history and authenticated SSE through its local proxy. Attach with `nylorun-studio` (not `nylorun studio`); it resolves the Project link. Remove AG-UI and legacy manifest endpoint configuration.
+6. Studio uses canonical history and authenticated SSE through its local proxy. Attach with the generated `nylorun-studio` npm script or the Project-aware `nylorun studio` CLI command; both resolve the Project link. Remove AG-UI and legacy manifest endpoint configuration.
 
 Keep credentials in gitignored `.nylorun/`; provider configuration uses `.env` only as a one-time seed into the Tenant vault. Keep backups of old SessionRecord/event files. They are not automatically converted to new SQLite checkpoints. Session export/import and migration tooling are deferred. Start new sessions after changing definitions or implementations. Because the Host now outlives `dev`, a source change re-registers agents and reconnects executors rather than restarting the Host.
 
