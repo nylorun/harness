@@ -198,9 +198,9 @@ export async function develop(
       ],
       { cwd: repo }
     );
-    await studio.ready(
-      `http://127.0.0.1:${options.studioPort}/nylo-studio.config.json`
-    );
+    // Hosted Studio: config JSON is gone; GET / is unauthenticated in both modes
+    // (local SPA or hosted landing). Token-gated hello is checked by smoke (WS-4).
+    await studio.ready(`http://127.0.0.1:${options.studioPort}/`);
   }
   async function rebuild(changed) {
     const selected = new Set(changed);
