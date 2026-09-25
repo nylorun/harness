@@ -153,7 +153,7 @@ jobs:
       id-token: write
     env:
       RELEASE_SHA: ${{ inputs.commit }}
-      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'nylorun-studio' }}
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'nylorun-oss-studio' }}
       STUDIO_HOSTING_ORIGIN: https://local.nylorun.studio
     steps:
       - uses: actions/checkout@v6

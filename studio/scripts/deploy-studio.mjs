@@ -2,7 +2,7 @@
  * Deploy Studio UI to Firebase Hosting and verify CSP + bundle digest.
  *
  * Env:
- *   FIREBASE_PROJECT_ID   — default from .firebaserc / nylorun-studio
+ *   FIREBASE_PROJECT_ID   — default from .firebaserc / nylorun-oss-studio
  *   FIREBASE_TOKEN        — optional CI token (alternative to GOOGLE_APPLICATION_CREDENTIALS)
  *   GOOGLE_APPLICATION_CREDENTIALS — path to SA JSON (preferred)
  *   STUDIO_HOSTING_ORIGIN — default https://local.nylorun.studio

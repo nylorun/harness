@@ -151,7 +151,7 @@ After npm publish, `deploy-studio` runs in the protected GitHub Environment
 3. Verifies `curl -I` CSP and `/v/<version>/bundle.tar` SHA-256 vs the digest.
 
 Credentials: `FIREBASE_SERVICE_ACCOUNT` (preferred) or `FIREBASE_TOKEN`, plus
-`FIREBASE_PROJECT_ID` (default `nylorun-studio`). Until secrets and custom-domain
+`FIREBASE_PROJECT_ID` (default `nylorun-oss-studio`). Until secrets and custom-domain
 DNS are in place, the job warns and exits soft so npm is not blocked; rerun
 deploy alone after Rahul finishes the handoff.
 
