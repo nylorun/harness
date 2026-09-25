@@ -4,6 +4,7 @@ import {
   PROTOCOL_VERSION,
   TENANT_HEADER,
 } from "@nylorun/agents";
+import { studioCorsHeaders } from "./access.js";
 
 const LOCAL_OWNER = "local-developer";
 
@@ -34,6 +35,9 @@ export type StudioProxyOptions = {
   runtimeUrl: string;
   serverKey: string;
   tenantId: string;
+  /** When omitted, only `origin` is treated as allowed (legacy callers). */
+  allowedOrigins?: ReadonlySet<string>;
+  corsOrigin?: string;
 };
 
 /** Local tooling proxy: credentials stay in this process, not the browser. */
@@ -45,8 +49,14 @@ export async function proxyRuntime(
   const incoming = new URL(request.url!, options.origin);
   const path = incoming.pathname.slice("/_studio/runtime".length);
   const method = request.method ?? "GET";
+  const allowed =
+    options.allowedOrigins ?? new Set<string>([options.origin]);
+  const cors = studioCorsHeaders(options.corsOrigin);
   const fail = (status: number, message: string) => {
-    response.writeHead(status, { "content-type": "application/json" });
+    response.writeHead(status, {
+      "content-type": "application/json",
+      ...cors,
+    });
     response.end(JSON.stringify({ message }));
   };
   const health = method === "GET" && path === "/health";
@@ -67,9 +77,10 @@ export async function proxyRuntime(
   const vaultWrite = isVaultWrite(method, path);
   if (!health && !read && !write && !tenantWrite && !vaultWrite)
     return fail(404, "Unsupported Studio operation");
+  const requestOrigin = request.headers.origin;
   if (
     (write || tenantWrite || vaultWrite) &&
-    request.headers.origin !== options.origin
+    (requestOrigin === undefined || !allowed.has(requestOrigin))
   )
     return fail(403, "Studio mutations require a same-origin request");
   let body: string | undefined;
@@ -131,6 +142,7 @@ export async function proxyRuntime(
         upstream.headers.get("content-type") ?? "application/json",
       "cache-control": "no-store",
       "x-accel-buffering": "no",
+      ...cors,
     });
     response.flushHeaders();
     if (upstream.body)

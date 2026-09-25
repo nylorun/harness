@@ -48,6 +48,32 @@ const nylorunDeps = Object.keys(manifest.dependencies ?? {}).filter((name) =>
 if (nylorunDeps.length !== 1 || nylorunDeps[0] !== "@nylorun/agents")
   throw new Error("Studio must depend only on @nylorun/agents among Nylorun packages.");
 
+/** Design §15: UI packages are build-time only; proxy runtime dep is agents alone. */
+const UI_DEV_DEPS = [
+  "react",
+  "react-dom",
+  "radix-ui",
+  "lucide-react",
+  "react-router-dom",
+  "react-resizable-panels",
+  "class-variance-authority",
+  "clsx",
+  "tailwind-merge",
+  "tw-animate-css",
+  "dayjs",
+];
+for (const name of UI_DEV_DEPS) {
+  if (manifest.dependencies?.[name])
+    throw new Error(`Studio UI package ${name} must be a devDependency (design §15).`);
+  if (!manifest.devDependencies?.[name])
+    throw new Error(`Studio UI package ${name} must be listed in devDependencies.`);
+}
+const runtimeDeps = Object.keys(manifest.dependencies ?? {});
+if (runtimeDeps.length !== 1 || runtimeDeps[0] !== "@nylorun/agents")
+  throw new Error(
+    "Studio runtime dependencies must be only @nylorun/agents (plus Node built-ins).",
+  );
+
 /** SD-I5: browser sources must not pull engine, host or executor. */
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
@@ -68,6 +94,16 @@ for (const path of walk("web/src")) {
       throw new Error(`SD-I5: ${path} must not import engine/host/executor (${pattern})`);
 }
 
+const digest = JSON.parse(readFileSync("dist/ui-digest.json", "utf8"));
+if (typeof digest.version !== "string" || !digest.version)
+  throw new Error("dist/ui-digest.json must include version.");
+if (typeof digest.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(digest.sha256))
+  throw new Error("dist/ui-digest.json must include a 64-char hex sha256.");
+if (digest.version !== manifest.version)
+  throw new Error(
+    `dist/ui-digest.json version (${digest.version}) must match package.json (${manifest.version}).`,
+  );
+
 const cache = mkdtempSync(join(tmpdir(), "nylo-studio-pack-"));
 const output = execFileSync(
   process.platform === "win32" ? "npm.cmd" : "npm",
@@ -85,13 +121,15 @@ for (const required of [
   "dist/host.js",
   "dist/index.js",
   "dist/index.d.ts",
-  "dist/web/index.html",
-  "dist/web/nylo-studio.config.json",
-  "dist/web/brand/nylorun-mark-white.svg",
-  "dist/web/favicon/favicon.svg",
+  "dist/ui-digest.json",
 ])
   if (!files.includes(required))
     throw new Error(`Missing tarball file: ${required}`);
 if (files.includes("dist/ui.js"))
   throw new Error("Legacy inline Studio UI must not be packaged.");
+if (files.includes("dist/bundle.tar"))
+  throw new Error("dist/bundle.tar must not be published in the npm tarball.");
+for (const path of files)
+  if (path === "dist/web" || path.startsWith("dist/web/"))
+    throw new Error(`dist/web must not be published in the npm tarball: ${path}`);
 console.log(`Studio tarball allowlist passed (${files.length} files).`);

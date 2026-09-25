@@ -1,45 +1,58 @@
 import { spawn } from "node:child_process";
+import { copyFile, mkdir, rm } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { LauncherError } from "./errors.js";
 
 /**
  * Extract a gzip npm tarball into `dest`, stripping the leading `package/` (D4).
+ *
+ * Copies the archive into `dest` and extracts with a relative name so GNU tar on
+ * Windows never sees a `C:\...` path (it treats `C:` as a remote host).
  */
 export async function extractTarball(
   tarballPath: string,
   dest: string,
 ): Promise<void> {
   await preflightTar();
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(
-      "tar",
-      ["-xzf", tarballPath, "-C", dest, "--strip-components=1"],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    let stderr = "";
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-    });
-    child.once("error", (error) => {
-      reject(
-        new LauncherError(
-          "install_failed",
-          `Failed to run tar: ${error.message}`,
-          "Install a system tar (macOS, Linux, and Windows 10 1803+ ship one) and retry.",
-        ),
+  await mkdir(dest, { recursive: true });
+  const archiveName = `.nylorun-extract-${process.pid}-${basename(tarballPath)}`;
+  const archiveInDest = join(dest, archiveName);
+  try {
+    await copyFile(tarballPath, archiveInDest);
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(
+        "tar",
+        ["-xzf", archiveName, "--strip-components=1"],
+        { cwd: dest, stdio: ["ignore", "pipe", "pipe"] },
       );
-    });
-    child.once("exit", (code) => {
-      if (code === 0) resolve();
-      else
+      let stderr = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      child.once("error", (error) => {
         reject(
           new LauncherError(
             "install_failed",
-            `tar extraction failed (${code}).${stderr ? `\n${stderr.trim()}` : ""}`,
-            "Retry the install. If it keeps failing, check the downloaded tarball and free disk space.",
+            `Failed to run tar: ${error.message}`,
+            "Install a system tar (macOS, Linux, and Windows 10 1803+ ship one) and retry.",
           ),
         );
+      });
+      child.once("exit", (code) => {
+        if (code === 0) resolve();
+        else
+          reject(
+            new LauncherError(
+              "install_failed",
+              `tar extraction failed (${code}).${stderr ? `\n${stderr.trim()}` : ""}`,
+              "Retry the install. If it keeps failing, check the downloaded tarball and free disk space.",
+            ),
+          );
+      });
     });
-  });
+  } finally {
+    await rm(archiveInDest, { force: true }).catch(() => undefined);
+  }
 }
 
 async function preflightTar(): Promise<void> {

@@ -60,8 +60,30 @@ const names = [
 
 const readyLine = (l) =>
   l.includes("Ready") || l.includes("Ctrl-C stops this Project only");
-const studioOnLine = (l) => /^Studio on http/.test(l);
+const studioOnLine = (l) => /^Studio on https?:\/\//.test(l);
 const hostLine = (l) => /^\s*Host\s+http/.test(l);
+
+function tokenFromLaunchUrl(launchUrl) {
+  const hashIndex = launchUrl.indexOf("#");
+  assert.ok(hashIndex >= 0, `launchUrl missing fragment: ${launchUrl}`);
+  const params = new URLSearchParams(launchUrl.slice(hashIndex + 1));
+  const token = params.get("token");
+  assert.ok(token && /^[A-Za-z0-9_-]{43}$/.test(token), "launchUrl token");
+  return token;
+}
+
+function proxyOriginFromLaunchUrl(launchUrl) {
+  // Local: http://localhost:<port>/v/<version>/#…
+  // Hosted: https://local.nylorun.studio/#…&port=
+  if (launchUrl.startsWith("https://local.nylorun.studio")) {
+    const hashIndex = launchUrl.indexOf("#");
+    const params = new URLSearchParams(launchUrl.slice(hashIndex + 1));
+    const port = params.get("port");
+    assert.ok(port, "hosted launchUrl missing port");
+    return `http://127.0.0.1:${port}`;
+  }
+  return new URL(launchUrl).origin;
+}
 
 try {
   const built = await localRuntimeBuild({
@@ -153,6 +175,30 @@ try {
   const project = projects[0];
   const home = await mkdtemp(join(tmpdir(), "nylorun-release-home-"));
   const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-release-host-"));
+
+  // Packaged @nylorun/studio no longer ships dist/web. Seed NYLORUN_HOME cache
+  // from repo pack-ui so nylorun-studio --local-ui works without a live origin.
+  await run(process.execPath, [join(root, "studio/scripts/pack-ui.mjs")], {
+    cwd: join(root, "studio"),
+  });
+  const uiDigest = JSON.parse(
+    await readFile(join(root, "studio/dist/ui-digest.json"), "utf8"),
+  );
+  assert.equal(typeof uiDigest.version, "string");
+  assert.equal(typeof uiDigest.sha256, "string");
+  const studioCache = join(hostRoot, "studio", uiDigest.version);
+  await mkdir(studioCache, { recursive: true });
+  await run("tar", [
+    "-xf",
+    join(root, "studio/dist/bundle.tar"),
+    "-C",
+    studioCache,
+  ]);
+  await writeFile(
+    join(studioCache, "bundle.tar"),
+    await readFile(join(root, "studio/dist/bundle.tar")),
+  );
+
   // Fixture models are only allowed on ephemeral Hosts; release smoke uses
   // `--ephemeral` so NYLORUN_DEV_MODEL=fixture can drive Studio and SDK turns.
   const env = {
@@ -188,26 +234,45 @@ try {
   const studio = group.start(
     "generated-studio",
     process.execPath,
-    [studioBin, "--no-open"],
+    [studioBin, "--no-open", "--local-ui"],
     { cwd: project, env },
   );
   const studioBanner = await studio.line(studioOnLine, 90_000);
-  const studioUrl = studioBanner.replace(/^Studio on\s+/, "").trim();
+  const launchUrl = studioBanner.replace(/^Studio on\s+/, "").trim();
+  const studioUrl = proxyOriginFromLaunchUrl(launchUrl);
+  const token = tokenFromLaunchUrl(launchUrl);
   const { credentials } = await readAuth(project);
   assert.equal(
     (await stat(join(project, ".nylorun/credentials.json"))).mode & 0o777,
     0o600,
   );
-  const configText = await (
-    await fetch(studioUrl + "/nylo-studio.config.json")
-  ).text();
-  assert.ok(!configText.includes(credentials.applicationKey));
-  assert.ok(!configText.includes("executor"));
-  const forbidden = await fetch(studioUrl + "/_studio/runtime/v1/actions");
+  const hello = await (
+    await fetch(`${studioUrl}/_studio/hello`, {
+      headers: { authorization: `Bearer ${token}` },
+    })
+  ).json();
+  assert.equal(hello.studioProtocol, 1);
+  assert.equal(hello.mode, "local");
+  assert.equal(
+    hello.runtime?.compatible,
+    true,
+    `Studio hello runtime incompatible: ${hello.runtime?.message ?? "(no message)"}`,
+  );
+  assert.ok(!JSON.stringify(hello).includes(credentials.applicationKey));
+  assert.ok(!JSON.stringify(hello).includes("executor"));
+  // Token gate (I3): unauthenticated /_studio/* → 401 before allowlist 404.
+  const unauthorized = await fetch(`${studioUrl}/_studio/runtime/v1/actions`);
+  assert.equal(unauthorized.status, 401);
+  const forbidden = await fetch(`${studioUrl}/_studio/runtime/v1/actions`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
   assert.equal(forbidden.status, 404);
-  const csrf = await fetch(studioUrl + "/_studio/runtime/v1/sessions/nope", {
+  const csrf = await fetch(`${studioUrl}/_studio/runtime/v1/sessions/nope`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
     body: "{}",
   });
   assert.equal(csrf.status, 403);
@@ -223,8 +288,27 @@ try {
   const page = await browser.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto(studioUrl);
-  await page.getByRole("button", { name: "New session", exact: true }).click();
+  assert.match(
+    launchUrl,
+    /^http:\/\/127\.0\.0\.1:\d+\/v\/[^/#]+\/#/,
+    `local --local-ui launchUrl must be versioned on 127.0.0.1: ${launchUrl}`,
+  );
+  await page.goto(launchUrl, { waitUntil: "domcontentloaded" });
+  try {
+    await page
+      .getByRole("button", { name: "New session", exact: true })
+      .click({ timeout: 30_000 });
+  } catch (error) {
+    const text = await page.locator("body").innerText().catch(() => "(no body)");
+    await mkdir(join(root, ".tmp/release-local"), { recursive: true });
+    await page.screenshot({
+      path: join(root, ".tmp/release-local/studio-boot-fail.png"),
+      fullPage: true,
+    });
+    throw new Error(
+      `New session missing after goto ${launchUrl}\nURL now: ${page.url()}\npageerrors: ${JSON.stringify(errors)}\nbody:\n${text.slice(0, 2000)}\n${error instanceof Error ? error.message : error}`,
+    );
+  }
   await page
     .getByRole("textbox", { name: "Message" })
     .fill("Look up order demo-123");

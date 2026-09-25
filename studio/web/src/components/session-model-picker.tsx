@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { proxyFetch } from "@/proxy-client";
 
 type HostModelProviderInfo = {
   id: string;
@@ -37,7 +38,7 @@ type ModelOption = {
 };
 
 const runtime = (path: string, init?: RequestInit) =>
-  fetch(location.origin + "/_studio/runtime" + path, init);
+  proxyFetch(`/_studio/runtime${path}`, init);
 
 function optionKey(providerId: string, modelId: string): string {
   return `${providerId}\0${modelId}`;

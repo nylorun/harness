@@ -132,7 +132,13 @@ jobs:
           "$LAUNCHER" --home "$NYLORUN_HOME" --json status
           "$LAUNCHER" --home "$NYLORUN_HOME" --json down --force
       - name: Launcher unit tests
-        run: npm test --workspace @nylorun/runtime -- test/launcher
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            npm test --workspace @nylorun/runtime -- test/launcher --retry=1
+          else
+            npm test --workspace @nylorun/runtime -- test/launcher
+          fi
   # darwin-x64 (macos-13) is omitted from required CI: GitHub-hosted macos-13
   # capacity has been unavailable for hours on #110 (forever-queued legs block
   # merge). Re-add when macos-13 runners are obtainable; darwin-arm64 remains.

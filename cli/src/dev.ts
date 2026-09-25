@@ -1,12 +1,14 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { loadProjectEnvironment } from "./environment.js";
 import { attachProject } from "./project/attach.js";
 import { seedTenantFromProject } from "./project/seed.js";
 import { requireProjectRoot } from "./project/root.js";
+import { resolveHome } from "./runtime/launcher.js";
 
-const DEV_FLAGS = ["--ephemeral"] as const;
+const DEV_FLAGS = ["--ephemeral", "--local-ui", "--no-studio", "--no-open"] as const;
 
 export interface DevelopOptions {
   entry?: string;
@@ -15,13 +17,22 @@ export interface DevelopOptions {
   home?: string;
 }
 
+export type DevelopmentPreflight = {
+  tsx: string;
+  entry: string;
+  ephemeral: boolean;
+  localUi: boolean;
+  studio: boolean;
+  open: boolean;
+};
+
 /**
  * Everything that can be checked without contacting the Host, so a Project that
  * cannot run never causes a Runtime Host to be started on its behalf.
  */
 export function developmentPreflight(
   args: readonly string[] = [],
-): { tsx: string; entry: string; ephemeral: boolean } {
+): DevelopmentPreflight {
   const flags: string[] = [];
   let entry: string | undefined;
   for (const arg of args) {
@@ -31,20 +42,25 @@ export function developmentPreflight(
     }
     if (arg.startsWith("-")) {
       throw new Error(
-        "Usage: nylorun dev [entry] [--ephemeral]\nDefault entry: src/main.ts",
+        "Usage: nylorun dev [entry] [--ephemeral] [--local-ui] [--no-studio] [--no-open]\nDefault entry: src/main.ts",
       );
     }
     if (entry !== undefined) {
       throw new Error(
-        "Usage: nylorun dev [entry] [--ephemeral]\nDefault entry: src/main.ts",
+        "Usage: nylorun dev [entry] [--ephemeral] [--local-ui] [--no-studio] [--no-open]\nDefault entry: src/main.ts",
       );
     }
     entry = arg;
   }
   if (new Set(flags).size !== flags.length) {
     throw new Error(
-      "Usage: nylorun dev [entry] [--ephemeral]\nDefault entry: src/main.ts",
+      "Usage: nylorun dev [entry] [--ephemeral] [--local-ui] [--no-studio] [--no-open]\nDefault entry: src/main.ts",
     );
+  }
+  const localUi = flags.includes("--local-ui");
+  const noStudio = flags.includes("--no-studio");
+  if (localUi && noStudio) {
+    throw new Error("--local-ui cannot be combined with --no-studio.");
   }
   const require = createRequire(join(process.cwd(), "package.json"));
   let tsx: string;
@@ -53,23 +69,76 @@ export function developmentPreflight(
   } catch {
     throw new Error("Install tsx to use nylorun dev");
   }
+  if (localUi) {
+    try {
+      require.resolve("@nylorun/studio");
+    } catch {
+      throw new Error("Install @nylorun/studio to use the Studio dashboard.");
+    }
+  }
   return {
     tsx,
     entry: entry ?? "src/main.ts",
     ephemeral: flags.includes("--ephemeral"),
+    localUi,
+    studio: localUi,
+    open: !flags.includes("--no-open"),
   };
+}
+
+/**
+ * Resolve `@nylorun/studio` from the Project and call `startStudio`.
+ * Used by `nylorun studio` and `nylorun dev --local-ui`.
+ */
+export async function startStudio(options: {
+  runtimeUrl: string;
+  serverKey: string;
+  tenant: { id: string; name: string };
+  open: boolean;
+  port?: number;
+  /** When true, force local UI. When false/omit, use startStudio default (hosted). */
+  localUi?: boolean;
+  cacheDir?: string;
+  projectRoot?: string;
+}): Promise<{
+  address: string;
+  launchUrl: string;
+  close(): Promise<void>;
+}> {
+  const projectRoot = options.projectRoot ?? process.cwd();
+  let entry: string;
+  try {
+    entry = createRequire(join(projectRoot, "package.json")).resolve(
+      "@nylorun/studio",
+    );
+  } catch {
+    throw new Error("Install @nylorun/studio to use the Studio dashboard.");
+  }
+  const studio = await import(pathToFileURL(entry).href);
+  const cacheDir = options.cacheDir ?? resolveHome();
+  const ui = options.localUi ? ("local" as const) : undefined;
+  return studio.startStudio({
+    runtimeUrl: options.runtimeUrl,
+    serverKey: options.serverKey,
+    tenant: options.tenant,
+    open: options.open,
+    cacheDir,
+    ...(ui === undefined ? {} : { ui }),
+    ...(options.port === undefined ? {} : { port: options.port }),
+  });
 }
 
 /**
  * `nylorun dev [entry]` — D§12 steps 1–4.
  * Spawns `tsx watch <entry>` with the three Project environment variables.
+ * `--local-ui` also starts the Studio proxy with a local dashboard.
  */
 export async function develop(options: DevelopOptions = {}): Promise<number> {
   const normalized = options;
   const projectRoot = normalized.projectRoot ?? requireProjectRoot();
   const previous = process.cwd();
   process.chdir(projectRoot);
-  let preflight: ReturnType<typeof developmentPreflight>;
+  let preflight: DevelopmentPreflight;
   try {
     preflight = developmentPreflight([
       ...(normalized.entry ? [normalized.entry] : []),
@@ -115,6 +184,9 @@ export async function develop(options: DevelopOptions = {}): Promise<number> {
         tenantName: ephemeral.tenant.name,
         hostStarted: true,
         ephemeral: true,
+        localUi: preflight.localUi,
+        openStudio: preflight.open,
+        home: normalized.home,
       });
     } finally {
       await ephemeral.close();
@@ -145,6 +217,9 @@ export async function develop(options: DevelopOptions = {}): Promise<number> {
     tenantName: attached.tenantName,
     hostStarted: attached.hostStarted,
     ephemeral: false,
+    localUi: preflight.localUi,
+    openStudio: preflight.open,
+    home: normalized.home ?? attached.home,
   });
 }
 
@@ -159,6 +234,9 @@ async function spawnWatcher(options: {
   tenantName: string;
   hostStarted: boolean;
   ephemeral: boolean;
+  localUi: boolean;
+  openStudio: boolean;
+  home?: string;
 }): Promise<number> {
   const entryPath = resolve(options.projectRoot, options.entry);
   const childEnv: NodeJS.ProcessEnv = {
@@ -169,6 +247,21 @@ async function spawnWatcher(options: {
     NYLORUN_SERVER_KEY: options.applicationKey,
   };
 
+  let studio: { launchUrl: string; close(): Promise<void> } | undefined;
+  let studioMode: "hosted" | "local" | undefined;
+  if (options.localUi) {
+    studio = await startStudio({
+      runtimeUrl: options.hostUrl,
+      serverKey: options.applicationKey,
+      tenant: { id: options.tenantId, name: options.tenantName },
+      open: options.openStudio,
+      localUi: true,
+      cacheDir: resolveHome(options.home),
+      projectRoot: options.projectRoot,
+    });
+    studioMode = "local";
+  }
+
   printBanner({
     hostUrl: options.hostUrl,
     hostStarted: options.hostStarted,
@@ -176,6 +269,8 @@ async function spawnWatcher(options: {
     tenantName: options.tenantName,
     tenantId: options.tenantId,
     entry: options.entry,
+    studioLaunchUrl: studio?.launchUrl,
+    studioMode,
   });
 
   const child = spawn(
@@ -208,6 +303,7 @@ async function spawnWatcher(options: {
   } finally {
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", terminate);
+    await studio?.close().catch(() => {});
   }
 }
 
@@ -218,6 +314,8 @@ function printBanner(options: {
   tenantName: string;
   tenantId: string;
   entry: string;
+  studioLaunchUrl?: string;
+  studioMode?: "hosted" | "local";
 }): void {
   const hostNote = options.ephemeral
     ? "(ephemeral; removed on exit)"
@@ -231,7 +329,14 @@ function printBanner(options: {
   console.log(`Host          ${options.hostUrl}  ${hostNote}`);
   console.log(`Tenant        ${options.tenantName}  ${short}`);
   console.log(`Entry         ${options.entry}`);
-  console.log(`Studio: npm run studio`);
+  if (options.studioLaunchUrl) {
+    console.log(`Studio        ${options.studioLaunchUrl}`);
+    if (options.studioMode === "hosted") {
+      console.log(`Safari or offline: nylorun studio --local-ui`);
+    }
+  } else {
+    console.log(`Studio: npm run studio`);
+  }
   console.log("");
   console.log("Ctrl-C stops this Project only.");
   if (!options.ephemeral) {

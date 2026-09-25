@@ -123,3 +123,44 @@ for up to ten minutes. A registry timeout does not mean the publication failed:
 confirm the version's integrity before retrying the same reviewed release.
 
 The local browser gate requires Chromium: run `npx playwright-core install chromium` on Linux, or set `NYLORUN_CHROME_PATH` to an installed Chrome executable. CI installs Chromium before testing packed artifacts.
+
+## Studio hosted dashboard
+
+`@nylorun/studio` publishes the Node proxy plus `dist/ui-digest.json`
+(`{ version, sha256 }`). The dashboard `dist/web` tree is **not** in the npm
+tarball. Release packaging builds the web UI once, then
+`studio/scripts/pack-ui.mjs` writes `dist/bundle.tar` (POSIX ustar of
+`dist/web`) and the digest. The publish workflow uploads `studio/dist/web` and
+`studio/dist/bundle.tar` as the `studio-ui-bundle` artifact.
+
+**H1 host:** Firebase Hosting · **H2:** Rahul owns `local.nylorun.studio` DNS.
+See the Project handoff `docs/hosted-studio-firebase-handoff.md` (Agent Store)
+for Firebase project, DNS records, and CI secrets.
+
+Default Studio mode is `ui: "hosted"` (I2). Use `--local-ui` for Safari/offline.
+
+### Deploy (Wave 3)
+
+After npm publish, `deploy-studio` runs in the protected GitHub Environment
+`studio`:
+
+1. Builds `studio/dist/hosting-site` via `prepare-hosting-site.mjs` (preserves
+   prior `/v/*` when the live origin or a mirror is available; **refuses** to
+   overwrite an existing `/v/<version>/`).
+2. Deploys with Firebase Hosting (`firebase.json` headers = design §9.1).
+3. Verifies `curl -I` CSP and `/v/<version>/bundle.tar` SHA-256 vs the digest.
+
+Credentials: `FIREBASE_SERVICE_ACCOUNT` (preferred) or `FIREBASE_TOKEN`, plus
+`FIREBASE_PROJECT_ID` (default `nylorun-oss-studio`). Until secrets and custom-domain
+DNS are in place, the job warns and exits soft so npm is not blocked; rerun
+deploy alone after Rahul finishes the handoff.
+
+### Rollback and retry
+
+- **Rollback:** repoint root `index.html` and `versions.json` at an earlier
+  build. Never delete or mutate `/v/*` (immutable builds).
+- **Retry after a failed deploy:** if npm publish succeeded but the hosted
+  upload did not, rerun only the deploy job for the same release commit and
+  Studio UI artifact. The previous dashboard stays live and protocol-compatible.
+- **Do not** republish a new npm version solely to fix a hosting deploy failure
+  when the digest and tarball are already correct.
