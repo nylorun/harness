@@ -206,20 +206,34 @@ export async function prepareHostingSite(options) {
   }
 
   const versionDir = join(outDir, "v", version);
-  if (existsSync(join(versionDir, "index.html"))) {
-    throw new Error(
-      `Refusing to overwrite immutable /v/${version}/ (I12). Pick a new Studio version.`,
+  const versionExists = existsSync(join(versionDir, "index.html"));
+  if (versionExists) {
+    // I12: never mutate an already-published /v/<version>/ tree. Still refresh
+    // mutable root welcome + versions.json so homepage deploys can ship.
+    console.warn(
+      `v/${version}/ already present (I12); keeping immutable assets, refreshing root welcome.`,
     );
+  } else {
+    copyTree(web, versionDir);
+    writeFileSync(join(versionDir, "bundle.tar"), readFileSync(bundle));
   }
 
-  copyTree(web, versionDir);
-  writeFileSync(join(versionDir, "bundle.tar"), readFileSync(bundle));
-
-  // Root entry = this build's index (asset base /v/<version>/).
+  // Root entry = welcome guide (not the SPA). Paired fragments redirect via welcome.js.
+  const hostingSrc = join(studioRoot, "hosting");
   writeFileSync(
     join(outDir, "index.html"),
-    readFileSync(join(versionDir, "index.html")),
+    readFileSync(join(hostingSrc, "index-root.html")),
   );
+  writeFileSync(
+    join(outDir, "welcome.css"),
+    readFileSync(join(hostingSrc, "welcome.css")),
+  );
+  writeFileSync(
+    join(outDir, "welcome.js"),
+    readFileSync(join(hostingSrc, "welcome.js")),
+  );
+  const brandSrc = join(hostingSrc, "brand");
+  if (existsSync(brandSrc)) copyTree(brandSrc, join(outDir, "brand"));
 
   const digest = readDigest(studioRoot);
   const protocols = { "1": version };
