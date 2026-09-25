@@ -127,6 +127,8 @@ export async function startTestTenant(
     model,
     childEnv,
     ...(options.leaseMs === undefined ? {} : { leaseMs: options.leaseMs }),
+    ...(options.flow === undefined ? {} : { flow: options.flow }),
+    ...(options.flowEnv === undefined ? {} : { flowEnv: options.flowEnv }),
     ...(options.vaultFetch === undefined
       ? {}
       : { vaultFetch: options.vaultFetch }),
