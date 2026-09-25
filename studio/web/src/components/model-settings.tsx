@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { proxyFetch } from "@/proxy-client";
 
 type HostModelView =
   | { configured: false }
@@ -55,7 +56,7 @@ type ConfiguredProvider = {
 type PanelMode = "add" | "view" | "update";
 
 const runtime = (path: string, init?: RequestInit) =>
-  fetch(location.origin + "/_studio/runtime" + path, init);
+  proxyFetch(`/_studio/runtime${path}`, init);
 
 function formatUpdated(value: string): string {
   const parsed = Date.parse(value);
@@ -399,7 +400,7 @@ export function ModelSettings() {
                   <Input
                     value={baseUrl}
                     onChange={(event) => setBaseUrl(event.target.value)}
-                    placeholder="https://example.test/v1"
+                    placeholder="api.example.test/v1"
                     required
                     readOnly={panelMode === "view"}
                   />

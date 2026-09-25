@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { createClient, RuntimeError } from "@nylorun/agents/client";
+import { RuntimeError } from "@nylorun/agents/client";
 import { KeyRound, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { createProxyClient } from "@/proxy-client";
 
 const OWNER = "local-developer";
 const SECRET_MASK = "••••••••••••••••";
@@ -56,13 +57,7 @@ type Row = {
   credential: CredentialInfo;
 };
 
-const client = (tenantId: string) =>
-  createClient({
-    url: location.origin + "/_studio/runtime",
-    key: "studio-proxy",
-    tenant: tenantId,
-    fetch: (url, init) => fetch(url, init),
-  });
+const client = (tenantId: string) => createProxyClient(tenantId);
 
 function formatWhen(value?: string): string {
   if (!value) return "—";
@@ -518,7 +513,7 @@ export function VaultModule({ tenantId }: Readonly<{ tenantId: string }>) {
                   <Input
                     value={bindingUrl}
                     onChange={(event) => setBindingUrl(event.target.value)}
-                    placeholder="https://mcp.example.com/service"
+                    placeholder="mcp.example.com/service"
                     required={panelMode === "add-credential"}
                     readOnly={panelMode !== "add-credential"}
                   />

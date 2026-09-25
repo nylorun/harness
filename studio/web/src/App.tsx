@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -7,7 +7,6 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { Tabs as TabsPrimitive } from "radix-ui";
-import { createClient } from "@nylorun/agents/client";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ModelSettings } from "@/components/model-settings";
 import { VaultModule } from "@/components/vault";
@@ -37,11 +36,16 @@ import {
   mergeStudioEvents,
   type StudioEvent,
 } from "@/event-presentation";
+import { shortTenantId, type StudioTenantInfo } from "@/config";
 import {
-  loadBrowserStudioConfig,
-  shortTenantId,
-  type StudioTenantInfo,
-} from "@/config";
+  classifyProxyFailure,
+  createProxyClient,
+  fetchHello,
+  protocolSupported,
+  readPairing,
+  redirectToCompatibleBuild,
+} from "@/proxy-client";
+import type { StudioHello } from "../../src/contract.ts";
 import type {
   AgentManifest,
   Connection,
@@ -88,30 +92,177 @@ function asStudioDefinition(raw: {
   };
 }
 
-const base = () => location.origin + "/_studio/runtime";
-// SDK requests travel through a trusted local proxy; this public marker is not a Runtime credential.
 function studioClient(tenantId: string) {
-  return createClient({
-    url: base(),
-    key: "studio-proxy",
-    tenant: tenantId,
-    fetch: (url, init) => fetch(url, init),
-  });
+  return createProxyClient(tenantId);
+}
+
+/** Vite BASE_URL ends with `/`; React Router basename must not. */
+function routerBasename(): string {
+  const base = import.meta.env.BASE_URL;
+  if (!base || base === "/") return "/";
+  return base.endsWith("/") ? base.slice(0, -1) : base;
+}
+
+void STUDIO_VERSION;
+
+type BootState =
+  | { kind: "booting" }
+  | { kind: "not-paired" }
+  | { kind: "redirecting" }
+  | { kind: "update-cli" }
+  | { kind: "proxy-stopped" }
+  | { kind: "needs-local-access" }
+  | { kind: "runtime-incompatible"; message: string }
+  | { kind: "ready"; hello: StudioHello };
+
+function StatusScreen({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <main className="mx-auto flex min-h-svh w-full max-w-lg flex-col justify-center gap-4 p-8">
+      <h1 className="text-2xl font-semibold">{title}</h1>
+      <div className="space-y-3 text-muted-foreground">{children}</div>
+    </main>
+  );
 }
 const pretty = (value: unknown) =>
   typeof value === "string" ? value : JSON.stringify(value, null, 2);
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={routerBasename()}>
       <Routes>
-        <Route path="*" element={<Workspace />} />
+        <Route path="*" element={<StudioRoot />} />
       </Routes>
     </BrowserRouter>
   );
 }
 
-function Workspace() {
+function StudioRoot() {
+  const [boot, setBoot] = useState<BootState>({ kind: "booting" });
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const pairing = readPairing();
+      if (!pairing) {
+        if (!cancelled) setBoot({ kind: "not-paired" });
+        return;
+      }
+      if (!protocolSupported(pairing.protocol)) {
+        if (!cancelled) setBoot({ kind: "redirecting" });
+        const redirected = await redirectToCompatibleBuild(pairing);
+        if (cancelled) return;
+        if (redirected) return;
+        setBoot({ kind: "update-cli" });
+        return;
+      }
+      try {
+        const hello = await fetchHello({ pairing });
+        if (cancelled) return;
+        if (!protocolSupported(hello.studioProtocol)) {
+          setBoot({ kind: "redirecting" });
+          const redirected = await redirectToCompatibleBuild({
+            ...pairing,
+            protocol: hello.studioProtocol,
+          });
+          if (cancelled) return;
+          if (redirected) return;
+          setBoot({ kind: "update-cli" });
+          return;
+        }
+        if (!hello.runtime.compatible) {
+          setBoot({
+            kind: "runtime-incompatible",
+            message:
+              hello.runtime.message ??
+              "The local Runtime is incompatible with this Studio.",
+          });
+          return;
+        }
+        setBoot({ kind: "ready", hello });
+      } catch (cause) {
+        if (cancelled) return;
+        const kind = classifyProxyFailure(cause, window.isSecureContext);
+        if (kind === "auth" || kind === "network")
+          setBoot({ kind: "proxy-stopped" });
+        else setBoot({ kind: "needs-local-access" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (boot.kind === "booting" || boot.kind === "redirecting") {
+    return (
+      <StatusScreen title="Connecting to Studio">
+        <p>Pairing with the local Studio proxy…</p>
+      </StatusScreen>
+    );
+  }
+  if (boot.kind === "not-paired") {
+    return (
+      <StatusScreen title="Not paired">
+        <p>
+          Run <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground">npx nylorun studio</code> in your project, then open the URL it prints.
+        </p>
+      </StatusScreen>
+    );
+  }
+  if (boot.kind === "proxy-stopped") {
+    return (
+      <StatusScreen title="Studio proxy stopped">
+        <p>
+          The local Studio proxy is unreachable or rejected this tab. Rerun{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground">nylorun studio</code> and open the new URL.
+        </p>
+      </StatusScreen>
+    );
+  }
+  if (boot.kind === "update-cli") {
+    return (
+      <StatusScreen title="Update the CLI">
+        <p>
+          This dashboard build does not speak the Studio protocol your proxy uses, and no compatible hosted build was found.
+        </p>
+        <p>
+          Upgrade the CLI and Studio package:{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground">npm i -D @nylorun/cli@latest @nylorun/studio@latest</code>
+        </p>
+      </StatusScreen>
+    );
+  }
+  if (boot.kind === "needs-local-access") {
+    return (
+      <StatusScreen title="Studio needs local access">
+        <p>
+          This browser blocked the request to the loopback Studio proxy. Safari cannot reach HTTP loopback from a secure hosted page.
+        </p>
+        <p>
+          In Chromium, reset the Local Network Access permission for this site, or allow localhost access when prompted.
+        </p>
+        <p>
+          Or run Studio in local mode:{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground">nylorun studio --local-ui</code>
+        </p>
+      </StatusScreen>
+    );
+  }
+  if (boot.kind === "runtime-incompatible") {
+    return (
+      <StatusScreen title="Runtime incompatible">
+        <p>{boot.message}</p>
+      </StatusScreen>
+    );
+  }
+  return <Workspace hello={boot.hello} />;
+}
+
+function Workspace({ hello }: { hello: StudioHello }) {
   const navigate = useNavigate();
   const location = useLocation();
   const match = location.pathname.match(
@@ -119,31 +270,17 @@ function Workspace() {
   );
   const agentId = match?.[1] ? decodeURIComponent(match[1]) : undefined;
   const sessionId = match?.[2] ? decodeURIComponent(match[2]) : undefined;
-  const [tenant, setTenant] = useState<StudioTenantInfo | undefined>();
+  const tenant: StudioTenantInfo | undefined = hello.tenant
+    ? { id: hello.tenant.id, name: hello.tenant.name }
+    : undefined;
   const [connection, setConnection] = useState<Connection>({
     status: "Connecting",
     agents: [],
     sessionsByAgent: {},
   });
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const config = await loadBrowserStudioConfig();
-        if (cancelled) return;
-        if (!config.tenant)
-          throw new Error("Studio config is missing tenant { id, name }.");
-        setTenant(config.tenant);
-      } catch (cause) {
-        if (!cancelled)
-          setError(cause instanceof Error ? cause.message : String(cause));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const [error, setError] = useState(
+    tenant ? "" : "Studio hello is missing tenant { id, name }.",
+  );
   const refresh = useCallback(async () => {
     if (!tenant) return;
     try {
