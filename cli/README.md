@@ -44,8 +44,7 @@ launcher protocol 1 and a compatible Host protocol, and invokes it with
 exits 1 with the install command for the recommended version
 (`cli/package.json` `nylorun.runtime`). A project devDependency on
 `@nylorun/runtime` also works, because npm scripts put `node_modules/.bin` on
-PATH. See [building a desktop client](../docs/building-a-desktop-client.md)
-for the launcher contract.
+PATH.
 
 `dev` starts (or reuses) the Host via the launcher, creates a Tenant through
 `@nylorun/admin` when the Project has no link, writes format-1 link +
@@ -104,5 +103,4 @@ Install the CLI as a **devDependency**. Generated applications keep
 | Logs | `nylorun runtime logs --follow` |
 | Runtime not installed | `npm install --global @nylorun/runtime`; `nylorun doctor runtime` checks |
 
-See [package architecture](../docs/design/package-architecture.md) and
-[MIGRATION.md](../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta).
+See [MIGRATION.md](../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta).

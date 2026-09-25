@@ -1,9 +1,6 @@
 # Runtime Clients and Admin API (breaking beta)
 
-Vocabulary: [runtime/src/CONTEXT.md](./runtime/src/CONTEXT.md). Companion docs:
-[package architecture](docs/design/package-architecture.md),
-[responsibility boundaries](docs/responsibility-boundaries.md),
-[building a desktop client](docs/building-a-desktop-client.md).
+Vocabulary: [runtime/src/CONTEXT.md](./runtime/src/CONTEXT.md).
 
 Every process that talks to a Runtime is a **client**. Two client packages
 cover the two surfaces: `@nylorun/agents` (Tenant API) and `@nylorun/admin`
@@ -263,12 +260,10 @@ Never delete names that start with `nylorun-tn_`.
 # Package architecture beta migration
 
 > **Superseded for dependency rules and application production trees:** the
-> [Runtime Clients section](#runtime-clients-and-admin-api-breaking-beta) and
-> [package architecture](docs/design/package-architecture.md) require
-> production apps to depend on `@nylorun/agents` only (CLI/Studio are
+> [Runtime Clients section](#runtime-clients-and-admin-api-breaking-beta)
+> requires production apps to depend on `@nylorun/agents` only (CLI/Studio are
 > `devDependencies`). Keep this section for the earlier define/contracts move.
 
-The [design document](docs/design/package-architecture.md) defines the structure.
 Cloud upgrades published packages from npm independently. Upgrade the tested
 package combination in `create-agent/compatibility.json`.
 

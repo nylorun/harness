@@ -6,9 +6,7 @@ state-in/state-out; the optional **Runtime Host** owns sessions across isolated
 
 This repository contains core (definitions/contracts), harness (engine), agents
 (SDK), runtime (OSS Host), CLI, Studio and the project creator. Cloud lives in
-the private agents-api repository. See the
-[package architecture](docs/design/package-architecture.md) for dependency and
-process diagrams. Vocabulary:
+the private agents-api repository. Vocabulary:
 [runtime/src/CONTEXT.md](runtime/src/CONTEXT.md).
 
 For the core-runtime beta, start with [the SDK](agents/README.md),
@@ -99,7 +97,7 @@ eval "$(npx nylorun runtime status --env)"
 | [RELEASING.md](./RELEASING.md)                       | Maintainers — version, publish, dist-tags       |
 | [MIGRATION.md](./MIGRATION.md)                       | Breaking beta migration (incl. Runtime Tenants) |
 | [DEPLOYMENT.md](./DEPLOYMENT.md)                     | Application hosting                             |
-| [docs/BUILDING_AGENTS.md](./docs/BUILDING_AGENTS.md) | Authoring agents against a Tenant               |
+| [agents/README.md](./agents/README.md)               | Authoring agents against a Tenant               |
 | [SECURITY.md](./SECURITY.md)                         | Vulnerability reports                           |
 | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)           | Community standards                             |
 
