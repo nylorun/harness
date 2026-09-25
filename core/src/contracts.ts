@@ -974,22 +974,6 @@ export type ProjectCredentialsFile = z.infer<
   typeof ProjectCredentialsFileSchema
 >;
 
-export const RuntimeBuildManifestSchema = z
-  .object({
-    format: z.literal(1),
-    runtimeVersion: z.string().min(1),
-    platform: z.enum(["darwin", "linux", "win32"]),
-    arch: z.enum(["arm64", "x64"]),
-    node: z.object({ version: z.string().min(1) }).strict(),
-    entry: z.string().min(1),
-    launcher: z.string().min(1),
-    launcherProtocol: z.literal(1),
-    protocol: ProtocolRangeSchema,
-    tenantSchema: z.object({ max: z.number().int() }).strict(),
-  })
-  .strict();
-export type RuntimeBuildManifest = z.infer<typeof RuntimeBuildManifestSchema>;
-
 export const HostModelViewSchema = z.union([
   z.object({ configured: z.literal(false) }).strict(),
   z

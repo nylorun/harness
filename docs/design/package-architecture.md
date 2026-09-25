@@ -7,27 +7,28 @@ operation.
 ## Intent
 
 Every process that talks to a Runtime is a **client**. Two client packages
-cover the two surfaces OSS and Cloud share. A local OSS Runtime is installed
-and started by a **launcher** inside a per-platform **Runtime build** — a
-process, not a package dependency.
+cover the two surfaces OSS and Cloud share. A local OSS Runtime is the npm
+package `@nylorun/runtime`, which the developer installs as a prerequisite
+(see [runtime distribution](runtime-distribution.md)). Clients start it
+through its **launcher**, `nylorun-runtime`: a process, not a package
+dependency.
 
 | Package | Owns |
 | --- | --- |
-| `@nylorun/core` | Definitions, manifests, protocol, error codes, Admin / Project-link / build-manifest schemas |
+| `@nylorun/core` | Definitions, manifests, protocol, error codes, Admin / Project-link schemas |
 | `@nylorun/harness` | Loop execution, checkpoints, effects |
 | `@nylorun/agents` | Tenant API client, authoring facade, executor, connection resolution |
 | `@nylorun/admin` | Admin API client, safe Tenant creation, local Host connection |
-| `@nylorun/runtime` | OSS Host + Tenant Runtimes; launcher source (not exported) |
-| `@nylorun/cli` | Dev commands, Project links, bootstrap, running the application under a watcher |
+| `@nylorun/runtime` | OSS Host + Tenant Runtimes; the `nylorun-runtime` launcher bin |
+| `@nylorun/cli` | Dev commands, Project links, prerequisite checks, running the application under a watcher |
 | `@nylorun/studio` | Dashboard and trusted local proxy (`nylorun-studio`) |
 | `@nylorun/create-agent` | Scaffolding and tested pins |
-| `@nylorun/runtime-<platform>-<arch>` | Per-platform Runtime build (Node + runtime + launcher) |
 
 ## Packages, surfaces and hosts
 
 Solid arrows are package dependencies. Dotted arrows mean "uses" or "is served
 by". There are no arrows between clients. To use a local OSS Runtime, the CLI
-and desktop apps also run the launcher inside its build. That is a process, not
+and desktop apps also run the installed Runtime's launcher. That is a process, not
 a dependency.
 
 ```mermaid
@@ -55,14 +56,14 @@ flowchart TB
 
   subgraph hosts["Hosts"]
     direction LR
-    RT["OSS Runtime build · local<br/>Runtime Host + Tenant Runtimes<br/>nylorun-runtime launcher · Node"]
+    RT["OSS Runtime · local · npm package<br/>Runtime Host + Tenant Runtimes<br/>nylorun-runtime launcher · developer's Node"]
     CLOUD["Cloud host<br/><i>separate repository</i>"]
   end
 
   subgraph foundation["Foundation"]
     direction LR
     HARNESS["@nylorun/harness<br/>agent loop · checkpoints · effects"]
-    CORE["@nylorun/core<br/>contracts · protocol · error codes<br/>Admin, Project-link and build schemas"]
+    CORE["@nylorun/core<br/>contracts · protocol · error codes<br/>Admin and Project-link schemas"]
   end
 
   APP --> AGENTS
@@ -101,8 +102,9 @@ Runtime, so it isn't shown.
 - **Clients** depend only on client packages. No client depends on another
   client, on `runtime` or on `harness`.
 - **Hosts** depend on `harness` and `core`, never on a client package.
-- **The launcher is part of the Runtime build.** Its source lives in
-  `@nylorun/runtime`, which does not export it. Clients run it as a process.
+- **The launcher is the Runtime package's bin.** `@nylorun/runtime` ships it
+  as `nylorun-runtime` and does not export its source. Clients find it on
+  PATH and run it as a process.
 - A developer application's production dependency tree contains
   `@nylorun/agents` and `@nylorun/core` and no other Nylorun package.
 
@@ -126,13 +128,13 @@ flowchart LR
 
 ## Interfaces and ownership
 
-- **core** — `/define`, `/contracts`, `/compatibility`; Admin, Project-link and
-  build-manifest schemas; closed `ERROR_CODES`; id generators.
+- **core** — `/define`, `/contracts`, `/compatibility`; Admin and Project-link
+  schemas; closed `ERROR_CODES`; id generators.
 - **agents** — `/define`, `/client`, `/executor`; `resolveConnection`,
   application and executor modes of `connectAgents`, derived executor tokens.
 - **admin** — `createAdmin`, `createTenant`, Tenant list/get/delete, `status`.
-- **runtime** — `/core`, `/node`, `/server` (Host entry). Launcher compiles to
-  `dist/launcher/main.js` and ships only inside Runtime builds.
+- **runtime** — `/core`, `/node`, `/server` (Host entry). The launcher compiles
+  to `dist/launcher/main.js`, exposed as the `nylorun-runtime` bin.
 - **cli** — `nylorun` binary: `dev`, `runtime`, `tenant`, `configure`, `doctor`.
   No `@nylorun/runtime` dependency; no `serve` or `studio` commands.
 - **studio** — `nylorun-studio` binary and `startStudio()`; depends on `agents`

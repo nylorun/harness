@@ -22,13 +22,22 @@ and conformance gates remain open.
 
 ## Quick start
 
+Install the prerequisites once: Node.js 24 or newer, and the Runtime.
+
+```sh
+node --version                                 # 24 or newer
+npm install --global @nylorun/runtime@beta     # provides nylorun-runtime
+```
+
 Create a local agent project (Studio enabled by default):
 
 ```sh
 npm create @nylorun/agent@beta my-agent
 ```
 
-The creator installs dependencies and starts development. The first start asks
+The creator installs dependencies and starts development. If a prerequisite
+is missing, it stops after creating the project and prints what to install;
+nothing is downloaded for you. The first start asks
 for a model provider, creates a **Tenant** on the **Runtime Host**, writes a
 **Project link** under `.nylorun/`, and stores the provider credential in that
 Tenant's vault.
@@ -42,8 +51,8 @@ Useful flags (after `--`):
 | `--yes`       | Accept npm install prompts                  |
 
 The generated app depends on the SDK and CLI; Studio is a development
-dependency. The `@nylorun/cli` package provides `nylorun` and brings the OSS
-runtime.
+dependency. The `@nylorun/cli` package provides `nylorun`, which runs the
+installed OSS Runtime (`nylorun doctor runtime` checks the prerequisites).
 
 ## Develop this repository
 
@@ -56,8 +65,9 @@ npm run setup
 npm run dev
 ```
 
-`npm run setup` installs both lockfiles and builds packages. `npm run dev`
-starts (or attaches to) a Runtime Host and stores the model provider in the
+`npm run setup` installs both lockfiles and builds packages. `npm run dev` uses
+the workspace Runtime (no global install needed here) and starts (or attaches
+to) a Runtime Host and stores the model provider in the
 linked Tenant vault on first run. The Host keeps running after you stop `dev`,
 so sessions survive a source change; `npx nylorun runtime down` stops it.
 

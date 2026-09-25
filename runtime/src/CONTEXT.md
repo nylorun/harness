@@ -31,20 +31,19 @@ _Avoid_: treating Host shutdown as a shared Admin API method.
 imports to call one surface. Each depends only on `@nylorun/core`.
 _Avoid_: depending on `runtime` or `harness` from application code.
 
-**Runtime build**: A per-platform package
-(`@nylorun/runtime-<platform>-<arch>`) containing Node, `@nylorun/runtime` with
-its dependencies, and the launcher. Installed under `<host root>/runtime/<version>/`.
-_Avoid_: equating the npm package `@nylorun/runtime` alone with what users run
-locally after version 1.
-
-**Launcher**: The `nylorun-runtime` executable inside a Runtime build. It
-installs builds and starts, stops and upgrades the local Host. Clients run it
+**Launcher**: The `nylorun-runtime` executable: the bin of the
+`@nylorun/runtime` npm package. It starts, stops and restarts the local Host on
+the Node it runs on, from its own package. Clients find it on PATH and run it
 as a process; it is not imported and not a surface.
-_Avoid_: "CLI host module" or importing launcher source from other packages.
+_Avoid_: "CLI host module", "Runtime build", or importing launcher source from
+other packages.
 
-**Bootstrap**: The one-time download a client performs when no Runtime build is
-installed yet (registry → integrity check → `install --from` → delete staging).
-_Avoid_: calling every `install` a bootstrap.
+**Prerequisites**: What a developer installs before using the Runtime: Node 24
+or newer, and `@nylorun/runtime` (`npm install --global @nylorun/runtime`, or a
+project devDependency). No client downloads either; a missing prerequisite is
+an error naming the install command. See
+[runtime distribution](../../docs/design/runtime-distribution.md).
+_Avoid_: "bootstrap" for installing the Runtime.
 
 **Local Host settings**: `host.json` and `host-credentials.json` in the Host
 root. `@nylorun/admin` reads them for local connection resolution.
@@ -70,9 +69,9 @@ _Avoid_: "scope", "database", or "SQLite path" as the name for this unit.
 own principals and never reads ambient environment, cwd, or home.
 _Avoid_: equating "Runtime" alone with a single Project's process.
 
-**Host root**: The absolute directory that holds Host files, the installed
-`runtime/<version>/` tree, `tenants/`, and `trash/`. Resolved once from
-`NYLORUN_HOME` or `~/.nylorun`.
+**Host root**: The absolute directory that holds Host files, `tenants/`, and
+`trash/`. Resolved once from `NYLORUN_HOME` or `~/.nylorun`. The Runtime itself
+is installed by npm, not under the Host root.
 
 **Project link**: Project-local `.nylorun/link.json` with
 `{ format, hostUrl, hostId, tenantId }`, plus `.nylorun/credentials.json`

@@ -33,6 +33,10 @@ Setup installs both lockfiles and builds packages. The seven packages compile wi
 regenerate examples, or change local credentials/data. Package consumer Node
 support remains separate from the pinned contributor toolchain.
 
+`npm run dev` links the workspace Runtime into `.tmp/runtime-prefix` and puts
+its `nylorun-runtime` first on PATH, so contributors need no global
+`@nylorun/runtime` and never run a published one by accident.
+
 Studio opens at `http://127.0.0.1:4161`; the Runtime Host listens on port 8787
 (or the port in `host.json`). The first run starts the Host, creates or reuses a
 Tenant via a Project link under gitignored `examples/.nylorun/`, and stores the

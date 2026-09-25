@@ -1,17 +1,25 @@
 # @nylorun/cli
 
 The local `nylorun` executable. Depends on `@nylorun/agents` and `@nylorun/admin`
-only among Nylorun packages — it runs the **launcher** inside a Runtime build as
-a process and never imports `@nylorun/runtime`. Requires Node 24+. Vocabulary:
+only among Nylorun packages — it runs the installed Runtime's **launcher** as a
+process and never imports `@nylorun/runtime`. Vocabulary:
 [runtime/src/CONTEXT.md](../runtime/src/CONTEXT.md).
 
+Prerequisites, installed by the developer (the CLI never downloads them):
+
 ```sh
-nylorun runtime up                 # launcher: install pin if needed, start Host
+node --version                            # 24 or newer
+npm install --global @nylorun/runtime     # provides nylorun-runtime
+nylorun doctor runtime                    # checks both
+```
+
+```sh
+nylorun runtime up                 # launcher: start the Host
 nylorun runtime down               # stop the Host; keep Tenants and host.json
 nylorun runtime status             # Host id, address, version, Tenant list
 nylorun runtime status --env       # export lines for the linked Project
 nylorun runtime logs [--follow]    # Host + Tenant logs
-nylorun runtime restart            # restart onto the CLI's pinned Runtime build
+nylorun runtime restart            # restart onto the installed Runtime
 nylorun runtime run                # attached foreground Host
 nylorun dev [entry]                # up → link/create Tenant → tsx watch entry
 nylorun dev --ephemeral            # temporary Host root + one Tenant
@@ -19,6 +27,7 @@ nylorun dev --local-ui             # also start Studio with a local dashboard
 nylorun studio [--local-ui]        # start Studio (launch URL + proxy token)
 nylorun configure                  # replace model credential on the linked Tenant
 nylorun tenant list|delete|status|reset
+nylorun doctor runtime             # prerequisites: Node 24+, installed Runtime
 nylorun doctor sandbox             # sandbox backend via Tenant API
 ```
 
@@ -26,13 +35,17 @@ nylorun doctor sandbox             # sandbox backend via Tenant API
 `node dist/src/main.js` with `connectAgents` in the application.
 `--local-ui` cannot be combined with `--no-studio`.
 
-## Runtime builds and the launcher
+## The launcher
 
-`nylorun runtime …` resolves the newest installed Runtime build under the Host
-root, bootstraps from the registry when none exists, and invokes
-`nylorun-runtime` with `--json`. The Host runs on the build's bundled Node.
-See [building a desktop client](../docs/building-a-desktop-client.md) for the
-launcher contract.
+`nylorun runtime …` finds `nylorun-runtime` on PATH, checks that it speaks
+launcher protocol 1 and a compatible Host protocol, and invokes it with
+`--json`. The Host runs on the same Node, from the installed
+`@nylorun/runtime`. When the launcher is missing or incompatible, the command
+exits 1 with the install command for the recommended version
+(`cli/package.json` `nylorun.runtime`). A project devDependency on
+`@nylorun/runtime` also works, because npm scripts put `node_modules/.bin` on
+PATH. See [building a desktop client](../docs/building-a-desktop-client.md)
+for the launcher contract.
 
 `dev` starts (or reuses) the Host via the launcher, creates a Tenant through
 `@nylorun/admin` when the Project has no link, writes format-1 link +
@@ -46,8 +59,8 @@ root (`NYLORUN_HOME` / `~/.nylorun`, never cwd), and prints `launchUrl`.
 ## Host root, Tenants and Project link
 
 The **Host root** is `NYLORUN_HOME` or `~/.nylorun` (resolved absolute once).
-It holds `host.json`, admin credentials, installed Runtime builds and every
-Tenant. Isolation is per **Tenant**, not per Project directory.
+It holds `host.json`, admin credentials and every Tenant; the Runtime itself
+is installed by npm. Isolation is per **Tenant**, not per Project directory.
 
 A **Project** stores only:
 
@@ -89,7 +102,7 @@ Install the CLI as a **devDependency**. Generated applications keep
 | `426` / exit 5 | Upgrade CLI / Runtime pin, or pin a matching older set |
 | Port conflict | Stop the other process or `nylorun runtime up --port <n>` |
 | Logs | `nylorun runtime logs --follow` |
-| No Runtime build | First `runtime up` / `dev` bootstraps; needs network once |
+| Runtime not installed | `npm install --global @nylorun/runtime`; `nylorun doctor runtime` checks |
 
 See [package architecture](../docs/design/package-architecture.md) and
 [MIGRATION.md](../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta).

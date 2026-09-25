@@ -10,6 +10,7 @@
   - `start` → `node dist/src/main.js`; `studio` → `nylorun-studio`.
   - `@nylorun/cli` and `@nylorun/studio` move to `devDependencies`; production depends on `@nylorun/agents` (and `zod`) only.
   - `--no-studio` removes Studio without rewriting `dev`.
+  - Before `npm run dev`, checks the prerequisites (Node 24+ and `nylorun-runtime` on PATH). If one is missing, it stops after creating the project and prints the install commands; it never installs them.
 
 ### Patch Changes
 

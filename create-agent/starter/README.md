@@ -1,6 +1,14 @@
 # My Nylorun agent
 
-Requires Node 24 and npm 11. Agent and tool definitions live in `agents/`. A
+Before you start, install the prerequisites once. Nothing downloads them for
+you; `npx nylorun doctor runtime` checks both.
+
+```sh
+node --version                            # 24 or newer
+npm install --global @nylorun/runtime     # the Runtime (nylorun-runtime)
+```
+
+Agent and tool definitions live in `agents/`. A
 **Runtime Host** holds your sessions in isolated **Tenants**; this project
 attaches through a **Project link** and connects your tools through the SDK's
 authenticated SSE executor. Production entry is `src/main.ts`, which calls

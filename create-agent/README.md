@@ -1,6 +1,11 @@
 # @nylorun/create-agent
 
+Install the prerequisites first (the creator checks them and never installs
+them):
+
 ```sh
+node --version                                 # 24 or newer
+npm install --global @nylorun/runtime@beta     # provides nylorun-runtime
 npm create @nylorun/agent@beta my-agent
 ```
 
@@ -10,7 +15,8 @@ Creates a Node 24 project with `@nylorun/agents` and Zod in production, plus
 `connectAgents` for both `npm run dev` and `npm start`. The starter includes
 one ordinary `lookup_order` tool; ask “Look up order demo-123”.
 
-Creation installs dependencies and starts development. Use `-- --no-studio` to
+Creation installs dependencies and starts development. If a prerequisite is
+missing, it stops after creating the project and prints what to install. Use `-- --no-studio` to
 omit Studio from the project, or `-- --no-open` to suppress browser opening.
 `--yes` affects installation only. The first `nylorun dev` starts the local
 Runtime and asks for the model provider when the terminal is interactive and
