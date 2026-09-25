@@ -165,7 +165,9 @@ try {
   const proxyOrigin = proxyOriginFromLaunchUrl(launchUrl);
 
   // I1: unauthenticated GET / still serves local SPA (or hosted landing).
-  assert.match(await (await fetch(proxyOrigin)).text(), /<div id="root">|<title>Nylorun Studio<\/title>/);
+  const rootPage = await fetch(proxyOrigin);
+  assert.equal(rootPage.status, 200, "GET / must be reachable without a token");
+  assert.match(await rootPage.text(), /<!doctype html>/i);
 
   const unauthorized = await fetch(`${proxyOrigin}/_studio/hello`);
   assert.equal(unauthorized.status, 401, "hello without token must be 401");

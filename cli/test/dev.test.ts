@@ -160,16 +160,19 @@ setInterval(()=>{}, 1000);
     await writeFile(
       join(root, "node_modules/@nylorun/studio/index.js"),
       `
-import {writeFileSync} from 'node:fs';
+import { writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 export async function startStudio(options) {
-  writeFileSync('studio.json', JSON.stringify(options));
+  writeFileSync(join(projectRoot, 'studio.json'), JSON.stringify(options));
   const timer = setInterval(() => {}, 1000);
   return {
     address: 'http://localhost:4161',
     launchUrl: 'http://localhost:4161/#studio=1&port=4161&token=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     close: async () => {
       clearInterval(timer);
-      writeFileSync('studio-stopped', 'yes');
+      writeFileSync(join(projectRoot, 'studio-stopped'), 'yes');
     },
   };
 }

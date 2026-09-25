@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -448,64 +448,74 @@ test("AC9: local mode serves dist/web and allows own origin", async () => {
   const webRoot = join(
     new URL("../dist/web", import.meta.url).pathname,
   );
+  const indexPath = join(webRoot, "index.html");
+  const assetPath = join(webRoot, "assets", "app.js");
+  const previousIndex = await readFile(indexPath, "utf8").catch(() => undefined);
+  const previousAsset = await readFile(assetPath).catch(() => undefined);
   await mkdir(join(webRoot, "assets"), { recursive: true });
   await writeFile(
-    join(webRoot, "index.html"),
+    indexPath,
     "<!doctype html><title>local-studio</title><body>local-ui</body>",
   );
-  await writeFile(join(webRoot, "assets", "app.js"), "console.log(1)");
+  await writeFile(assetPath, "console.log(1)");
 
-  await withUpstream(
-    (req, res) => {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    },
-    async (runtimeUrl) => {
-      const studio = await startStudio({
-        runtimeUrl,
-        serverKey: "server-secret",
-        tenant: TENANT,
-        open: false,
-        port: 0,
-        ui: "local",
-      });
-      try {
-        assert.ok(studio.launchUrl.startsWith(`${studio.address}/#`));
-        const page = await fetch(studio.address);
-        assert.equal(page.status, 200);
-        assert.match(await page.text(), /local-ui/);
+  try {
+    await withUpstream(
+      (req, res) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      },
+      async (runtimeUrl) => {
+        const studio = await startStudio({
+          runtimeUrl,
+          serverKey: "server-secret",
+          tenant: TENANT,
+          open: false,
+          port: 0,
+          ui: "local",
+        });
+        try {
+          assert.ok(studio.launchUrl.startsWith(`${studio.address}/#`));
+          const page = await fetch(studio.address);
+          assert.equal(page.status, 200);
+          assert.match(await page.text(), /local-ui/);
 
-        const token = tokenFromLaunch(studio.launchUrl);
-        const origin = studio.address;
-        const response = await fetch(
-          `${studio.address}/_studio/runtime/v1/agents`,
-          {
-            headers: { ...auth(token), origin },
-          },
-        );
-        assert.equal(response.status, 200);
-        assert.equal(
-          response.headers.get("access-control-allow-origin"),
-          origin,
-        );
+          const token = tokenFromLaunch(studio.launchUrl);
+          const origin = studio.address;
+          const response = await fetch(
+            `${studio.address}/_studio/runtime/v1/agents`,
+            {
+              headers: { ...auth(token), origin },
+            },
+          );
+          assert.equal(response.status, 200);
+          assert.equal(
+            response.headers.get("access-control-allow-origin"),
+            origin,
+          );
 
-        const preflight = await fetch(
-          `${studio.address}/_studio/runtime/v1/agents`,
-          {
-            method: "OPTIONS",
-            headers: { origin },
-          },
-        );
-        assert.equal(preflight.status, 204);
-        assert.equal(
-          preflight.headers.get("access-control-allow-origin"),
-          origin,
-        );
-      } finally {
-        await studio.close();
-      }
-    },
-  );
+          const preflight = await fetch(
+            `${studio.address}/_studio/runtime/v1/agents`,
+            {
+              method: "OPTIONS",
+              headers: { origin },
+            },
+          );
+          assert.equal(preflight.status, 204);
+          assert.equal(
+            preflight.headers.get("access-control-allow-origin"),
+            origin,
+          );
+        } finally {
+          await studio.close();
+        }
+      },
+    );
+  } finally {
+    if (previousIndex !== undefined) await writeFile(indexPath, previousIndex);
+    if (previousAsset !== undefined) await writeFile(assetPath, previousAsset);
+    else await rm(assetPath, { force: true }).catch(() => {});
+  }
 });
 
 test("AC10: allowlisted runtime proxy still works through authorize gate", async () => {
