@@ -165,3 +165,16 @@ it("E1-4: failed install leaves other versions untouched", async () => {
   expect(existsSync(join(paths.runtime, "0.9.6-missing"))).toBe(false);
 });
 
+
+it("E1-4: Intel macOS is rejected before any download (no darwin-x64 build)", async () => {
+  const paths = await home();
+  await expect(
+    install(paths, {
+      version: "0.9.7-test",
+      registry: "http://127.0.0.1:9",
+      platform: "darwin",
+      arch: "x64",
+    }),
+  ).rejects.toMatchObject({ code: "platform_unsupported" } satisfies Partial<LauncherError>);
+  expect(existsSync(join(paths.runtime, "0.9.7-test"))).toBe(false);
+});

@@ -3,7 +3,11 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { CliError } from "../errors.js";
-import { buildPackageName, currentPlatformArch } from "./builds.js";
+import {
+  buildPackageName,
+  currentPlatformArch,
+  type PlatformArch,
+} from "./builds.js";
 import { extractTarball } from "./extract.js";
 import { verifyIntegrity } from "./integrity.js";
 import { renderProgress, type ProgressEvent } from "./progress.js";
@@ -13,6 +17,8 @@ export interface BootstrapOptions {
   fetchImpl?: typeof fetch;
   /** Override platform package name (tests). */
   packageName?: string;
+  /** Override detected platform (tests). */
+  platform?: PlatformArch;
   onProgress?: (event: ProgressEvent) => void;
   env?: NodeJS.ProcessEnv;
 }
@@ -40,7 +46,14 @@ export async function bootstrap(
   const env = options.env ?? process.env;
   const registry = options.registry ?? defaultRegistry(env);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const current = currentPlatformArch();
+  const current = options.platform ?? currentPlatformArch();
+  // No darwin-x64 build is published; fail before touching the Host home.
+  if (current.platform === "darwin" && current.arch === "x64") {
+    throw new CliError(
+      "Runtime builds are not published for Intel macOS (darwin-x64). Use macOS on Apple silicon, Linux (glibc), or Windows x64.",
+      1,
+    );
+  }
   const name = options.packageName ?? buildPackageName(current);
   const onProgress =
     options.onProgress ??

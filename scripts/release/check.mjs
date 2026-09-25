@@ -24,7 +24,7 @@ try {
   await validatePlan(plan, root);
   for (const [name, version] of Object.entries(plan.packages))
     await releaseNotes(root, name, version);
-  // G6: local build manifest/size + npm view dry-run for five platforms.
+  // G6: local build manifest/size + npm view dry-run for four platforms.
   await checkRuntimeBuilds({
     log: (line) => console.log(line),
   });

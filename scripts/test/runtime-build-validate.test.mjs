@@ -11,15 +11,14 @@ import {
 } from "../release/runtime-build-validate.mjs";
 import { writeJson } from "../lib/repo.mjs";
 
-test("runtimeBuildPublishOrder is the five D8 platforms", () => {
+test("runtimeBuildPublishOrder is the four D8 platforms", () => {
   assert.deepEqual(runtimeBuildPublishOrder(), [
     "@nylorun/runtime-darwin-arm64",
-    "@nylorun/runtime-darwin-x64",
     "@nylorun/runtime-linux-x64",
     "@nylorun/runtime-linux-arm64",
     "@nylorun/runtime-win32-x64",
   ]);
-  assert.equal(buildPackageNames().length, 5);
+  assert.equal(buildPackageNames().length, 4);
   assert.ok(BUILD_SIZE_WARN_BYTES === 60 * 1024 * 1024);
 });
 

@@ -53,7 +53,8 @@ jobs:
             studio/dist/web
             studio/dist/bundle.tar
           if-no-files-found: error
-  # D8 / D17: five platform builds on native runners (wiring only — publish consumes).
+  # D8 / D17: four platform builds on native runners (wiring only — publish consumes).
+  # Matches RUNTIME_BUILD_PLATFORMS in scripts/lib/local-build.mjs (no darwin-x64).
   runtime-build:
     if: github.ref == 'refs/heads/main'
     needs: validate
@@ -61,10 +62,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             platform: darwin-arm64
-          - os: macos-13
-            platform: darwin-x64
           - os: ubuntu-latest
             platform: linux-x64
           - os: ubuntu-24.04-arm

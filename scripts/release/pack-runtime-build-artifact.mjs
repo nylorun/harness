@@ -2,7 +2,7 @@
  * CI helper for publish.yml runtime-build matrix: run --release, copy the
  * tarball into .tmp/release-artifacts/runtime-builds/, write builds-<platform>.json.
  *
- * Env: PLATFORM=darwin-arm64|darwin-x64|linux-x64|linux-arm64|win32-x64
+ * Env: PLATFORM=darwin-arm64|linux-x64|linux-arm64|win32-x64
  */
 import { mkdir, copyFile, writeFile, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";

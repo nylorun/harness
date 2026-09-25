@@ -1,6 +1,6 @@
 /**
  * G6: validate Runtime build manifests, warn on size, and dry-run npm view
- * resolution for the five platform packages (D8 / D17).
+ * resolution for the four platform packages (D8 / D17).
  */
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -125,7 +125,7 @@ export async function dryRunPinnedBuildResolve(runtimeVersion) {
 
 /**
  * Build the current platform locally (if needed), validate it, and dry-run
- * npm view for all five platform packages at the runtime pin.
+ * npm view for all four platform packages at the runtime pin.
  */
 export async function checkRuntimeBuilds({
   repo = root,
