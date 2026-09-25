@@ -178,7 +178,6 @@ export {
   Switch,
   Parallel,
   Map,
-  Verdict,
   VerdictSchema,
   isVerdict,
   withInstructions,
