@@ -9,7 +9,7 @@ HTTP client, Node host or SDK dependencies.
 - Root: shared contracts and types; no authoring or execution entry points.
 
 Applications normally import `@nylorun/agents`. Hosts and the execution engine
-consume core directly. See [package architecture](../docs/design/package-architecture.md).
+consume core directly.
 
 A built agent's non-enumerable `getBinding()` retains local functions, tool
 snapshots, ordered declarations and live output schemas. Only its manifest is

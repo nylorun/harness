@@ -18,7 +18,7 @@ npm run build --workspace @nylorun/runtime
 ## Install and the launcher
 
 Developers install the Runtime as a prerequisite; nothing downloads it for
-them ([runtime distribution](../docs/design/runtime-distribution.md)):
+them:
 
 ```sh
 node --version                            # 24 or newer
@@ -33,8 +33,7 @@ process; prefer `nylorun runtime up`. A project may instead add this package
 as a devDependency to pin its Runtime version; do not make it an application
 production dependency. For tests and ephemeral embeds, use
 `startEphemeralRuntime()` from `@nylorun/runtime/core`. See
-[MIGRATION.md](../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta) and
-[building a desktop client](../docs/building-a-desktop-client.md).
+[MIGRATION.md](../MIGRATION.md#runtime-clients-and-admin-api-breaking-beta).
 
 Default address: loopback port `8787` (persisted in `host.json`). The Host root
 is `NYLORUN_HOME` or `~/.nylorun`. Tenants live under `tenants/<tenantId>/`.

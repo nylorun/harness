@@ -3,8 +3,7 @@
 Execution engine, checkpoints and durable host effects. Shared authoring and wire
 contracts live in `@nylorun/core`; applications use `@nylorun/agents`.
 OSS publishes harness for local Runtime; Cloud installs published packages from
-npm independently. See the
-[package architecture](../docs/design/package-architecture.md).
+npm independently.
 
 Use `/run` for explicit execution, `/model/adapters` for provider format adapters,
 and `/compatibility` for checkpoint compatibility. Definitions and protocol
