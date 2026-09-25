@@ -48,7 +48,7 @@ export interface TenantConfig {
   flow?: Partial<FlowLimits>;
   /**
    * Optional env snapshot for `NYLORUN_FLOW_*`. Host passes this; the Runtime
-   * never reads ambient `process.env` for flow limits.
+   * never reads ambient process environment for flow limits.
    */
   flowEnv?: Readonly<Record<string, string | undefined>>;
   vaultFetch?: typeof fetch;

@@ -47,7 +47,7 @@ function parsePositiveInt(
 
 /**
  * Resolve limits from `RuntimeOptions.flow` overrides and optional env snapshot.
- * Does not read ambient `process.env` — callers pass an explicit env map.
+ * Does not read ambient process environment — callers pass an explicit env map.
  */
 export function resolveFlowLimits(input?: {
   readonly flow?: Partial<FlowLimits> | null;
