@@ -742,8 +742,16 @@ try {
     const url = ready.url;
 
     // Compatible CLI: different package version, same protocol.
+    // Include harness: runtime depends on it and the bumped version is not on npm yet.
     const okCli = join(temporary, "cli-ok");
-    await installConsumer(okCli, packed, ["core", "agents", "admin", "runtime", "cli"]);
+    await installConsumer(okCli, packed, [
+      "core",
+      "harness",
+      "agents",
+      "admin",
+      "runtime",
+      "cli",
+    ]);
     const okPkg = join(okCli, "node_modules/@nylorun/cli/package.json");
     const okManifest = await readJson(okPkg);
     okManifest.version = "9.9.9-acceptance";
@@ -766,7 +774,14 @@ try {
 
     // Outside-range CLI: patch PROTOCOL_VERSION and refuse before mutation.
     const badCli = join(temporary, "cli-bad");
-    await installConsumer(badCli, packed, ["core", "agents", "admin", "runtime", "cli"]);
+    await installConsumer(badCli, packed, [
+      "core",
+      "harness",
+      "agents",
+      "admin",
+      "runtime",
+      "cli",
+    ]);
     const badCore = join(
       badCli,
       "node_modules/@nylorun/core/dist/compatibility.js",

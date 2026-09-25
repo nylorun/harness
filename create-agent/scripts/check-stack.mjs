@@ -13,6 +13,9 @@ for(const enabled of [true,false]){
  assert.equal(p.scripts.start,'node dist/src/main.js');
  assert.equal(p.scripts.studio,enabled?'nylorun-studio':undefined);
  assert.ok(!files['agents/assistant/agent.ts'].match(/\bmodel\s*:/));
- assert.equal(pins.admin,'0.1.0-beta');
+ // Admin is for CLI/desktop/CI — starter apps must not depend on it.
+ assert.equal(p.dependencies['@nylorun/admin'],undefined);
+ assert.equal(p.devDependencies?.['@nylorun/admin'],undefined);
+ assert.match(pins.admin,/^\d+\.\d+\.\d+-beta$/);
 }
 console.log('SDK registry starter contract passed, with and without Studio.');
