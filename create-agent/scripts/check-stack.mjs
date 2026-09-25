@@ -13,6 +13,7 @@ for(const enabled of [true,false]){
  assert.equal(p.scripts.start,'node dist/src/main.js');
  assert.equal(p.scripts.studio,enabled?'nylorun-studio':undefined);
  assert.ok(!files['agents/assistant/agent.ts'].match(/\bmodel\s*:/));
- assert.equal(pins.admin,'0.1.0-beta');
+ const adminPkg=JSON.parse(await readFile(new URL('../../admin/package.json',import.meta.url),'utf8'));
+ assert.equal(pins.admin,adminPkg.version);
 }
 console.log('SDK registry starter contract passed, with and without Studio.');
