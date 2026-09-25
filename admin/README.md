@@ -33,5 +33,4 @@ Errors are `AdminError` with a registry `code` from `@nylorun/core`
 `compareVersions`.
 
 Developer applications do **not** depend on this package — only managing
-clients (CLI, desktop Runtime panel, CI) do. See
-[building a desktop client](../docs/building-a-desktop-client.md).
+clients (CLI, desktop Runtime panel, CI) do.

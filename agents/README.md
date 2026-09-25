@@ -154,7 +154,7 @@ The model gets `bash`, `read`, `write`, `edit`, `grep` and `glob` on a Linux mac
 }))
 ```
 
-The `dev` preset allows package registries and code hosts. Private networks, loopback, the host and cloud metadata endpoints are always blocked. Options from the full design that are not in this version (`setup`, `files`, `secrets`, `mount`, `onStart`, …) throw a `SandboxError` that says so. See [the sandbox design](../docs/design/sandboxes.md).
+The `dev` preset allows package registries and code hosts. Private networks, loopback, the host and cloud metadata endpoints are always blocked. Options from the full design that are not in this version (`setup`, `files`, `secrets`, `mount`, `onStart`, …) throw a `SandboxError` that says so.
 
 Put an agent in another agent's `tools` to let the model delegate to it:
 
