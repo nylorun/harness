@@ -414,6 +414,20 @@ async function seedVirtual(url, tenant) {
   assert.ok(response.ok, text);
 }
 
+/**
+ * `--only H2,H6,...` runs a subset, so CI can split the checks across jobs.
+ * H1, H3 and H4 share one Host and always run together.
+ */
+const SCENARIOS = ["H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "H9"];
+const onlyIndex = process.argv.indexOf("--only");
+const only =
+  onlyIndex === -1
+    ? undefined
+    : new Set((process.argv[onlyIndex + 1] ?? "").split(",").filter(Boolean));
+if (only && (only.size === 0 || [...only].some((id) => !SCENARIOS.includes(id))))
+  throw new Error(`Usage: tenants.mjs [--only ${SCENARIOS.join(",")}]`);
+const selected = (...ids) => !only || ids.some((id) => only.has(id));
+
 const results = [];
 function pass(id, message) {
   results.push({ id, ok: true, message });
@@ -440,7 +454,7 @@ try {
     .version;
 
   // ── H1 / H3 / H4: packed Host, two Tenants, isolation + restart + rotation ──
-  {
+  if (selected("H1", "H3", "H4")) {
     const hostRoot = join(temporary, "host-h1");
     const { hostId, adminKey } = await writeHostFiles(hostRoot, { port: 0 });
     const versionDir = await installRuntimeTree(
@@ -631,7 +645,7 @@ try {
   }
 
   // ── H5: sandbox reconciliation prefix isolation ──
-  {
+  if (selected("H5")) {
     const runtimeRoot = join(temporary, "h5-runtime");
     await installConsumer(runtimeRoot, packed, [
       "core",
@@ -782,7 +796,7 @@ try {
   }
 
   // ── H6: protocol within range vs outside (patched CLI constant) ──
-  {
+  if (selected("H6")) {
     const hostRoot = join(temporary, "host-h6");
     const { adminKey } = await writeHostFiles(hostRoot, { port: 0 });
     const versionDir = await installRuntimeTree(
@@ -897,7 +911,7 @@ try {
   }
 
   // ── H7: installed Runtime; concurrent up; refused restart leaves Host ──
-  {
+  if (selected("H7")) {
     const hostRoot = join(temporary, "host-h7");
     await writeHostFiles(hostRoot, { port: await availablePort() });
     assertNotRealHome(hostRoot);
@@ -945,7 +959,7 @@ try {
   }
 
   // ── H8: Host survives Project node_modules deletion ──
-  {
+  if (selected("H8")) {
     const hostRoot = join(temporary, "host-h8");
     await writeHostFiles(hostRoot, { port: await availablePort() });
     const project = join(temporary, "project-h8");
@@ -979,7 +993,7 @@ try {
   }
 
   // ── H9: Project link rules (clone / move / worktree / tenant use) ──
-  {
+  if (selected("H9")) {
     const hostRoot = join(temporary, "host-h9");
     const { hostId, adminKey } = await writeHostFiles(hostRoot, { port: 0 });
     const versionDir = await installRuntimeTree(
@@ -1080,7 +1094,7 @@ try {
   }
 
   // ── H2: concurrent Projects through one port; stop one leaves Host + other ──
-  {
+  if (selected("H2")) {
     const hostRoot = join(temporary, "host-h2");
     const home = join(temporary, "home-h2");
     await mkdir(home);
@@ -1286,7 +1300,11 @@ console.log("Ready 1 connected agent");
     );
   }
 
-  console.log("\nAll packed-package acceptance checks passed:");
+  console.log(
+    only
+      ? `\nSelected packed-package acceptance checks passed (${[...only].join(",")}):`
+      : "\nAll packed-package acceptance checks passed:",
+  );
   for (const item of results) console.log(`  ${item.id} ${item.message}`);
 } catch (error) {
   console.error(error);

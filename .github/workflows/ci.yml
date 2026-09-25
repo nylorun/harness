@@ -27,9 +27,9 @@ jobs:
       - run: npm run setup
       - run: npm run check -- --built
       - run: npm run check:stack -- --built
-  # End-to-end, in parallel with `check`: packed starter in a real browser,
-  # dev supervisor, clean-checkout setup, and the release combination.
-  smoke:
+  # End-to-end, in parallel with `check`: the packed starter in a real browser,
+  # and the release combination when a PR changes the release plan.
+  smoke-starter:
     runs-on: ubuntu-latest
     # Bound the job so a wedged runner cannot block the PR matrix indefinitely.
     timeout-minutes: 45
@@ -46,20 +46,21 @@ jobs:
             examples/package-lock.json
       - run: npm install --global npm@11.15.0
       - run: npm run setup
-      # Playwright's own Chromium: the runner's Google Chrome left Studio's
-      # message box disabled in the starter smoke (#128).
-      - run: npx playwright-core install --with-deps chromium
+      # Headless Chromium only (the smoke never runs headed), cached per
+      # Playwright version. The runner's preinstalled Chrome supplies its
+      # system libraries, so no apt install.
+      - id: playwright
+        run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-shell
+      - run: npx playwright-core install --only-shell chromium
       - name: Smoke starter
         # Healthy smoke is ~2–4 min; in-process deadline is 15m. Keep Actions
         # above that so the script can report its own abort reason.
         timeout-minutes: 18
         run: node create-agent/scripts/smoke-starter.mjs
-      - name: Test dev
-        timeout-minutes: 10
-        run: npm run test:dev
-      - name: Test setup
-        timeout-minutes: 10
-        run: npm run test:setup
       - name: Validate a proposed release
         if: github.event_name == 'pull_request'
         # release:check is ~2–10 min when healthy; afdaee7 Validate wedged >50 min
@@ -74,8 +75,35 @@ jobs:
             npm run build --prefix examples
             npm run release:check -- --built
           fi
-  # WS-H packed-package acceptance (H1–H9) under a temporary Host root.
+  # Dev supervisor with the packed Runtime, and clean-checkout setup plus
+  # release preparation. No browser; runs beside smoke-starter.
+  smoke-dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm run setup
+      - name: Test dev
+        timeout-minutes: 10
+        run: npm run test:dev
+      - name: Test setup
+        timeout-minutes: 10
+        run: npm run test:setup
+  # WS-H packed-package acceptance (H1–H9) under a temporary Host root, split
+  # into two groups of about a minute each.
   acceptance:
+    strategy:
+      fail-fast: false
+      matrix:
+        scenarios: ["H1,H3,H4,H5,H7,H8", "H2,H6,H9"]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -89,7 +117,7 @@ jobs:
             examples/package-lock.json
       - run: npm install --global npm@11.15.0
       - run: npm run setup
-      - run: node scripts/acceptance/tenants.mjs
+      - run: node scripts/acceptance/tenants.mjs --only ${{ matrix.scenarios }}
   # macOS, the other supported developer OS (Windows developers use WSL2, which
   # is Linux): J5 desktop contract (installs @nylorun/runtime like a developer,
   # then runs its launcher), launcher unit tests (process groups, /private/var
@@ -136,7 +164,7 @@ jobs:
       - run: npm run check --workspaces
   ci:
     if: always()
-    needs: [check, smoke, acceptance, macos, consumers]
+    needs: [check, smoke-starter, smoke-dev, acceptance, macos, consumers]
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI job to pass

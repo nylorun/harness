@@ -54,7 +54,14 @@ jobs:
       # before npm pack (Wave 2; deploy-studio is Wave 3 after H1/H2).
       # check-example-assets (in release:check) needs the examples build.
       - run: npm run build --prefix examples
-      - run: npx playwright-core install --with-deps chromium
+      # Headless Chromium only, cached per Playwright version (see ci.yml).
+      - id: playwright
+        run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-shell
+      - run: npx playwright-core install --only-shell chromium
       - run: npm run release:check -- --built
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
