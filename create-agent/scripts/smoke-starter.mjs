@@ -214,6 +214,39 @@ try {
     );
     return { credentials, link };
   };
+  /**
+   * `dev` prints its ready banner before the application's connectAgents has
+   * registered the seed agent. Studio creating a session in that window left
+   * the session "loading" and the message box disabled (intermittent CI
+   * failure). Poll the Tenant until it serves `assistant`, as the release
+   * smoke does.
+   */
+  const waitForSeedAgent = async (cwd, timeoutMs = 60_000) => {
+    const deadline = Date.now() + timeoutMs;
+    let last = "no response";
+    while (Date.now() < deadline) {
+      try {
+        const { credentials, link } = await readAuth(cwd);
+        const response = await fetch(`${link.hostUrl}/v1/agents`, {
+          headers: {
+            authorization: `Bearer ${credentials.applicationKey}`,
+            "Nylorun-Tenant": link.tenantId,
+            "Nylorun-Protocol": "2",
+          },
+          signal: AbortSignal.timeout(5_000),
+        });
+        const body = await response.json();
+        if (body.agents?.some((agent) => agent.manifest?.id === "assistant")) return;
+        last = `HTTP ${response.status} agents=${JSON.stringify(
+          body.agents?.map((agent) => agent.manifest?.id) ?? null,
+        )}`;
+      } catch (error) {
+        last = error instanceof Error ? error.message : String(error);
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(`Seed agent "assistant" was not served (${last}).`);
+  };
 
   const studioBin = join(project, "node_modules/@nylorun/studio/dist/cli.js");
   const cliBin = join(project, "node_modules/@nylorun/cli/dist/cli.js");
@@ -227,6 +260,7 @@ try {
   const hostBanner = await dev.line(hostLine, 90_000);
   const url = hostBanner.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
   await dev.line(readyLine, 60_000);
+  await waitForSeedAgent(project);
   const studio = group.start(
     "generated-studio",
     process.execPath,
@@ -305,9 +339,21 @@ try {
       `New session missing after goto ${launchUrl}\nURL now: ${page.url()}\npageerrors: ${JSON.stringify(errors)}\nbody:\n${text.slice(0, 2000)}\n${error instanceof Error ? error.message : error}`,
     );
   }
-  await page
-    .getByRole("textbox", { name: "Message" })
-    .fill("Look up order demo-123");
+  try {
+    await page
+      .getByRole("textbox", { name: "Message" })
+      .fill("Look up order demo-123");
+  } catch (error) {
+    const text = await page.locator("body").innerText().catch(() => "(no body)");
+    await mkdir(join(root, ".tmp/release-local"), { recursive: true });
+    await page.screenshot({
+      path: join(root, ".tmp/release-local/studio-message-fail.png"),
+      fullPage: true,
+    });
+    throw new Error(
+      `Message box stayed disabled after New session\npageerrors: ${JSON.stringify(errors)}\nbody:\n${text.slice(0, 2000)}\n${error instanceof Error ? error.message : error}`,
+    );
+  }
   await page.getByRole("button", { name: "Send", exact: true }).click();
   try {
     await page
