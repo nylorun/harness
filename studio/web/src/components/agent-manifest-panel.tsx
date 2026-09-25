@@ -10,12 +10,25 @@ export function hookFrequency(hook: HookPoint): string {
 export function AgentManifestPanel({
   agent,
 }: Readonly<{ agent: AgentManifest }>) {
-  const tools = agent.manifest.capabilities.flatMap(
-    (capability) => capability.tools ?? [],
+  const capabilities =
+    "capabilities" in agent.manifest && Array.isArray(agent.manifest.capabilities)
+      ? agent.manifest.capabilities
+      : [];
+  const tools = capabilities.flatMap(
+    (capability: { tools?: readonly { name: string; description?: string }[] }) =>
+      capability.tools ?? [],
   );
-  const hooks = agent.manifest.capabilities.flatMap((capability) =>
-    (capability.hooks ?? []).map((hook) => ({ capability: capability.id, hook })),
+  const hooks = capabilities.flatMap(
+    (capability: {
+      id: string;
+      hooks?: readonly HookPoint[];
+    }) =>
+      (capability.hooks ?? []).map((hook: HookPoint) => ({
+        capability: capability.id,
+        hook,
+      })),
   );
+  const isWorkflow = agent.kind === "workflow" || agent.manifest.kind === "workflow";
   return (
     <ScrollArea className="h-full">
       <div className="space-y-4 p-4">
@@ -30,12 +43,19 @@ export function AgentManifestPanel({
         </section>
         <Separator />
         <section>
+          <h3 className="text-sm font-medium">Kind</h3>
+          <p className="mt-2 text-sm">{isWorkflow ? "workflow" : "agent"}</p>
+        </section>
+        <Separator />
+        <section>
           <h3 className="text-sm font-medium">Capabilities</h3>
           <ul className="mt-2 space-y-1 text-sm">
-            {agent.manifest.capabilities.length === 0 ? (
-              <li className="text-muted-foreground">None declared</li>
+            {capabilities.length === 0 ? (
+              <li className="text-muted-foreground">
+                {isWorkflow ? "Workflow (no agent capabilities)" : "None declared"}
+              </li>
             ) : (
-              agent.manifest.capabilities.map((capability) => (
+              capabilities.map((capability) => (
                 <li key={capability.id} className="font-mono text-xs">
                   {capability.id}
                 </li>

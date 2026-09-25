@@ -21,6 +21,20 @@ test("labels new Runtime LiveEvent types", () => {
   assert.equal(eventLabel({ type: "effect.uncertain" }), "Effect uncertain");
 });
 
+test("labels workflow LiveEvent types", () => {
+  assert.equal(eventLabel({ type: "node.started" }), "Node started");
+  assert.equal(eventLabel({ type: "loop.iteration" }), "Loop iteration");
+  assert.equal(eventLabel({ type: "loop.decided" }), "Loop decided");
+  assert.equal(
+    eventSummary({
+      type: "loop.decided",
+      payload: { path: "fix-tests", n: 1, next: "input", patched: true },
+    }),
+    "fix-tests #1 → input (patched)",
+  );
+});
+
+
 test("summarizes message and action payloads", () => {
   assert.equal(
     eventSummary({

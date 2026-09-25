@@ -1,7 +1,7 @@
 const { checkBoundaries } = await import("../../scripts/check-boundaries.mjs");
 checkBoundaries("studio");
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 const manifest = JSON.parse(readFileSync("package.json", "utf8"));
@@ -33,7 +33,13 @@ for (const field of [
   "peerDependencies",
   "optionalDependencies",
 ])
-  for (const name of ["@nylorun/harness", "@nylorun/runtime", "@nylorun/admin", "@nylorun/cli"])
+  for (const name of [
+    "@nylorun/harness",
+    "@nylorun/runtime",
+    "@nylorun/admin",
+    "@nylorun/cli",
+    "@nylorun/core",
+  ])
     if (manifest[field]?.[name])
       throw new Error(`Studio must not depend on ${name}`);
 const nylorunDeps = Object.keys(manifest.dependencies ?? {}).filter((name) =>
@@ -41,6 +47,27 @@ const nylorunDeps = Object.keys(manifest.dependencies ?? {}).filter((name) =>
 );
 if (nylorunDeps.length !== 1 || nylorunDeps[0] !== "@nylorun/agents")
   throw new Error("Studio must depend only on @nylorun/agents among Nylorun packages.");
+
+/** SD-I5: browser sources must not pull engine, host or executor. */
+function walk(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)],
+  );
+}
+for (const path of walk("web/src")) {
+  if (!/\.(?:ts|tsx)$/.test(path)) continue;
+  const source = readFileSync(path, "utf8");
+  for (const pattern of [
+    /@nylorun\/harness/,
+    /@nylorun\/runtime/,
+    /@nylorun\/core/,
+    /@nylorun\/agents\/executor/,
+    /execute-action/,
+  ])
+    if (pattern.test(source))
+      throw new Error(`SD-I5: ${path} must not import engine/host/executor (${pattern})`);
+}
+
 const cache = mkdtempSync(join(tmpdir(), "nylo-studio-pack-"));
 const output = execFileSync(
   process.platform === "win32" ? "npm.cmd" : "npm",
