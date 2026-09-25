@@ -4,6 +4,14 @@ export function joinPath(parent: string, part: string): string {
   return parent ? `${parent}/${part}` : part;
 }
 
+/**
+ * Map item path: `<map path>[index]/<each id>` (workflows.md §6).
+ * Example: `implement[2]/code`.
+ */
+export function mapItemPath(mapPath: string, index: number, eachId: string): string {
+  return `${mapPath}[${index}]/${eachId}`;
+}
+
 /** Drop Map indices from a path to get the node key. */
 export function nodeKeyOf(path: string): string {
   return path.replace(/\[\d+]/g, "");

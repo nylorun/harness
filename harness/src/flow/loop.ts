@@ -1,30 +1,15 @@
 import { HarnessError } from "@nylorun/core/define";
 import type { JsonValue, Verdict, WorkflowManifest } from "@nylorun/core/define";
-import type { DurableHost, HostEffect } from "../run/durable.js";
+import type { WorkflowLoopNode, WorkflowNode } from "@nylorun/core";
+import type { DurableHost } from "../run/durable.js";
 import { HostSuspension } from "../loop/host-suspension.js";
 import type { FlowCheckpoint } from "./checkpoint.js";
-import { flowEffectId, iterationsOf, joinPath } from "./paths.js";
+import { createFlowContext, failureOf, settleInFlight, type FlowContext } from "./context.js";
+import { joinPath, nodeKeyOf } from "./paths.js";
+import { runNode, unwrapSlot } from "./node.js";
+import { FlowNodeError, type FlowDurableResult, type FlowRunResult } from "./types.js";
 
-export type FlowRunResult =
-  | { readonly status: "completed"; readonly output: JsonValue }
-  | {
-      readonly status: "failed";
-      readonly error: { readonly code: string; readonly message: string; readonly path?: string };
-    }
-  | { readonly status: "cancelled" }
-  | { readonly status: "paused"; readonly pending: unknown };
-
-export type FlowDurableResult =
-  | {
-      readonly status: "waiting" | "uncertain";
-      readonly checkpoint: FlowCheckpoint;
-      readonly effectIds: readonly string[];
-    }
-  | {
-      readonly status: "completed" | "paused" | "cancelled" | "failed";
-      readonly checkpoint: FlowCheckpoint;
-      readonly result: FlowRunResult;
-    };
+export type { FlowDurableResult, FlowRunResult } from "./types.js";
 
 type LoopHistoryEntry = {
   readonly iteration: number;
@@ -48,111 +33,113 @@ export async function runLoop(options: {
   const root = manifest.root;
   if (!("loop" in root))
     throw new HarnessError("execution.invalid-state", "runLoop expects a loop root");
-  const loop = root.loop;
-  const loopPath = loop.id;
-  const runNode = loop.run;
-  if (!("agent" in runNode))
-    throw new HarnessError("execution.invalid-state", "Tracer Loop.run must be an agent node");
-  const agentId = runNode.agent;
-  const agentPath = joinPath(loopPath, agentId);
 
-  const pending = new Map<string, "pending" | "uncertain">();
-  const inFlight = new Set<Promise<unknown>>();
-
-  const effect = async (
-    kind: "agent" | "fn" | "verify",
-    input: unknown,
-    identity: { path: string; key: string; iterations: string },
-    context: Record<string, unknown> = {},
-  ): Promise<unknown> => {
-    const effectId = flowEffectId({
-      turnId: checkpoint.turnId,
-      segment: checkpoint.segment,
-      path: identity.path,
-      kind,
-      iterations: identity.iterations,
-    });
-    const request: HostEffect = JSON.parse(
-      JSON.stringify({
-        effectId,
-        sessionId: checkpoint.sessionId,
-        turnId: checkpoint.turnId,
-        agentId: manifest.id,
-        manifestHash: checkpoint.manifestHash,
-        kind,
-        path: identity.path,
-        key: identity.key,
-        iterations: identity.iterations,
-        input,
-        context,
-      }),
-    );
-    const operation = host.resolveEffect(request);
-    inFlight.add(operation);
-    let result: Awaited<ReturnType<DurableHost["resolveEffect"]>>;
-    try {
-      result = await operation;
-    } finally {
-      inFlight.delete(operation);
-    }
-    if (result.status !== "completed") {
-      pending.set(effectId, result.status);
-      throw new HostSuspension(effectId, result.status);
-    }
-    return result.outcome.value;
-  };
+  const ctx = createFlowContext({
+    manifest,
+    checkpoint,
+    host,
+    signal: options.signal,
+  });
 
   try {
-    let iteration = 1;
-    let currentInput: JsonValue = checkpoint.input;
-    const history: LoopHistoryEntry[] = [];
-    // Loop run input stays fixed for verify/decide; iteration input feeds the agent.
-    const loopInput = checkpoint.input;
+    if (options.signal?.aborted)
+      return { status: "cancelled", checkpoint, result: { status: "cancelled" } };
+    const output = await runLoopNode(ctx, root.loop, root.loop.id, checkpoint.input);
+    return {
+      status: "completed",
+      checkpoint,
+      result: { status: "completed", output },
+    };
+  } catch (error) {
+    await settleInFlight(ctx);
+    if (error instanceof HostSuspension) {
+      return {
+        status: [...ctx.pending.values()].includes("uncertain") ? "uncertain" : "waiting",
+        checkpoint,
+        effectIds: [...ctx.pending.keys()],
+      };
+    }
+    if (error instanceof FlowNodeError && error.failure.code === "cancelled")
+      return { status: "cancelled", checkpoint, result: { status: "cancelled" } };
+    const failure = failureOf(error, root.loop.id);
+    return {
+      status: "failed",
+      checkpoint,
+      result: { status: "failed", error: failure },
+    };
+  }
+}
 
-    for (;;) {
-      if (options.signal?.aborted)
-        return { status: "cancelled", checkpoint, result: { status: "cancelled" } };
+/**
+ * Nested or root Loop body: run → verify → decide until `{ output }` or stop.
+ * Patching (`decision.agent`) is L5 — ignored here beyond validating presence.
+ */
+export async function runLoopNode(
+  ctx: FlowContext,
+  loop: WorkflowLoopNode["loop"],
+  path: string,
+  input: JsonValue,
+): Promise<JsonValue> {
+  let iteration = 1;
+  let currentInput: JsonValue = input;
+  const history: LoopHistoryEntry[] = [];
+  const loopInput = input;
 
-      const iterations = iterationsOf([iteration]);
+  for (;;) {
+    if (ctx.signal?.aborted)
+      throw new FlowNodeError({ code: "cancelled", message: "cancelled", path });
 
-      const agentOutput = (await effect(
-        "agent",
-        {
-          agentId,
-          input: currentInput,
-          path: agentPath,
-        },
-        { path: agentPath, key: agentPath, iterations },
-        { loopPath, n: iteration },
-      )) as JsonValue;
+    ctx.iterations = [...ctx.iterations, iteration];
+    const iterations = ctx.iterationsString();
 
-      const verdict = (await effect(
-        "verify",
-        { input: loopInput, output: agentOutput, iteration },
-        { path: loopPath, key: loopPath, iterations },
-        { loopPath, n: iteration },
-      )) as Verdict;
+    try {
+      const runOutput = await runNode(ctx, loop.run, runPath(path, loop.run), currentInput, {
+        ownerInput: loopInput,
+      });
 
-      const decision = (await effect(
-        "fn",
-        {
-          output: agentOutput,
-          verdict,
-          iteration,
-          input: loopInput,
-          history,
-        },
-        { path: loopPath, key: `${loopPath}/decide`, iterations },
-        { loopPath, n: iteration, role: "decide" },
-      )) as Decision;
+      const verdict = await runVerify(ctx, loop.verify, path, {
+        input: loopInput,
+        output: runOutput,
+        iteration,
+      });
 
-      if ("output" in decision && !("input" in decision)) {
-        return {
-          status: "completed",
-          checkpoint,
-          result: { status: "completed", output: decision.output },
-        };
+      let decision: Decision;
+      try {
+        decision = (await ctx.effect(
+          "fn",
+          {
+            output: runOutput,
+            verdict,
+            iteration,
+            input: loopInput,
+            history,
+          },
+          { path, key: `${nodeKeyOf(path)}/decide`, iterations },
+          { loopPath: path, n: iteration, role: "decide" },
+        )) as Decision;
+      } catch (error) {
+        if (error instanceof FlowNodeError && error.failure.code === "fn.failed") {
+          throw new FlowNodeError({
+            code: "loop.stopped",
+            message: error.failure.message,
+            path,
+          });
+        }
+        if (
+          error instanceof Error &&
+          !(error instanceof HostSuspension) &&
+          !(error instanceof FlowNodeError)
+        ) {
+          throw new FlowNodeError({
+            code: "loop.stopped",
+            message: error.message,
+            path,
+          });
+        }
+        throw error;
       }
+
+      if ("output" in decision && !("input" in decision)) return decision.output;
 
       if (!("input" in decision))
         throw new HarnessError(
@@ -160,29 +147,89 @@ export async function runLoop(options: {
           "Decide returned neither input nor output",
         );
 
-      history.push({ iteration, output: agentOutput, verdict });
+      // L5 owns turn-manifest patches; `{ agent }` is accepted but not applied here.
+      history.push({ iteration, output: runOutput, verdict });
       currentInput = decision.input as JsonValue;
       iteration += 1;
+    } finally {
+      ctx.iterations.pop();
     }
-  } catch (error) {
-    await Promise.allSettled([...inFlight]);
-    if (!(error instanceof HostSuspension)) {
-      if (error instanceof Error && error.message) {
-        return {
-          status: "failed",
-          checkpoint,
-          result: {
-            status: "failed",
-            error: { code: "loop.stopped", message: error.message, path: loopPath },
-          },
-        };
+  }
+}
+
+function runPath(loopPath: string, run: WorkflowNode): string {
+  const { part } = unwrapSlot(run);
+  return joinPath(loopPath, part);
+}
+
+async function runVerify(
+  ctx: FlowContext,
+  verify: WorkflowLoopNode["loop"]["verify"],
+  loopPath: string,
+  args: { input: JsonValue; output: JsonValue; iteration: number },
+): Promise<Verdict> {
+  const iterations = ctx.iterationsString();
+
+  if ("fn" in verify) {
+    try {
+      return (await ctx.effect(
+        "verify",
+        args,
+        { path: loopPath, key: nodeKeyOf(loopPath), iterations },
+        { loopPath, n: args.iteration },
+      )) as Verdict;
+    } catch (error) {
+      if (error instanceof FlowNodeError) {
+        if (error.failure.code === "loop.verify-failed") throw error;
+        throw new FlowNodeError({
+          code: "loop.verify-failed",
+          message: error.failure.message,
+          path: loopPath,
+        });
       }
       throw error;
     }
-    return {
-      status: [...pending.values()].includes("uncertain") ? "uncertain" : "waiting",
-      checkpoint,
-      effectIds: [...pending.keys()],
-    };
   }
+
+  // Verifier agent (or slot wrapping one): input is { task, response, iteration }.
+  const judgePayload = {
+    task: args.input,
+    response: args.output,
+    iteration: args.iteration,
+  } as JsonValue;
+
+  try {
+    if ("slot" in verify) {
+      const { part } = unwrapSlot(verify);
+      const verifyPath = joinPath(loopPath, part);
+      const value = await runNode(ctx, verify, verifyPath, judgePayload);
+      return value as Verdict;
+    }
+    if ("agent" in verify) {
+      const verifyPath = joinPath(loopPath, verify.agent);
+      const value = await ctx.effect(
+        "agent",
+        { agentId: verify.agent, input: judgePayload, path: verifyPath },
+        { path: verifyPath, key: nodeKeyOf(verifyPath), iterations },
+        { loopPath, n: args.iteration, role: "verify-agent" },
+      );
+      return value as Verdict;
+    }
+  } catch (error) {
+    if (error instanceof HostSuspension) throw error;
+    if (error instanceof FlowNodeError) {
+      throw new FlowNodeError({
+        code: "loop.verify-failed",
+        message: error.failure.message,
+        path: loopPath,
+      });
+    }
+    throw new FlowNodeError({
+      code: "loop.verify-failed",
+      message: error instanceof Error ? error.message : String(error),
+      path: loopPath,
+    });
+  }
+
+  throw new HarnessError("execution.invalid-state", "Unsupported Loop.verify node");
 }
