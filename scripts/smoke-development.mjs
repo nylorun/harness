@@ -33,7 +33,9 @@ const readyLine = (l) =>
   l.includes("Ready") || l.includes("Ctrl-C stops this Project only");
 const hostLine = (l) => /^\s*Host\s+http/.test(l);
 const studioLaunchLine = (l) =>
-  /^Studio\s+https?:\/\//.test(l) || /^Studio on http/.test(l);
+  /^Studio\s+https?:\/\//.test(l) ||
+  /^Studio\s+on\s+https?:\/\//.test(l) ||
+  /^Studio launchUrl https?:\/\//.test(l);
 
 function tokenFromLaunchUrl(launchUrl) {
   const hashIndex = launchUrl.indexOf("#");
@@ -134,6 +136,30 @@ try {
     { cwd: project },
   );
 
+  // Packaged @nylorun/studio no longer ships dist/web. Until local.nylorun.studio
+  // is deployed (Wave 3 / H1–H2), seed the Host cache from the repo pack-ui output
+  // so --local-ui can resolve without a live hosted origin.
+  await run(process.execPath, [join(root, "studio/scripts/pack-ui.mjs")], {
+    cwd: join(root, "studio"),
+  });
+  const uiDigest = JSON.parse(
+    await readFile(join(root, "studio/dist/ui-digest.json"), "utf8"),
+  );
+  assert.equal(typeof uiDigest.version, "string");
+  assert.equal(typeof uiDigest.sha256, "string");
+  const studioCache = join(hostRoot, "studio", uiDigest.version);
+  await mkdir(studioCache, { recursive: true });
+  await run("tar", [
+    "-xf",
+    join(root, "studio/dist/bundle.tar"),
+    "-C",
+    studioCache,
+  ]);
+  await writeFile(
+    join(studioCache, "bundle.tar"),
+    await readFile(join(root, "studio/dist/bundle.tar")),
+  );
+
   const env = {
     ...process.env,
     HOME: home,
@@ -160,7 +186,9 @@ try {
     { cwd: project, env },
   );
   const studioBanner = await studio.line(studioLaunchLine, 90_000);
-  const launchUrl = studioBanner.replace(/^Studio(?:\s+on)?\s+/, "").trim();
+  const launchUrl = studioBanner
+    .replace(/^Studio(?:\s+launchUrl|\s+on)?\s+/, "")
+    .trim();
   const token = tokenFromLaunchUrl(launchUrl);
   const proxyOrigin = proxyOriginFromLaunchUrl(launchUrl);
 
