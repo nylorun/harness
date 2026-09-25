@@ -1,7 +1,12 @@
 import { resolve } from "node:path";
-import type { PlatformArch } from "./builds.js";
-import { UsageError } from "./errors.js";
-import { install } from "./install.js";
+import { fileURLToPath } from "node:url";
+import {
+  HOST_PROTOCOL,
+  LAUNCHER_PROTOCOL,
+} from "@nylorun/core/compatibility";
+import { TENANT_SCHEMA_VERSION } from "../tenant/schema.js";
+import { RUNTIME_VERSION } from "../version.js";
+import { LauncherError, UsageError } from "./errors.js";
 import { down, restart, run, up, type LifecycleContext } from "./lifecycle.js";
 import { logs } from "./logs.js";
 import {
@@ -17,19 +22,24 @@ import { status } from "./status.js";
 export const launcherUsage = `Usage: nylorun-runtime [--home <dir>] [--json] <command>
 
 Commands:
-  install <version> [--from <dir>]
-  up [--version <v>] [--port <n>]
+  version                  also --version
+  up [--port <n>] [--allow-downgrade]
   down [--wait [--timeout <s>]] [--force]
-  restart [--version <v>] [--allow-downgrade] [--wait | --force]
-  run [--version <v>] [--port <n>]
+  restart [--port <n>] [--allow-downgrade] [--wait | --force]
+  run [--port <n>] [--allow-downgrade]
   status
   logs [--lines <n>] [--follow] [--tenant <id> | --all]`;
 
+/** The Runtime needs node:sqlite and Node 24 APIs. */
+const MIN_NODE_MAJOR = 24;
+
 export interface LauncherRuntimeOptions {
   home: string;
-  registry: string;
-  platform: PlatformArch["platform"];
-  arch: PlatformArch["arch"];
+  platform: NodeJS.Platform;
+  /** Node running this launcher (`process.execPath`); the Host runs on it. */
+  nodeBinary: string;
+  /** `process.versions.node`; the launcher refuses Node older than 24. */
+  nodeVersion: string;
   sink: OutputSink;
   /** Allowlisted ambient baseline from main.ts. */
   baselineEnv: Readonly<Record<string, string | undefined>>;
@@ -38,7 +48,16 @@ export interface LauncherRuntimeOptions {
   signal?: AbortSignal;
   /** Optional lifecycle overrides for tests. */
   lifecycle?: Partial<
-    Pick<LifecycleContext, "spawnHost" | "onSignal" | "lock" | "fetchImpl">
+    Pick<
+      LifecycleContext,
+      | "spawnHost"
+      | "onSignal"
+      | "lock"
+      | "fetchImpl"
+      | "hostEntry"
+      | "runtimeVersion"
+      | "tenantSchemaMax"
+    >
   >;
 }
 
@@ -73,7 +92,7 @@ function parseGlobal(args: readonly string[]): Flags {
     if (arg === "--help" || arg === "-h") {
       throw new UsageError(launcherUsage, "");
     }
-    rest.push(arg);
+    rest.push(arg === "--version" && rest.length === 0 ? "version" : arg);
   }
   return { rest, booleans: new Set(), values: new Map(), json, home };
 }
@@ -127,8 +146,10 @@ function lifecycleContext(
   return {
     paths,
     platform: options.platform,
-    arch: options.arch,
-    registry: options.registry,
+    nodeBinary: options.nodeBinary,
+    hostEntry: fileURLToPath(new URL("../host/main.js", import.meta.url)),
+    runtimeVersion: RUNTIME_VERSION,
+    tenantSchemaMax: TENANT_SCHEMA_VERSION,
     baselineEnv: options.baselineEnv,
     emit: (event) => emitEvent(sink, event),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
@@ -153,35 +174,34 @@ export async function runLauncher(
     const [verb, ...rest] = global.rest;
     if (!verb) usage("Missing command.");
 
-    if (verb === "install") {
-      const flags = parseCommandFlags(rest, { values: ["--from"] });
-      const version = flags.rest[0];
-      if (!version || flags.rest.length !== 1) {
-        usage("install requires exactly one <version>.");
-      }
-      await ensureHostLayout(paths);
-      const result = await install(paths, {
-        version,
-        registry: options.registry,
-        platform: options.platform,
-        arch: options.arch,
-        ...(flags.values.has("--from")
-          ? { from: resolve(flags.values.get("--from")!) }
-          : {}),
-        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-        emit: (event) => emitEvent(sink, event),
+    if (verb === "version") {
+      const flags = parseCommandFlags(rest);
+      if (flags.rest.length) usage("version takes no arguments.");
+      emitResult(sink, {
+        runtimeVersion: options.lifecycle?.runtimeVersion ?? RUNTIME_VERSION,
+        launcherProtocol: LAUNCHER_PROTOCOL,
+        protocol: HOST_PROTOCOL,
+        node: options.nodeVersion,
       });
-      emitResult(sink, { ...result });
       return 0;
+    }
+
+    const nodeMajor = Number(options.nodeVersion.split(".")[0]);
+    if (!(nodeMajor >= MIN_NODE_MAJOR)) {
+      throw new LauncherError(
+        "platform_unsupported",
+        `Node ${MIN_NODE_MAJOR} or newer is required to run the Nylorun Runtime (found ${options.nodeVersion}).`,
+        `Install Node ${MIN_NODE_MAJOR}, then reinstall: npm install --global @nylorun/runtime`,
+      );
     }
 
     if (verb === "status") {
       const flags = parseCommandFlags(rest);
       if (flags.rest.length) usage("status takes no arguments.");
-      const result = await status(paths, {
-        platform: options.platform,
-        arch: options.arch,
-      });
+      const result = await status(
+        paths,
+        options.lifecycle?.runtimeVersion ?? RUNTIME_VERSION,
+      );
       emitResult(sink, { ...result });
       return 0;
     }
@@ -218,18 +238,14 @@ export async function runLauncher(
 
     if (verb === "up") {
       const flags = parseCommandFlags(rest, {
-        values: ["--version", "--port", "--from"],
+        booleans: ["--allow-downgrade"],
+        values: ["--port"],
       });
       if (flags.rest.length) usage("up takes no positional arguments.");
       const port = parsePort(flags.values.get("--port"));
       const result = await up(lifecycleContext(paths, options, sink), {
-        ...(flags.values.has("--version")
-          ? { version: flags.values.get("--version") }
-          : {}),
         ...(port !== undefined ? { port } : {}),
-        ...(flags.values.has("--from")
-          ? { from: resolve(flags.values.get("--from")!) }
-          : {}),
+        allowDowngrade: flags.booleans.has("--allow-downgrade"),
       });
       emitResult(sink, { ...result });
       return 0;
@@ -261,7 +277,7 @@ export async function runLauncher(
     if (verb === "restart") {
       const flags = parseCommandFlags(rest, {
         booleans: ["--allow-downgrade", "--wait", "--force"],
-        values: ["--version", "--timeout", "--from", "--port"],
+        values: ["--timeout", "--port"],
       });
       if (flags.rest.length) usage("restart takes no positional arguments.");
       let timeoutMs: number | undefined;
@@ -274,16 +290,10 @@ export async function runLauncher(
       }
       const port = parsePort(flags.values.get("--port"));
       const result = await restart(lifecycleContext(paths, options, sink), {
-        ...(flags.values.has("--version")
-          ? { version: flags.values.get("--version") }
-          : {}),
         allowDowngrade: flags.booleans.has("--allow-downgrade"),
         wait: flags.booleans.has("--wait"),
         force: flags.booleans.has("--force"),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-        ...(flags.values.has("--from")
-          ? { from: resolve(flags.values.get("--from")!) }
-          : {}),
         ...(port !== undefined ? { port } : {}),
       });
       emitResult(sink, { ...result });
@@ -292,19 +302,15 @@ export async function runLauncher(
 
     if (verb === "run") {
       const flags = parseCommandFlags(rest, {
-        values: ["--version", "--port", "--from"],
+        booleans: ["--allow-downgrade"],
+        values: ["--port"],
       });
       if (flags.rest.length) usage("run takes no positional arguments.");
       const port = parsePort(flags.values.get("--port"));
       const ctx = lifecycleContext(paths, options, sink);
       const result = await run(ctx, {
-        ...(flags.values.has("--version")
-          ? { version: flags.values.get("--version") }
-          : {}),
         ...(port !== undefined ? { port } : {}),
-        ...(flags.values.has("--from")
-          ? { from: resolve(flags.values.get("--from")!) }
-          : {}),
+        allowDowngrade: flags.booleans.has("--allow-downgrade"),
         onReady: (ready) => emitResult(sink, { ...ready }),
       });
       void result;

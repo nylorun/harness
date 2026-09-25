@@ -1,6 +1,8 @@
 /**
  * Packed create-agent starter smoke (G7 / I2):
  * - Pack workspace tarballs including @nylorun/admin for CLI installs
+ * - Install the packed Runtime as the developer prerequisite (`nylorun-runtime`
+ *   on PATH); without it, `nylorun dev` names the install command
  * - `nylorun dev` and separate `nylorun-studio` (no `nylorun serve`)
  * - `npm start` = `node dist/src/main.js` with NYLORUN_* from Project link
  */
@@ -21,11 +23,7 @@ import { chromium } from "playwright-core";
 import { root, npmCli, run } from "../../scripts/lib/repo.mjs";
 import { ProcessGroup } from "../../scripts/lib/processes.mjs";
 import { availablePort } from "../../scripts/lib/development.mjs";
-import {
-  localRuntimeBuild,
-  materializeNodeBinary,
-} from "../../scripts/lib/local-build.mjs";
-import { startLocalRegistry } from "../../scripts/lib/local-registry.mjs";
+import { installRuntime } from "../../scripts/lib/runtime-install.mjs";
 
 // Hard wall-clock bound so a wedged CI runner/step cannot sit forever when
 // Actions log upload already stalled (BlobNotFound while status=in_progress).
@@ -42,7 +40,6 @@ smokeDeadline.unref?.();
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-release-"));
 const group = new ProcessGroup();
 let browser;
-let registry;
 const projects = [];
 const tarballs = process.env.NYLORUN_STACK_TARBALLS
   ? JSON.parse(await readFile(process.env.NYLORUN_STACK_TARBALLS, "utf8"))
@@ -86,13 +83,6 @@ function proxyOriginFromLaunchUrl(launchUrl) {
 }
 
 try {
-  const built = await localRuntimeBuild({
-    out: join(root, ".tmp/runtime-builds"),
-    repo: root,
-  });
-  await materializeNodeBinary(built.dir);
-  registry = await startLocalRegistry({ builds: [built] });
-
   const artifacts = join(temporary, "artifacts");
   await mkdir(artifacts);
   for (const name of names) {
@@ -201,14 +191,20 @@ try {
 
   // Fixture models are only allowed on ephemeral Hosts; release smoke uses
   // `--ephemeral` so NYLORUN_DEV_MODEL=fixture can drive Studio and SDK turns.
-  const env = {
+  // Prerequisite, as a developer does: the Runtime (packed candidate with its
+  // packed @nylorun dependencies) installed and on PATH.
+  const runtime = await installRuntime(join(temporary, "runtime"), [
+    tarballs.runtime,
+    tarballs.core,
+    tarballs.harness,
+  ]);
+  const env = runtime.env({
     ...process.env,
     HOME: home,
     USERPROFILE: home,
     NYLORUN_HOME: hostRoot,
-    NYLORUN_REGISTRY: registry.url,
     NYLORUN_DEV_MODEL: "fixture",
-  };
+  });
   const readAuth = async (cwd) => {
     const credentials = JSON.parse(
       await readFile(join(cwd, ".nylorun/credentials.json"), "utf8"),
@@ -217,6 +213,39 @@ try {
       await readFile(join(cwd, ".nylorun/link.json"), "utf8"),
     );
     return { credentials, link };
+  };
+  /**
+   * `dev` prints its ready banner before the application's connectAgents has
+   * registered the seed agent. Studio creating a session in that window left
+   * the session "loading" and the message box disabled (intermittent CI
+   * failure). Poll the Tenant until it serves `assistant`, as the release
+   * smoke does.
+   */
+  const waitForSeedAgent = async (cwd, timeoutMs = 60_000) => {
+    const deadline = Date.now() + timeoutMs;
+    let last = "no response";
+    while (Date.now() < deadline) {
+      try {
+        const { credentials, link } = await readAuth(cwd);
+        const response = await fetch(`${link.hostUrl}/v1/agents`, {
+          headers: {
+            authorization: `Bearer ${credentials.applicationKey}`,
+            "Nylorun-Tenant": link.tenantId,
+            "Nylorun-Protocol": "2",
+          },
+          signal: AbortSignal.timeout(5_000),
+        });
+        const body = await response.json();
+        if (body.agents?.some((agent) => agent.manifest?.id === "assistant")) return;
+        last = `HTTP ${response.status} agents=${JSON.stringify(
+          body.agents?.map((agent) => agent.manifest?.id) ?? null,
+        )}`;
+      } catch (error) {
+        last = error instanceof Error ? error.message : String(error);
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(`Seed agent "assistant" was not served (${last}).`);
   };
 
   const studioBin = join(project, "node_modules/@nylorun/studio/dist/cli.js");
@@ -231,6 +260,7 @@ try {
   const hostBanner = await dev.line(hostLine, 90_000);
   const url = hostBanner.trim().replace(/^Host\s+/, "").split(/\s+/)[0];
   await dev.line(readyLine, 60_000);
+  await waitForSeedAgent(project);
   const studio = group.start(
     "generated-studio",
     process.execPath,
@@ -309,9 +339,21 @@ try {
       `New session missing after goto ${launchUrl}\nURL now: ${page.url()}\npageerrors: ${JSON.stringify(errors)}\nbody:\n${text.slice(0, 2000)}\n${error instanceof Error ? error.message : error}`,
     );
   }
-  await page
-    .getByRole("textbox", { name: "Message" })
-    .fill("Look up order demo-123");
+  try {
+    await page
+      .getByRole("textbox", { name: "Message" })
+      .fill("Look up order demo-123");
+  } catch (error) {
+    const text = await page.locator("body").innerText().catch(() => "(no body)");
+    await mkdir(join(root, ".tmp/release-local"), { recursive: true });
+    await page.screenshot({
+      path: join(root, ".tmp/release-local/studio-message-fail.png"),
+      fullPage: true,
+    });
+    throw new Error(
+      `Message box stayed disabled after New session\npageerrors: ${JSON.stringify(errors)}\nbody:\n${text.slice(0, 2000)}\n${error instanceof Error ? error.message : error}`,
+    );
+  }
   await page.getByRole("button", { name: "Send", exact: true }).click();
   try {
     await page
@@ -501,14 +543,13 @@ try {
   );
   const missingPort = await availablePort();
   const missingHome = await mkdtemp(join(tmpdir(), "nylorun-release-missing-"));
-  const missingEnv = {
+  const missingEnv = runtime.env({
     ...process.env,
     HOME: home,
     USERPROFILE: home,
     NYLORUN_HOME: missingHome,
-    NYLORUN_REGISTRY: registry.url,
     PORT: String(missingPort),
-  };
+  });
   // No fixture and no MODEL_* — vault model stays unconfigured.
   delete missingEnv.NYLORUN_DEV_MODEL;
   const missing = group.start(
@@ -573,13 +614,40 @@ try {
   await missing.stop();
   await rm(missingHome, { recursive: true, force: true }).catch(() => {});
 
+  // Prerequisite missing: with no Runtime on PATH, dev stops and names the
+  // install command. Nothing is downloaded.
+  const noRuntimeHome = await mkdtemp(join(tmpdir(), "nylorun-release-noruntime-"));
+  const noRuntime = await run(
+    process.execPath,
+    [headlessCli, "dev", "--ephemeral"],
+    {
+      cwd: projects[1],
+      capture: true,
+      timeout: 60_000,
+      env: {
+        ...env,
+        NYLORUN_HOME: noRuntimeHome,
+        PATH: dirname(process.execPath),
+      },
+    },
+  ).then(
+    () => undefined,
+    (error) => error,
+  );
+  assert.ok(noRuntime, "nylorun dev must fail without the Runtime on PATH");
+  assert.match(
+    `${noRuntime.stderr ?? ""}${noRuntime.stdout ?? ""}${noRuntime.message}`,
+    /npm install --global @nylorun\/runtime@/,
+  );
+  await rm(noRuntimeHome, { recursive: true, force: true }).catch(() => {});
+  console.log("no-runtime: dev names the install command ok");
+
   console.log(
-    "PASS: packed creator, both starters (ephemeral Host + fixture), browser tool/results, source restart, compiled npm start, shutdown, credentials, and missing-configuration error.",
+    "PASS: packed creator, both starters (ephemeral Host + fixture), browser tool/results, source restart, compiled npm start, shutdown, credentials, missing-configuration error, and missing-Runtime prerequisite.",
   );
 } finally {
   clearTimeout(smokeDeadline);
   await browser?.close();
   await group.close();
-  await registry?.close?.();
   await rm(temporary, { recursive: true, force: true });
 }

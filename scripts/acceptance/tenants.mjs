@@ -6,7 +6,6 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn, fork } from "node:child_process";
 import {
-  access,
   chmod,
   cp,
   mkdir,
@@ -20,10 +19,11 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir, homedir } from "node:os";
-import { join, dirname, resolve } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { root, npm, run, readJson } from "../lib/repo.mjs";
 import { availablePort } from "../lib/development.mjs";
+import { installRuntime } from "../lib/runtime-install.mjs";
 
 const PROTOCOL = "2";
 const PROTOCOL_HEADER = "Nylorun-Protocol";
@@ -154,13 +154,10 @@ async function writeHostFiles(hostRoot, { port = 0 } = {}) {
   return { hostId, adminKey };
 }
 
+/** Install the packed Runtime tree beside (not inside) the Host root. */
 async function installRuntimeTree(hostRoot, packed, version) {
-  const target = join(hostRoot, "runtime", version);
-  const staging = join(
-    hostRoot,
-    "runtime",
-    `.tmp-${version}-${randomBytes(4).toString("hex")}`,
-  );
+  const target = `${hostRoot}-runtime-${version}`;
+  const staging = `${target}.tmp-${randomBytes(4).toString("hex")}`;
   await mkdir(staging, { recursive: true });
   await writeFile(
     join(staging, "package.json"),
@@ -216,6 +213,65 @@ function spawnHost(entry, hostRoot, env = {}) {
     stdio: ["ignore", "ignore", "inherit", "ipc"],
   });
   return child;
+}
+
+/**
+ * The packed Runtime installed as the developer prerequisite, with its
+ * launcher run on this Node against `hostRoot` (--json).
+ */
+async function installedLauncher(prefix, packed, hostRoot) {
+  const installed = await installRuntime(prefix, [
+    packed.runtime,
+    packed.core,
+    packed.harness,
+  ]);
+  const script = join(
+    prefix,
+    "node_modules",
+    "@nylorun",
+    "runtime",
+    "dist",
+    "launcher",
+    "main.js",
+  );
+  const run = (args) =>
+    new Promise((resolvePromise, reject) => {
+      const child = spawn(
+        process.execPath,
+        [script, "--home", hostRoot, "--json", ...args],
+        {
+          env: { ...process.env, NYLORUN_HOME: hostRoot },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.on("data", (c) => {
+        stdout += c.toString("utf8");
+      });
+      child.stderr?.on("data", (c) => {
+        stderr += c.toString("utf8");
+      });
+      child.once("error", reject);
+      child.once("exit", (code) =>
+        resolvePromise({ code: code ?? 1, stdout, stderr }),
+      );
+    });
+  return { env: installed.env, run };
+}
+
+function launcherResult(stdout) {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return undefined;
+      }
+    })
+    .find((event) => event?.type === "result");
 }
 
 async function awaitHostReady(child, timeoutMs = 30_000) {
@@ -840,117 +896,51 @@ try {
     );
   }
 
-  // ── H7: concurrent launcher install --from; offline Host; failed version ──
+  // ── H7: installed Runtime; concurrent up; refused restart leaves Host ──
   {
-    const { localRuntimeBuild, materializeNodeBinary } = await import(
-      "../lib/local-build.mjs"
-    );
     const hostRoot = join(temporary, "host-h7");
     await writeHostFiles(hostRoot, { port: await availablePort() });
     assertNotRealHome(hostRoot);
-    const built = await localRuntimeBuild({
-      out: join(root, ".tmp/runtime-builds"),
-      repo: root,
-    });
-    await materializeNodeBinary(built.dir);
-    const launcher =
-      process.platform === "win32"
-        ? join(built.dir, "bin", "nylorun-runtime.cmd")
-        : join(built.dir, "bin", "nylorun-runtime");
-    const runLauncher = async (args) => {
-      // Prefer build node + launcher entry on Windows so .cmd spawn does not
-      // hit EINVAL / shell-mangled NDJSON (same approach as desktop contract).
-      let command = launcher;
-      let argv = ["--home", hostRoot, "--json", ...args];
-      if (process.platform === "win32") {
-        const buildRoot = resolve(dirname(launcher), "..");
-        const nodeExe = join(buildRoot, "node", "bin", "node.exe");
-        const entry = join(
-          buildRoot,
-          "lib",
-          "node_modules",
-          "@nylorun",
-          "runtime",
-          "dist",
-          "launcher",
-          "main.js",
-        );
-        try {
-          await access(nodeExe);
-          await access(entry);
-          command = nodeExe;
-          argv = [entry, ...argv];
-        } catch {
-          command = process.env.ComSpec ?? "cmd.exe";
-          argv = [
-            "/d",
-            "/s",
-            "/c",
-            `"${launcher}" --home "${hostRoot}" --json ${args.map((a) => `"${a}"`).join(" ")}`,
-          ];
-        }
-      }
-      return new Promise((resolvePromise, reject) => {
-        const child = spawn(command, argv, {
-          env: { ...process.env, NYLORUN_HOME: hostRoot },
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
-        });
-        let stdout = "";
-        let stderr = "";
-        child.stdout?.on("data", (c) => {
-          stdout += c.toString("utf8");
-        });
-        child.stderr?.on("data", (c) => {
-          stderr += c.toString("utf8");
-        });
-        child.once("error", reject);
-        child.once("exit", (code) =>
-          resolvePromise({ code: code ?? 1, stdout, stderr }),
-        );
-      });
-    };
+    const launcher = await installedLauncher(
+      join(temporary, "runtime-h7"),
+      packed,
+      hostRoot,
+    );
     const [a, b] = await Promise.all([
-      runLauncher(["install", runtimeVersion, "--from", built.dir]),
-      runLauncher(["install", runtimeVersion, "--from", built.dir]),
+      launcher.run(["up"]),
+      launcher.run(["up"]),
     ]);
     assert.equal(a.code, 0, a.stderr || a.stdout);
     assert.equal(b.code, 0, b.stderr || b.stdout);
-    const installed = await readdir(join(hostRoot, "runtime"));
-    assert.ok(
-      installed.includes(runtimeVersion),
-      `expected ${runtimeVersion} under runtime/, got ${installed.join(",")}`,
+    const results = [launcherResult(a.stdout), launcherResult(b.stdout)];
+    assert.deepEqual(
+      results.map((result) => result?.started).sort(),
+      [false, true],
+      "exactly one concurrent up starts the Host",
     );
+    assert.equal(results[0].pid, results[1].pid);
+    assert.equal(results[0].version, runtimeVersion);
+    const url = results[0].url;
+    await waitReady(url);
+    assert.equal((await fetch(`${url}/health`)).status, 200);
 
-    const up = await runLauncher(["up", "--version", runtimeVersion]);
-    assert.equal(up.code, 0, up.stderr || up.stdout);
-    const upEvent = up.stdout
-      .split(/\r?\n/)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return undefined;
-        }
-      })
-      .find((event) => event?.type === "result");
-    assert.ok(upEvent?.url, up.stdout);
-    await waitReady(upEvent.url);
-    assert.equal((await fetch(`${upEvent.url}/health`)).status, 200);
-
-    const failed = await runLauncher([
-      "install",
-      "0.0.0-does-not-exist",
-      "--from",
-      join(temporary, "missing-build"),
-    ]);
-    assert.notEqual(failed.code, 0);
-    assert.ok((await readdir(join(hostRoot, "runtime"))).includes(runtimeVersion));
-    assert.equal((await fetch(`${upEvent.url}/ready`)).status, 200);
-    await runLauncher(["down", "--force"]);
+    // A newer Runtime last ran this Host root: restart refuses the downgrade
+    // before touching the running Host.
+    const configPath = join(hostRoot, "host.json");
+    const config = await readJson(configPath);
+    await writeFile(
+      configPath,
+      JSON.stringify({ ...config, runtimeVersion: "99.0.0" }, null, 2),
+    );
+    const refused = await launcher.run(["restart"]);
+    assert.notEqual(refused.code, 0);
+    assert.match(refused.stdout, /downgrade_refused/);
+    assert.equal((await fetch(`${url}/ready`)).status, 200);
+    await writeFile(configPath, JSON.stringify(config, null, 2));
+    await launcher.run(["down", "--force"]);
     pass(
       "H7",
-      "concurrent install --from; Host starts; failed version leaves Host untouched",
+      "installed Runtime: concurrent up starts one Host; a refused restart leaves it untouched",
     );
   }
 
@@ -1091,9 +1081,6 @@ try {
 
   // ── H2: concurrent Projects through one port; stop one leaves Host + other ──
   {
-    const { localRuntimeBuild, materializeNodeBinary } = await import(
-      "../lib/local-build.mjs"
-    );
     const hostRoot = join(temporary, "host-h2");
     const home = join(temporary, "home-h2");
     await mkdir(home);
@@ -1101,83 +1088,15 @@ try {
     const { hostId, adminKey } = await writeHostFiles(hostRoot, { port });
     assertNotRealHome(hostRoot);
 
-    // `nylorun`dev` attach always launcher-ups; install a real Runtime build
-    // under NYLORUN_HOME so attach does not hit the public registry (404).
-    const built = await localRuntimeBuild({
-      out: join(root, ".tmp/runtime-builds"),
-      repo: root,
-    });
-    await materializeNodeBinary(built.dir);
-    const launcherBin =
-      process.platform === "win32"
-        ? join(built.dir, "bin", "nylorun-runtime.cmd")
-        : join(built.dir, "bin", "nylorun-runtime");
-    const runLauncher = async (args) => {
-      let command = launcherBin;
-      let argv = ["--home", hostRoot, "--json", ...args];
-      if (process.platform === "win32") {
-        const buildRoot = resolve(dirname(launcherBin), "..");
-        const nodeExe = join(buildRoot, "node", "bin", "node.exe");
-        const entry = join(
-          buildRoot,
-          "lib",
-          "node_modules",
-          "@nylorun",
-          "runtime",
-          "dist",
-          "launcher",
-          "main.js",
-        );
-        try {
-          await access(nodeExe);
-          await access(entry);
-          command = nodeExe;
-          argv = [entry, ...argv];
-        } catch {
-          command = process.env.ComSpec ?? "cmd.exe";
-          argv = [
-            "/d",
-            "/s",
-            "/c",
-            `"${launcherBin}" --home "${hostRoot}" --json ${args.map((a) => `"${a}"`).join(" ")}`,
-          ];
-        }
-      }
-      return new Promise((resolvePromise, reject) => {
-        const child = spawn(command, argv, {
-          env: { ...process.env, NYLORUN_HOME: hostRoot },
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
-        });
-        let stdout = "";
-        let stderr = "";
-        child.stdout?.on("data", (c) => {
-          stdout += c.toString("utf8");
-        });
-        child.stderr?.on("data", (c) => {
-          stderr += c.toString("utf8");
-        });
-        child.once("error", reject);
-        child.once("exit", (code) =>
-          resolvePromise({ code: code ?? 1, stdout, stderr }),
-        );
-      });
-    };
-
-    const installed = await runLauncher([
-      "install",
-      runtimeVersion,
-      "--from",
-      built.dir,
-    ]);
-    assert.equal(installed.code, 0, installed.stderr || installed.stdout);
-    const up = await runLauncher([
-      "up",
-      "--version",
-      runtimeVersion,
-      "--port",
-      String(port),
-    ]);
+    // `nylorun dev` attach always launcher-ups: the Runtime is a prerequisite
+    // on PATH (packed candidate), never downloaded.
+    const launcher = await installedLauncher(
+      join(temporary, "runtime-h2"),
+      packed,
+      hostRoot,
+    );
+    const runLauncher = launcher.run;
+    const up = await runLauncher(["up", "--port", String(port)]);
     assert.equal(up.code, 0, up.stderr || up.stdout);
     await waitReady(`http://127.0.0.1:${port}`);
     live.push(async () => {
@@ -1267,13 +1186,13 @@ console.log("Ready 1 connected agent");
         [join(project, "node_modules/@nylorun/cli/dist/cli.js"), "dev"],
         {
           cwd: project,
-          env: {
+          env: launcher.env({
             PATH: process.env.PATH,
             NYLORUN_HOME: hostRoot,
             HOME: home,
             USERPROFILE: home,
             NYLORUN_DEV_MODEL: "fixture",
-          },
+          }),
           stdio: ["ignore", "pipe", "pipe"],
         },
       );

@@ -16,13 +16,6 @@ export function emitEvent(sink: OutputSink, event: LauncherEvent): void {
     case "progress": {
       const parts: string[] = [event.phase];
       if (event.message) parts.push(event.message);
-      if (event.received !== undefined) {
-        parts.push(
-          event.total !== undefined
-            ? `${event.received}/${event.total}`
-            : String(event.received),
-        );
-      }
       sink.stderr(parts.join(" "));
       return;
     }

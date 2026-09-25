@@ -67,7 +67,7 @@ export async function writeHostConfig(
       throw new LauncherError(
         "host_format_newer",
         `host.json format ${existingFormat} is newer than this launcher supports (${KNOWN_FORMAT}).`,
-        "Upgrade the Runtime build that manages this Host root, then retry.",
+        "Upgrade the Runtime (npm install --global @nylorun/runtime@latest), then retry.",
         { format: existingFormat, known: KNOWN_FORMAT },
       );
     }

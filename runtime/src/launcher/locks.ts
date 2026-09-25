@@ -133,7 +133,6 @@ export async function withProcessLock<T>(
   }
 }
 
-export const INSTALL_LOCK_WAIT_MS = 120_000;
 export const LIFECYCLE_LOCK_WAIT_MS = 60_000;
 
 export function readProcessLock(path: string): ProcessLock | undefined {

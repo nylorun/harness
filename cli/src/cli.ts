@@ -25,6 +25,7 @@ ${runtimeUsage}
   dev [entry] [--ephemeral] [--local-ui] [--no-studio] [--no-open]
   studio [--local-ui] [--port <n>] [--no-open]
   configure
+  doctor runtime [--json]  check the prerequisites: Node 24+ and an installed Runtime
   doctor sandbox [--json]  show which sandbox backend this Tenant's Host offers
   tenant current|list [--json]|use <name-or-id>|status [--json]|reset|delete`;
 
@@ -138,10 +139,15 @@ async function main() {
 
   if (command === "doctor") {
     const [topic, ...options] = args;
-    if (topic !== "sandbox" || options.some((option) => option !== "--json"))
-      throw usageError("Usage: nylorun doctor sandbox [--json]");
-    const { doctorSandbox } = await import("./doctor.js");
-    await doctorSandbox({ json: options.includes("--json") });
+    if (
+      (topic !== "sandbox" && topic !== "runtime") ||
+      options.some((option) => option !== "--json")
+    )
+      throw usageError("Usage: nylorun doctor runtime|sandbox [--json]");
+    const { doctorRuntime, doctorSandbox } = await import("./doctor.js");
+    const json = options.includes("--json");
+    if (topic === "runtime") await doctorRuntime({ json });
+    else await doctorSandbox({ json });
     return;
   }
 

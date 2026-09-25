@@ -1,6 +1,6 @@
 /**
- * G7 development smoke: packed create-agent starter against a local-registry
- * Runtime build — `npm run dev`, separate `nylorun studio`, then
+ * G7 development smoke: packed create-agent starter against a packed Runtime
+ * installed like a developer installs it (`nylorun-runtime` on PATH) — `npm run dev`, separate `nylorun studio`, then
  * `npm run build` + `npm start` (`node dist/src/main.js`) with Project link env.
  * No `nylorun serve`. Hosted Studio: token from launchUrl; probe `/_studio/hello`.
  */
@@ -15,19 +15,14 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import {
-  localRuntimeBuild,
-  materializeNodeBinary,
-} from "./lib/local-build.mjs";
-import { startLocalRegistry } from "./lib/local-registry.mjs";
 import { ProcessGroup } from "./lib/processes.mjs";
 import { npmCli, root, run } from "./lib/repo.mjs";
+import { installRuntime } from "./lib/runtime-install.mjs";
 
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-dev-smoke-"));
 const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-dev-host-"));
 const home = await mkdtemp(join(tmpdir(), "nylorun-dev-home-"));
 const group = new ProcessGroup();
-let registry;
 
 const readyLine = (l) =>
   l.includes("Ready") || l.includes("Ctrl-C stops this Project only");
@@ -60,13 +55,6 @@ function proxyOriginFromLaunchUrl(launchUrl) {
 }
 
 try {
-  const built = await localRuntimeBuild({
-    out: join(root, ".tmp/runtime-builds"),
-    repo: root,
-  });
-  await materializeNodeBinary(built.dir);
-  registry = await startLocalRegistry({ builds: [built] });
-
   const artifacts = join(temporary, "artifacts");
   await mkdir(artifacts);
   const names = [
@@ -161,14 +149,20 @@ try {
     await readFile(join(root, "studio/dist/bundle.tar")),
   );
 
-  const env = {
+  // Prerequisite, as a developer does: install the Runtime (here the packed
+  // candidate with its packed @nylorun dependencies) and put it on PATH.
+  const runtime = await installRuntime(join(temporary, "runtime"), [
+    tarballs.runtime,
+    tarballs.core,
+    tarballs.harness,
+  ]);
+  const env = runtime.env({
     ...process.env,
     HOME: home,
     USERPROFILE: home,
     NYLORUN_HOME: hostRoot,
-    NYLORUN_REGISTRY: registry.url,
     NYLORUN_DEV_MODEL: "fixture",
-  };
+  });
 
   const cliBin = join(project, "node_modules/@nylorun/cli/dist/cli.js");
 
@@ -266,11 +260,10 @@ try {
   );
 
   console.log(
-    "Development smoke passed: starter via local-registry build, nylorun dev, nylorun studio --local-ui (token + hello), npm start (node dist/src/main.js), no serve.",
+    "Development smoke passed: starter with the packed Runtime on PATH, nylorun dev, nylorun studio --local-ui (token + hello), npm start (node dist/src/main.js), no serve.",
   );
 } finally {
   await group.close();
-  await registry?.close?.();
   await rm(temporary, { recursive: true, force: true });
   await rm(hostRoot, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });

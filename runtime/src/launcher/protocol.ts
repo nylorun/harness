@@ -1,18 +1,9 @@
-import type { ErrorCode } from "@nylorun/core/compatibility";
+import type { ErrorCode, ProtocolRange } from "@nylorun/core/compatibility";
 
 export type LauncherEvent =
   | {
       type: "progress";
-      phase:
-        | "download"
-        | "verify"
-        | "extract"
-        | "install"
-        | "start"
-        | "stop"
-        | "wait";
-      received?: number;
-      total?: number;
+      phase: "start" | "stop" | "wait";
       message?: string;
     }
   | { type: "result"; [field: string]: unknown }
@@ -38,12 +29,6 @@ export interface UpResult {
   started: boolean;
 }
 
-export interface InstallResult {
-  version: string;
-  path: string;
-  installed: boolean;
-}
-
 export interface DownResult {
   stopped: boolean;
 }
@@ -57,7 +42,16 @@ export interface StatusResult {
   pid?: number;
   version?: string;
   runtimeVersion?: string;
-  installed: string[];
+  /** Version of the installed `@nylorun/runtime` running this launcher. */
+  launcherVersion: string;
+}
+
+/** `nylorun-runtime version`: what is installed and what it speaks. */
+export interface VersionResult {
+  runtimeVersion: string;
+  launcherProtocol: 1;
+  protocol: ProtocolRange;
+  node: string;
 }
 
 export interface HostConfigFileV1 {
@@ -74,10 +68,3 @@ export interface HostConfigFileV1 {
   };
 }
 
-export interface InstallRecord {
-  format: 1;
-  version: string;
-  integrity: string | null;
-  source: "registry" | "path";
-  installedAt: string;
-}

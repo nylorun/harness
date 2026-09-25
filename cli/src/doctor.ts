@@ -8,6 +8,10 @@ import {
   type AgentManifest,
 } from "@nylorun/agents";
 import { CliError } from "./errors.js";
+import { launcher, resolveHome, runtimeInstallCommand } from "./runtime/launcher.js";
+
+/** Oldest Node the Runtime runs on (it needs node:sqlite). */
+const MIN_NODE_MAJOR = 24;
 
 const LABEL: Record<string, string> = {
   microsandbox: "microsandbox VM",
@@ -55,6 +59,59 @@ async function fetchSandboxReport(options?: {
     "GET",
     undefined,
   );
+}
+
+/**
+ * `nylorun doctor runtime`: check the two prerequisites (Node 24+ and an
+ * installed `@nylorun/runtime`) and print the fix for each one that fails.
+ * Exits 1 when a prerequisite is missing; installs nothing.
+ */
+export async function doctorRuntime(options: { json: boolean }): Promise<void> {
+  const nodeOk = Number(process.versions.node.split(".")[0]) >= MIN_NODE_MAJOR;
+  let runtime:
+    | { ok: true; version: string; bin: string; node: string }
+    | { ok: false; problem: string };
+  try {
+    const handle = await launcher(resolveHome());
+    runtime = { ok: true, ...handle.runtime };
+  } catch (error) {
+    runtime = {
+      ok: false,
+      problem: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (options.json) {
+    console.log(
+      JSON.stringify(
+        {
+          node: { version: process.versions.node, ok: nodeOk },
+          runtime,
+          install: runtimeInstallCommand(),
+        },
+        null,
+        2,
+      ),
+    );
+  } else {
+    const rows: [string, string][] = [
+      [
+        "node",
+        nodeOk
+          ? `✓ ${process.versions.node}`
+          : `✗ ${process.versions.node}: install Node ${MIN_NODE_MAJOR} or newer`,
+      ],
+      [
+        "runtime",
+        runtime.ok
+          ? `✓ ${runtime.version} · ${runtime.bin}`
+          : `✗ ${runtime.problem.split("\n")[0]}\n    ${runtimeInstallCommand()}`,
+      ],
+    ];
+    const width = Math.max(...rows.map(([key]) => key.length)) + 2;
+    for (const [key, value] of rows)
+      console.log(`  ${key.padEnd(width)}${value}`);
+  }
+  if (!nodeOk || !runtime.ok) process.exitCode = 1;
 }
 
 /** `nylorun doctor sandbox`: Tenant sandbox report via the Tenant API (F2-4). */

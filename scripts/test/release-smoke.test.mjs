@@ -49,6 +49,9 @@ test("the publication smoke creates and starts a project without a terminal or p
         commands.push(args);
         return { status: 0 };
       },
+      // The smoke installs the published Runtime first (the prerequisite).
+      nodeVersion: process.versions.node,
+      findOnPath: () => "/prefix/bin/nylorun-runtime",
     },
   );
   assert.deepEqual(commands, [

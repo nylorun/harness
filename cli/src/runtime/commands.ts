@@ -12,12 +12,12 @@ import {
 } from "./launcher.js";
 import { runtimeVersion } from "./version.js";
 
-export const runtimeUsage = `  runtime up [--port <n>] [--version <v>]
+export const runtimeUsage = `  runtime up [--port <n>]
   runtime down [--wait] [--force] [--timeout <seconds>]
   runtime status [--json] [--env]
   runtime logs [-f|--follow] [-n <lines>] [--tenant <id>|--all]
-  runtime restart [--port <n>] [--version <v>] [--allow-downgrade] [--wait|--force]
-  runtime run [--port <n>] [--version <v>]
+  runtime restart [--port <n>] [--allow-downgrade] [--wait|--force]
+  runtime run [--port <n>]
   up                       alias for "runtime up"
   down                     alias for "runtime down"
   logs                     alias for "runtime logs"`;
@@ -94,24 +94,16 @@ export async function runtimeCommand(
       : resolveHome());
   const handle =
     options.handle ??
-    (await launcher(home, {
-      version: options.version,
-      registry: options.registry,
-      fetchImpl: options.fetchImpl,
-      env: options.env,
-      onProgress: options.onProgress,
-      bootstrap: options.bootstrap,
-    }));
+    (await launcher(home, { env: options.env }));
 
   const [verb, ...rest] = args;
   if (verb === "up" || verb === "start") {
     const flags = parseRuntimeFlags(rest, {
-      values: ["--port", "--version"],
+      values: ["--port"],
     });
     if (flags.rest.length) throw usageError(runtimeUsage);
     const port = parsePort(flags.values.get("--port"));
-    const version = flags.values.get("--version") ?? runtimeVersion();
-    const invokeArgs = ["up", "--version", version];
+    const invokeArgs = ["up"];
     if (port !== undefined) invokeArgs.push("--port", String(port));
     const outcome = await handle.invoke(invokeArgs);
     throwOnLauncherFailure(outcome);
@@ -185,9 +177,19 @@ export async function runtimeCommand(
     throwOnLauncherFailure(outcome);
     const result = outcome.result ?? {};
     if (json) {
-      console.log(JSON.stringify({ ...result, cliRuntimeVersion: runtimeVersion() }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            ...result,
+            node: handle.runtime.node,
+            recommendedRuntimeVersion: runtimeVersion(),
+          },
+          null,
+          2,
+        ),
+      );
     } else {
-      printStatus(result);
+      printStatus(result, handle);
     }
     const state = typeof result.state === "string" ? result.state : undefined;
     const code = exitCodeForStatusState(state);
@@ -237,15 +239,14 @@ export async function runtimeCommand(
   if (verb === "restart") {
     const flags = parseRuntimeFlags(rest, {
       booleans: ["--allow-downgrade", "--wait", "--force"],
-      values: ["--port", "--version"],
+      values: ["--port"],
     });
     if (flags.rest.length) throw usageError(runtimeUsage);
     if (flags.booleans.has("--wait") && flags.booleans.has("--force")) {
       throw usageError("Use either --wait or --force, not both.");
     }
     const port = parsePort(flags.values.get("--port"));
-    const version = flags.values.get("--version") ?? runtimeVersion();
-    const invokeArgs = ["restart", "--version", version];
+    const invokeArgs = ["restart"];
     if (port !== undefined) invokeArgs.push("--port", String(port));
     if (flags.booleans.has("--allow-downgrade"))
       invokeArgs.push("--allow-downgrade");
@@ -259,12 +260,11 @@ export async function runtimeCommand(
 
   if (verb === "run") {
     const flags = parseRuntimeFlags(rest, {
-      values: ["--port", "--version"],
+      values: ["--port"],
     });
     if (flags.rest.length) throw usageError(runtimeUsage);
     const port = parsePort(flags.values.get("--port"));
-    const version = flags.values.get("--version") ?? runtimeVersion();
-    const invokeArgs = ["run", "--version", version];
+    const invokeArgs = ["run"];
     if (port !== undefined) invokeArgs.push("--port", String(port));
     const outcome = await handle.invokeStreaming(invokeArgs);
     throwOnLauncherFailure(outcome);
@@ -301,7 +301,10 @@ function printUpResult(result: Record<string, unknown>): void {
   }
 }
 
-function printStatus(result: Record<string, unknown>): void {
+function printStatus(
+  result: Record<string, unknown>,
+  handle: LauncherHandle,
+): void {
   const lines: [string, string | undefined][] = [
     ["Home", typeof result.home === "string" ? result.home : undefined],
     ["State", typeof result.state === "string" ? result.state : undefined],
@@ -316,18 +319,14 @@ function printStatus(result: Record<string, unknown>): void {
       typeof result.version === "string" ? result.version : undefined,
     ],
     [
-      "Runtime",
+      "Last started",
       typeof result.runtimeVersion === "string"
         ? result.runtimeVersion
         : undefined,
     ],
-    ["CLI Runtime", runtimeVersion()],
-    [
-      "Installed",
-      Array.isArray(result.installed)
-        ? (result.installed as string[]).join(", ") || "(none)"
-        : undefined,
-    ],
+    ["Installed", `${handle.runtime.version} (${handle.runtime.bin})`],
+    ["Node", handle.runtime.node],
+    ["Recommended", runtimeVersion()],
   ];
   const width = Math.max(...lines.map(([label]) => label.length));
   for (const [label, value] of lines) {
@@ -337,4 +336,3 @@ function printStatus(result: Record<string, unknown>): void {
 
 export { runtimeVersion } from "./version.js";
 export { launcher } from "./launcher.js";
-export { bootstrap } from "./bootstrap.js";

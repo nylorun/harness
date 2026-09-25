@@ -10,7 +10,6 @@ import {
   baselineEnvironment,
   hostProcessEnvironment,
 } from "../host/environment.js";
-import { readManifest, type PlatformArch } from "./builds.js";
 import { LauncherError } from "./errors.js";
 import { ensureHostConfig } from "./ensure-config.js";
 import type { HostConfigFile } from "./host-config.js";
@@ -22,18 +21,17 @@ import {
   readHostState,
   writeHostState,
 } from "./host-state.js";
-import { install, type ProgressEmitter } from "./install.js";
 import {
   LIFECYCLE_LOCK_WAIT_MS,
   processAlive,
   withProcessLock,
   type LockOptions,
 } from "./locks.js";
-import { hostUrl, versionDir, type HostPaths } from "./paths.js";
+import { hostUrl, type HostPaths } from "./paths.js";
 import { probeHostHealth, probeReady } from "./probe.js";
 import type { DownResult, LauncherEvent, UpResult } from "./protocol.js";
 import { assertSchemaGuard } from "./schema-guard.js";
-import { forceKillHost, nodeBinaryPath, spawnHostProcess } from "./spawn.js";
+import { forceKillHost, spawnHostProcess } from "./spawn.js";
 import { status } from "./status.js";
 
 const READY_TIMEOUT_MS = 30_000;
@@ -45,9 +43,15 @@ export type LifecycleEmit = (event: LauncherEvent) => void;
 
 export interface LifecycleContext {
   paths: HostPaths;
-  platform: PlatformArch["platform"];
-  arch: PlatformArch["arch"];
-  registry: string;
+  platform: NodeJS.Platform;
+  /** Node that runs the Host: the launcher's own `process.execPath`. */
+  nodeBinary: string;
+  /** Host entry of this package (`dist/host/main.js`). */
+  hostEntry: string;
+  /** Version of this `@nylorun/runtime` package. */
+  runtimeVersion: string;
+  /** Highest Tenant schema this package can open. */
+  tenantSchemaMax: number;
   /** Allowlisted ambient baseline (from main.ts). */
   baselineEnv: Readonly<Record<string, string | undefined>>;
   emit?: LifecycleEmit;
@@ -92,22 +96,22 @@ async function logTail(path: string, lines = 40): Promise<string> {
   }
 }
 
-function resolveTargetVersion(
-  runtimeVersion: string | undefined,
-  requested: string | undefined,
-): string {
-  if (!runtimeVersion && !requested) {
-    throw new LauncherError(
-      "version_required",
-      "No Runtime version is configured and none was requested.",
-      'Pass --version <v>, or install a build and set runtimeVersion via a successful up.',
-    );
-  }
-  if (!runtimeVersion) return requested!;
-  if (!requested) return runtimeVersion;
-  return compareVersions(runtimeVersion, requested) >= 0
-    ? runtimeVersion
-    : requested;
+/**
+ * Refuse to start an older Runtime than the one that last ran this Host root,
+ * unless the caller confirmed the downgrade.
+ */
+function assertNotDowngrade(
+  recorded: string | undefined,
+  target: string,
+  allowDowngrade: boolean | undefined,
+): void {
+  if (!recorded || allowDowngrade) return;
+  if (compareVersions(target, recorded) >= 0) return;
+  throw new LauncherError(
+    "downgrade_refused",
+    `This Host root last ran Runtime ${recorded}; the installed Runtime is ${target}.`,
+    `Install ${recorded} or newer (npm install --global @nylorun/runtime@${recorded}), or pass --allow-downgrade after confirming Tenants can open on the older schema.`,
+  );
 }
 
 async function awaitHostReady(
@@ -192,16 +196,11 @@ async function requestShutdown(
 }
 
 export interface UpOptions {
-  version?: string;
   port?: number;
   /** Foreground mode used by `run`. */
   foreground?: boolean;
-  from?: string;
-  /**
-   * When true, use `version` exactly (restart after allow-downgrade).
-   * Default `up` still takes max(runtimeVersion, --version).
-   */
-  exactVersion?: boolean;
+  /** Start even when this Runtime is older than the one that last ran. */
+  allowDowngrade?: boolean;
 }
 
 /**
@@ -228,10 +227,7 @@ async function upLocked(
   });
   await ensureHostCredentials(ctx.paths);
 
-  const before = await status(ctx.paths, {
-    platform: ctx.platform,
-    arch: ctx.arch,
-  });
+  const before = await status(ctx.paths, ctx.runtimeVersion);
 
   if (before.state === "running" && !options.foreground) {
     return {
@@ -264,54 +260,21 @@ async function upLocked(
     await clearHostState(ctx.paths);
   }
 
-  const target = options.exactVersion
-    ? (options.version ??
-      (typeof config.runtimeVersion === "string"
-        ? config.runtimeVersion
-        : undefined))
-    : resolveTargetVersion(
-        typeof config.runtimeVersion === "string"
-          ? config.runtimeVersion
-          : undefined,
-        options.version,
-      );
-  if (!target) {
-    throw new LauncherError(
-      "version_required",
-      "No Runtime version is configured and none was requested.",
-      'Pass --version <v>, or install a build and set runtimeVersion via a successful up.',
-    );
-  }
+  const target = ctx.runtimeVersion;
+  assertNotDowngrade(
+    typeof config.runtimeVersion === "string" ? config.runtimeVersion : undefined,
+    target,
+    options.allowDowngrade,
+  );
+  assertSchemaGuard(ctx.paths, ctx.tenantSchemaMax);
 
-  emitProgress(ctx, "install");
-  const installed = await install(ctx.paths, {
-    version: target,
-    registry: ctx.registry,
-    platform: ctx.platform,
-    arch: ctx.arch,
-    ...(options.from ? { from: options.from } : {}),
-    ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-    emit: ctx.emit as ProgressEmitter | undefined,
-    lock: ctx.lock,
-  });
-
-  const manifest = readManifest(installed.path);
-  if (!manifest) {
+  const entry = ctx.hostEntry;
+  const nodeBinary = ctx.nodeBinary;
+  if (!existsSync(entry)) {
     throw new LauncherError(
-      "install_failed",
-      `Installed build at ${installed.path} has no valid manifest.`,
-      "Re-install the Runtime build.",
-    );
-  }
-  assertSchemaGuard(ctx.paths, manifest.tenantSchema.max);
-
-  const entry = join(installed.path, manifest.entry);
-  const nodeBinary = nodeBinaryPath(installed.path, ctx.platform);
-  if (!existsSync(nodeBinary) || !existsSync(entry)) {
-    throw new LauncherError(
-      "install_failed",
-      `Build is missing Node or entry at ${installed.path}.`,
-      "Re-install the Runtime build.",
+      "host_start_failed",
+      `The installed Runtime has no Host entry at ${entry}.`,
+      `Reinstall it: npm install --global @nylorun/runtime@${target}`,
     );
   }
 
@@ -424,10 +387,7 @@ async function downLocked(
   ctx: LifecycleContext,
   options: DownOptions,
 ): Promise<DownResult> {
-  const current = await status(ctx.paths, {
-    platform: ctx.platform,
-    arch: ctx.arch,
-  });
+  const current = await status(ctx.paths, ctx.runtimeVersion);
   const stateFile = await readHostState(ctx.paths);
   const pid = current.pid ?? stateFile?.pid;
 
@@ -526,17 +486,16 @@ async function downLocked(
 }
 
 export interface RestartOptions {
-  version?: string;
   allowDowngrade?: boolean;
   wait?: boolean;
   force?: boolean;
   timeoutMs?: number;
-  from?: string;
   port?: number;
 }
 
 /**
- * Install/verify target, stop, start (D§9.8). runtimeVersion updates only after ready.
+ * Check the installed Runtime can take over, stop, start (D§9.8).
+ * runtimeVersion updates only after ready.
  */
 export async function restart(
   ctx: LifecycleContext,
@@ -549,51 +508,16 @@ export async function restart(
       const config = (await ensureHostConfig(ctx.paths, {
         ...(options.port !== undefined ? { port: options.port } : {}),
       })).config;
-      const runtimeVersion =
+      const target = ctx.runtimeVersion;
+      // Check before touching the running Host.
+      assertNotDowngrade(
         typeof config.runtimeVersion === "string"
           ? config.runtimeVersion
-          : undefined;
-      const target = options.version ?? runtimeVersion;
-      if (!target) {
-        throw new LauncherError(
-          "version_required",
-          "No Runtime version is configured and none was requested.",
-          'Pass --version <v> to restart onto a specific build.',
-        );
-      }
-      if (
-        runtimeVersion &&
-        compareVersions(target, runtimeVersion) < 0 &&
-        !options.allowDowngrade
-      ) {
-        throw new LauncherError(
-          "downgrade_refused",
-          `Refusing to downgrade from ${runtimeVersion} to ${target}.`,
-          "Pass --allow-downgrade after confirming Tenants can open on the older schema.",
-        );
-      }
-
-      // Install and verify before touching the running Host.
-      emitProgress(ctx, "install");
-      const installed = await install(ctx.paths, {
-        version: target,
-        registry: ctx.registry,
-        platform: ctx.platform,
-        arch: ctx.arch,
-        ...(options.from ? { from: options.from } : {}),
-        ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-        emit: ctx.emit as ProgressEmitter | undefined,
-        lock: ctx.lock,
-      });
-      const manifest = readManifest(installed.path);
-      if (!manifest) {
-        throw new LauncherError(
-          "install_failed",
-          `Target build at ${installed.path} has no valid manifest.`,
-          "Re-install the Runtime build.",
-        );
-      }
-      assertSchemaGuard(ctx.paths, manifest.tenantSchema.max);
+          : undefined,
+        target,
+        options.allowDowngrade,
+      );
+      assertSchemaGuard(ctx.paths, ctx.tenantSchemaMax);
 
       await downLocked(ctx, {
         wait: options.wait,
@@ -605,10 +529,8 @@ export async function restart(
 
       try {
         return await upLocked(ctx, {
-          version: target,
-          exactVersion: true,
+          allowDowngrade: true,
           ...(options.port !== undefined ? { port: options.port } : {}),
-          ...(options.from ? { from: options.from } : {}),
         });
       } catch (error) {
         if (error instanceof LauncherError && error.code === "host_start_failed") {
@@ -623,7 +545,7 @@ export async function restart(
           throw new LauncherError(
             "upgrade_failed",
             `Failed to start Runtime ${target} after stop.${tail ? `\n${tail}` : ""}`,
-            "The previous Host is stopped. Fix the issue and run up --version with the last good version if the schema guard allows.",
+            "The previous Host is stopped. Fix the issue, or reinstall the last good version (npm install --global @nylorun/runtime@<version>) and run up.",
             { version: target, logExcerpt: tail },
           );
         }
@@ -640,9 +562,8 @@ export async function restart(
 export async function run(
   ctx: LifecycleContext,
   options: {
-    version?: string;
     port?: number;
-    from?: string;
+    allowDowngrade?: boolean;
     onReady?: (result: UpResult) => void;
   } = {},
 ): Promise<UpResult> {
@@ -651,9 +572,8 @@ export async function run(
     ctx.lock?.waitMs ?? LIFECYCLE_LOCK_WAIT_MS,
     async () => {
       const result = await upLocked(ctx, {
-        version: options.version,
         port: options.port,
-        from: options.from,
+        allowDowngrade: options.allowDowngrade,
         foreground: true,
       });
       options.onReady?.(result);
@@ -716,6 +636,3 @@ export async function run(
     ctx.lock,
   );
 }
-
-// Re-export for tests that need versionDir after install.
-export { versionDir };

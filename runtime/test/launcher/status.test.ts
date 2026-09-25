@@ -4,12 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { ensureHostLayout, hostPaths } from "../../src/launcher/paths.js";
 import { status } from "../../src/launcher/status.js";
-import { writeFakeBuild } from "./fixtures/fake-build.js";
-import {
-  currentPlatformArch,
-  removeRoot,
-  temporaryRoot,
-} from "./fixtures/registry.js";
+import { removeRoot, temporaryRoot } from "./fixtures/roots.js";
 
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -48,23 +43,17 @@ async function listen(
   return { server, port };
 }
 
-it("E1-5: status reports absent without host.json and lists installed builds", async () => {
+it("E1-5: status reports absent without host.json and the installed Runtime", async () => {
   const paths = await home();
-  const current = currentPlatformArch();
-  await writeFakeBuild(join(paths.runtime, "0.9.0-beta"), {
-    version: "0.9.0-beta",
-    ...current,
-  });
-  const result = await status(paths, current);
+  const result = await status(paths, "0.9.0-beta");
   expect(result.state).toBe("absent");
   expect(result.launcherProtocol).toBe(1);
   expect(result.home).toBe(paths.root);
-  expect(result.installed).toEqual(["0.9.0-beta"]);
+  expect(result.launcherVersion).toBe("0.9.0-beta");
 });
 
 it("E1-5: status reports running when /health matches hostId", async () => {
   const paths = await home();
-  const current = currentPlatformArch();
   const hostId = "host_0123456789abcdefghjkmnpq";
   const { port } = await listen((req, res) => {
     if (new URL(req.url ?? "/", "http://127.0.0.1").pathname === "/health") {
@@ -93,7 +82,7 @@ it("E1-5: status reports running when /health matches hostId", async () => {
       runtimeVersion: "0.9.0-beta",
     }),
   );
-  const result = await status(paths, current);
+  const result = await status(paths, "0.9.0-beta");
   expect(result.state).toBe("running");
   expect(result.hostId).toBe(hostId);
   expect(result.pid).toBe(process.pid);
@@ -102,7 +91,6 @@ it("E1-5: status reports running when /health matches hostId", async () => {
 
 it("E1-5: status reports unresponsive when PID is alive but /health is silent", async () => {
   const paths = await home();
-  const current = currentPlatformArch();
   const free = await listen(() => undefined);
   const freePort = free.port;
   // Stop listening so health fails, but keep the port number.
@@ -131,14 +119,13 @@ it("E1-5: status reports unresponsive when PID is alive but /health is silent", 
       url: `http://127.0.0.1:${freePort}`,
     }),
   );
-  const result = await status(paths, current);
+  const result = await status(paths, "0.9.0-beta");
   expect(result.state).toBe("unresponsive");
   expect(result.pid).toBe(process.pid);
 });
 
 it("E1-5: status reports stopped and foreign-port", async () => {
   const paths = await home();
-  const current = currentPlatformArch();
   const free = await listen(() => undefined);
   const freePort = free.port;
   await new Promise<void>((resolve, reject) =>
@@ -165,7 +152,7 @@ it("E1-5: status reports stopped and foreign-port", async () => {
       url: `http://127.0.0.1:${freePort}`,
     }),
   );
-  expect((await status(paths, current)).state).toBe("stopped");
+  expect((await status(paths, "0.9.0-beta")).state).toBe("stopped");
 
   const { port: foreignPort } = await listen((_req, res) => {
     res.writeHead(200, { "content-type": "text/plain" });
@@ -180,12 +167,11 @@ it("E1-5: status reports stopped and foreign-port", async () => {
       port: foreignPort,
     }),
   );
-  expect((await status(paths, current)).state).toBe("foreign-port");
+  expect((await status(paths, "0.9.0-beta")).state).toBe("foreign-port");
 });
 
 it("E1-5: status takes no lock and does not mutate files", async () => {
   const paths = await home();
-  const current = currentPlatformArch();
   await writeFile(
     paths.config,
     JSON.stringify({
@@ -197,7 +183,7 @@ it("E1-5: status takes no lock and does not mutate files", async () => {
   );
   const marker = join(paths.root, "marker");
   await writeFile(marker, "before");
-  await status(paths, current);
+  await status(paths, "0.9.0-beta");
   const { readFile, access } = await import("node:fs/promises");
   expect(await readFile(marker, "utf8")).toBe("before");
   await expect(access(paths.lifecycleLock)).rejects.toThrow();

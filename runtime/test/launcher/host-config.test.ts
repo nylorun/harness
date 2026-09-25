@@ -8,7 +8,7 @@ import {
   writeHostConfig,
 } from "../../src/launcher/host-config.js";
 import { ensureHostLayout, hostPaths } from "../../src/launcher/paths.js";
-import { removeRoot, temporaryRoot } from "./fixtures/registry.js";
+import { removeRoot, temporaryRoot } from "./fixtures/roots.js";
 
 const roots: string[] = [];
 afterEach(async () => {

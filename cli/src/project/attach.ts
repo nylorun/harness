@@ -12,7 +12,6 @@ import {
   throwOnLauncherFailure,
   type LauncherInvokeResult,
 } from "../runtime/launcher.js";
-import { runtimeVersion } from "../runtime/version.js";
 import {
   readCredentials,
   removeCredentials,
@@ -107,11 +106,7 @@ export async function attachProject(
   const projectRoot = options.projectRoot;
   const home = resolveHome(options.home);
   const handle = await launcher(home);
-  const upOutcome = await handle.invoke([
-    "up",
-    "--version",
-    runtimeVersion(),
-  ]);
+  const upOutcome = await handle.invoke(["up"]);
   throwOnLauncherFailure(upOutcome);
   const host = upResultFromInvoke(upOutcome);
   const hostUrl = host.url.replace(/\/$/, "");

@@ -1,5 +1,6 @@
+#!/usr/bin/env node
 /**
- * Launcher process entry (`dist/launcher/main.js` inside a Runtime build).
+ * Launcher process entry: the `nylorun-runtime` bin of `@nylorun/runtime`.
  *
  * The only file under runtime/src/launcher/ allowed to read ambient process/OS
  * state (process.env, process.cwd(), os.homedir(), os.tmpdir()). Values are
@@ -7,31 +8,12 @@
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { PlatformArch } from "./builds.js";
 import { runLauncher } from "./commands.js";
 
 function resolveHome(env: NodeJS.ProcessEnv): string {
   const fromEnv = env.NYLORUN_HOME;
   if (fromEnv !== undefined && fromEnv.trim() !== "") return resolve(fromEnv);
   return resolve(homedir(), ".nylorun");
-}
-
-function resolveRegistry(env: NodeJS.ProcessEnv): string {
-  const fromEnv = env.NYLORUN_REGISTRY;
-  if (fromEnv !== undefined && fromEnv.trim() !== "") return fromEnv.trim();
-  return "https://registry.npmjs.org";
-}
-
-function currentPlatform(): PlatformArch["platform"] {
-  const value = process.platform;
-  if (value === "darwin" || value === "linux" || value === "win32") return value;
-  return value as PlatformArch["platform"];
-}
-
-function currentArch(): PlatformArch["arch"] {
-  const value = process.arch;
-  if (value === "arm64" || value === "x64") return value;
-  return value as PlatformArch["arch"];
 }
 
 /** Copy allowlisted ambient keys for Host spawn (Tenants §12). */
@@ -57,9 +39,10 @@ export async function main(
 ): Promise<number> {
   return runLauncher(argv, {
     home: resolveHome(env),
-    registry: resolveRegistry(env),
-    platform: currentPlatform(),
-    arch: currentArch(),
+    platform: process.platform,
+    // The Host runs on the same Node as the launcher; no Node is bundled.
+    nodeBinary: process.execPath,
+    nodeVersion: process.versions.node,
     baselineEnv: baselineFromEnv(env),
     sink: {
       json: false,
@@ -74,9 +57,9 @@ export async function main(
 }
 
 const entry = process.argv[1];
-// Windows argv paths use backslashes; normalize before suffix checks so
-// `node.exe …\launcher\main.js` still counts as the CLI entry (desktop
-// contract / .cmd shim both invoke this file that way).
+// Windows argv paths use backslashes; normalize before suffix checks so the
+// npm `.cmd` shim (`node.exe …\launcher\main.js`) still counts as the entry.
+// POSIX npm installs link `bin/nylorun-runtime` to this file.
 const normalizedEntry = entry?.replaceAll("\\", "/");
 const isEntry =
   normalizedEntry !== undefined &&

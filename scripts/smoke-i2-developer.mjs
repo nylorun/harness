@@ -5,20 +5,18 @@
  * Production deps of the generated app must be only `@nylorun/agents` (+ core).
  */
 import assert from "node:assert/strict";
-import { copyFile, mkdir, mkdtemp, chmod, lstat, rm, writeFile, readFile, access } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { root, npmCli, run } from "./lib/repo.mjs";
 import { ProcessGroup } from "./lib/processes.mjs";
-import { localRuntimeBuild } from "./lib/local-build.mjs";
-import { startLocalRegistry } from "./lib/local-registry.mjs";
+import { installRuntime } from "./lib/runtime-install.mjs";
 
 const temporary = await mkdtemp(join(tmpdir(), "nylorun-i2-"));
 const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-i2-host-"));
 const home = await mkdtemp(join(tmpdir(), "nylorun-i2-home-"));
 const group = new ProcessGroup();
-let registry;
 
 const readyLine = (l) =>
   l.includes("Ready") || l.includes("Ctrl-C stops this Project only");
@@ -26,32 +24,7 @@ const hostLine = (l) => /^\s*Host\s+http/.test(l);
 const studioOnLine = (l) => /^Studio on http/.test(l);
 const waitingLine = (l) => l.includes("Waiting for nylorun dev");
 
-/** Local builds symlink Node; npm pack drops absolute symlinks. */
-async function materializeNodeBinary(buildDir) {
-  const target = join(buildDir, "node", "bin", "node");
-  try {
-    const stats = await lstat(target);
-    if (!stats.isSymbolicLink()) {
-      await access(target);
-      return;
-    }
-  } catch {
-    /* copy below */
-  }
-  await mkdir(dirname(target), { recursive: true });
-  await rm(target, { force: true });
-  await copyFile(process.execPath, target);
-  await chmod(target, 0o755);
-}
-
 try {
-  const built = await localRuntimeBuild({
-    out: join(root, ".tmp/runtime-builds"),
-    repo: root,
-  });
-  await materializeNodeBinary(built.dir);
-  registry = await startLocalRegistry({ builds: [built] });
-
   const artifacts = join(temporary, "artifacts");
   await mkdir(artifacts);
   const names = [
@@ -138,14 +111,19 @@ try {
     `production Nylorun deps must be agents+core; got ${unique.join(", ")}`,
   );
 
-  const env = {
+  // Prerequisite, as a developer does: the Runtime on PATH (packed candidate).
+  const runtime = await installRuntime(join(temporary, "runtime"), [
+    tarballs.runtime,
+    tarballs.core,
+    tarballs.harness,
+  ]);
+  const env = runtime.env({
     ...process.env,
     HOME: home,
     USERPROFILE: home,
     NYLORUN_HOME: hostRoot,
-    NYLORUN_REGISTRY: registry.url,
     NYLORUN_DEV_MODEL: "fixture",
-  };
+  });
 
   // Order A: dev first, then studio (invoke Studio CLI directly — npm's
   // lifecycle + ProcessGroup detached spawn can exit before the bin attaches).
@@ -251,7 +229,6 @@ try {
   );
 } finally {
   await group.close();
-  await registry?.close?.();
   await rm(temporary, { recursive: true, force: true });
   await rm(hostRoot, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });

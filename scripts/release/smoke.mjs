@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { npmCli } from "../lib/repo.mjs";
 import { ProcessGroup } from "../lib/processes.mjs";
 import { availablePort } from "../lib/development.mjs";
+import { installRuntime } from "../lib/runtime-install.mjs";
 
 export function publicCreatorArguments(version) {
   return [
@@ -67,7 +68,11 @@ async function waitForSeedAgent(port, applicationKey, tenantId, timeoutMs = 30_0
   throw new Error(`Public creator did not serve its seed agent (${last}).`);
 }
 
-export async function publicCreatorSmoke(version) {
+/**
+ * Install the published Runtime as a developer would (the prerequisite), then
+ * create and start a project with the published creator.
+ */
+export async function publicCreatorSmoke(version, runtimeVersion) {
   const temporary = await mkdtemp(join(tmpdir(), "nylorun-published-"));
   const hostRoot = await mkdtemp(join(tmpdir(), "nylorun-published-host-"));
   const home = await mkdtemp(join(tmpdir(), "nylorun-published-home-"));
@@ -77,17 +82,23 @@ export async function publicCreatorSmoke(version) {
     const npmrc = join(temporary, ".npmrc");
     await writeFile(npmrc, "");
     await writeFile(npmrc + ".global", "");
+    const environment = publicCreatorEnvironment(process.env, npmrc, port, {
+      NYLORUN_HOME: hostRoot,
+      HOME: home,
+      USERPROFILE: home,
+    });
+    const runtime = await installRuntime(
+      join(temporary, "runtime"),
+      `@nylorun/runtime@${runtimeVersion}`,
+      { env: environment },
+    );
     const child = group.start(
       "public-creator",
       process.execPath,
       [npmCli(), ...publicCreatorArguments(version)],
       {
         cwd: temporary,
-        env: publicCreatorEnvironment(process.env, npmrc, port, {
-          NYLORUN_HOME: hostRoot,
-          HOME: home,
-          USERPROFILE: home,
-        }),
+        env: runtime.env(environment),
       },
     );
     await child.ready(`http://127.0.0.1:${port}/ready`, 120_000);

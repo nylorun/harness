@@ -65,8 +65,12 @@ export function checkBoundaries(name) {
       if (name === "core" && /(?:from\s*|import\s*\()["']node:/.test(source))
         throw new Error(`Core must remain portable: ${path}`);
     }
-  if (name === "runtime" && pkg.bin)
-    throw new Error("The CLI owns the nylorun binary");
+  // The CLI owns `nylorun`; the Runtime exposes only its launcher.
+  if (
+    name === "runtime" &&
+    Object.keys(pkg.bin ?? {}).some((bin) => bin !== "nylorun-runtime")
+  )
+    throw new Error("The CLI owns the nylorun binary; Runtime exposes only nylorun-runtime");
   console.log(`${name}: package, source and declaration dependencies passed.`);
 }
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url)

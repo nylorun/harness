@@ -1,12 +1,29 @@
 #!/usr/bin/env node
 import { mkdir, rename, rm, writeFile, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import type { Compatibility, CreatorDependencies } from "./contracts.js";
 import { createProject, CreationError } from "./project.js";
 import { parse, usage } from "./arguments.js";
 import { CreationCancelled, runCommand } from "./process.js";
+
+function findOnPath(name: string): string | undefined {
+  const extensions =
+    process.platform === "win32"
+      ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
+      : [""];
+  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean))
+    for (const extension of extensions) {
+      const candidate = join(dir, `${name}${extension.toLowerCase()}`);
+      try {
+        if (statSync(candidate).isFile()) return candidate;
+      } catch {
+        /* not here */
+      }
+    }
+  return undefined;
+}
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -40,6 +57,8 @@ async function main(): Promise<void> {
       write: async (path, content) => writeFile(path, content),
       run: (command, args, directory) =>
         runCommand(command, args, directory, controller.signal),
+      nodeVersion: process.versions.node,
+      findOnPath,
     };
     const compatibility = JSON.parse(
       await readFile(

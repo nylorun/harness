@@ -262,41 +262,47 @@ async function spawnWatcher(options: {
     studioMode = "local";
   }
 
-  printBanner({
-    hostUrl: options.hostUrl,
-    hostStarted: options.hostStarted,
-    ephemeral: options.ephemeral,
-    tenantName: options.tenantName,
-    tenantId: options.tenantId,
-    entry: options.entry,
-    studioLaunchUrl: studio?.launchUrl,
-    studioMode,
-  });
-
-  const child = spawn(
-    process.execPath,
-    [options.tsx, "watch", "--clear-screen=false", entryPath],
-    {
-      cwd: options.projectRoot,
-      stdio: "inherit",
-      env: childEnv,
-      detached: process.platform !== "win32",
-    },
-  );
-  let stopping = false;
+  // Handle signals before the banner: a supervisor may stop us as soon as it
+  // reads it, and an unhandled SIGTERM would kill this process and orphan the
+  // detached watcher.
+  let child: ReturnType<typeof spawn> | undefined;
+  let stopping: NodeJS.Signals | undefined;
   const stop = (signal: NodeJS.Signals) => {
     if (stopping) return;
-    stopping = true;
-    child.kill(signal);
+    stopping = signal;
+    child?.kill(signal);
   };
   const interrupt = () => stop("SIGINT");
   const terminate = () => stop("SIGTERM");
   process.on("SIGINT", interrupt);
   process.on("SIGTERM", terminate);
   try {
+    printBanner({
+      hostUrl: options.hostUrl,
+      hostStarted: options.hostStarted,
+      ephemeral: options.ephemeral,
+      tenantName: options.tenantName,
+      tenantId: options.tenantId,
+      entry: options.entry,
+      studioLaunchUrl: studio?.launchUrl,
+      studioMode,
+    });
+    if (stopping) return stopping === "SIGINT" ? 130 : 143;
+
+    const watcher = spawn(
+      process.execPath,
+      [options.tsx, "watch", "--clear-screen=false", entryPath],
+      {
+        cwd: options.projectRoot,
+        stdio: "inherit",
+        env: childEnv,
+        detached: process.platform !== "win32",
+      },
+    );
+    child = watcher;
     return await new Promise<number>((resolvePromise, reject) => {
-      child.once("error", reject);
-      child.once("exit", (code, signal) =>
+      watcher.once("error", reject);
+      watcher.once("exit", (code, signal) =>
         resolvePromise(code ?? (signal === "SIGINT" ? 130 : 143)),
       );
     });

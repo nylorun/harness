@@ -5,7 +5,7 @@ import type { HostPaths } from "./paths.js";
 
 /**
  * Every tenants/<id>/tenant.json schemaVersion must be at most the target
- * build's tenantSchema.max.
+ * installed Runtime's Tenant schema.
  */
 export function assertSchemaGuard(
   paths: HostPaths,
@@ -35,8 +35,8 @@ export function assertSchemaGuard(
     if (schemaVersion !== undefined && schemaVersion > tenantSchemaMax) {
       throw new LauncherError(
         "host_schema_newer",
-        `Tenant ${id} has schemaVersion ${schemaVersion}, which is newer than this build supports (max ${tenantSchemaMax}).`,
-        "Upgrade to a Runtime build that supports this Tenant schema, or restore the Tenant from its migration snapshot.",
+        `Tenant ${id} has schemaVersion ${schemaVersion}, which is newer than the installed Runtime supports (max ${tenantSchemaMax}).`,
+        "Install a Runtime that supports this Tenant schema (npm install --global @nylorun/runtime@latest), or restore the Tenant from its migration snapshot.",
         { tenantId: id, schemaVersion, tenantSchemaMax },
       );
     }

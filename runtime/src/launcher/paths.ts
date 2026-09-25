@@ -11,7 +11,6 @@ export interface HostPaths {
   log: string;
   home: string;
   tmp: string;
-  runtime: string;
   tenants: string;
   trash: string;
   lifecycleLock: string;
@@ -27,7 +26,6 @@ export function hostPaths(hostRoot: string): HostPaths {
     log: join(root, "runtime.log"),
     home: join(root, "home"),
     tmp: join(root, "tmp"),
-    runtime: join(root, "runtime"),
     tenants: join(root, "tenants"),
     trash: join(root, "trash"),
     lifecycleLock: join(root, ".lifecycle.lock"),
@@ -39,7 +37,6 @@ export async function ensureHostLayout(paths: HostPaths): Promise<void> {
     paths.root,
     paths.home,
     paths.tmp,
-    paths.runtime,
     paths.tenants,
     paths.trash,
   ]) {
@@ -49,14 +46,6 @@ export async function ensureHostLayout(paths: HostPaths): Promise<void> {
 
 export function ensureDirSync(path: string): void {
   if (!existsSync(path)) mkdirSync(path, { recursive: true, mode: 0o700 });
-}
-
-export function versionDir(paths: HostPaths, version: string): string {
-  return join(paths.runtime, version);
-}
-
-export function installLockPath(paths: HostPaths, version: string): string {
-  return join(paths.runtime, `.install-${version}.lock`);
 }
 
 export function hostUrl(config: { host: string; port: number }): string {
