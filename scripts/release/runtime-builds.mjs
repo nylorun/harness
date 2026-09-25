@@ -134,9 +134,12 @@ async function extractNodeArchive(archivePath, destination, { platform }) {
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
   if (platform === "win32") {
-    await run("tar", ["-xf", archivePath, "-C", destination], {
-      capture: true,
-    });
+    // Git Bash tar treats "C:" as a remote host unless --force-local is set.
+    await run(
+      "tar",
+      ["--force-local", "-xf", archivePath, "-C", destination],
+      { capture: true },
+    );
   } else {
     await run("tar", ["-xzf", archivePath, "-C", destination], {
       capture: true,
