@@ -2,23 +2,19 @@ import {
   delegateOf,
   implementationsFor,
   isBuiltWorkflow,
-  isSandboxToolName,
   isToolError,
   normalizeToolDefinition,
   normalizedSchemasFor,
   runHookPoint,
-  SANDBOX_TOOL_NAMES,
   type BoundToolDefinition,
   type BuiltAgent,
   type BuiltWorkflow,
   type JsonValue,
-  type SandboxToolName,
   type ToolExecutionContext,
   type WorkflowBinding,
 } from "@nylorun/core/define";
 import type { Action, ActionOutcome } from "@nylorun/core/contracts";
-import type { Transport } from "./http.js";
-import { segment } from "./http.js";
+import type { ActionSandbox } from "./sandbox/client.js";
 
 class Suspend {
   constructor(readonly outcome: unknown) {}
@@ -30,75 +26,19 @@ const object = (value: unknown): Record<string, any> =>
 
 export type ExecutableDefinition = BuiltAgent | BuiltWorkflow;
 
-/** Claim-scoped sandbox built-ins for executor actions (workflows.md §8 / SD §6.3). */
-export type ActionSandbox = {
-  readonly [K in SandboxToolName]: (
-    args: Record<string, unknown>,
-  ) => Promise<unknown>;
-};
-
 export type ExecuteActionOptions = {
-  readonly transport?: Transport;
-  readonly claimId?: string;
-  readonly generation?: number;
-  /**
-   * When false, omit `ctx.sandbox`. Defaults to true when claim credentials are
-   * present; L4 Runtime refuses tools when the session has no sandbox.
-   */
-  readonly sandbox?: boolean;
+  /** Claim-scoped sandbox client; omitted when the session has no sandbox. */
+  readonly sandbox?: ActionSandbox;
 };
-
-function claimSandboxOf(options: {
-  transport: Transport;
-  actionId: string;
-  claimId: string;
-  generation: number;
-}): ActionSandbox {
-  const call = (tool: SandboxToolName, args: Record<string, unknown>) =>
-    options.transport.json(
-      `/v1/actions/${segment(options.actionId)}/sandbox/${segment(tool)}`,
-      "POST",
-      {
-        claimId: options.claimId,
-        generation: options.generation,
-        ...args,
-      },
-    );
-  const sandbox = {} as Record<SandboxToolName, ActionSandbox[SandboxToolName]>;
-  for (const tool of SANDBOX_TOOL_NAMES) {
-    if (!isSandboxToolName(tool)) continue;
-    sandbox[tool] = (args) => call(tool, args);
-  }
-  return sandbox as ActionSandbox;
-}
-
-function sandboxFor(
-  action: Action,
-  options?: ExecuteActionOptions,
-): ActionSandbox | undefined {
-  if (options?.sandbox === false) return undefined;
-  if (
-    !options?.transport ||
-    !options.claimId ||
-    options.generation === undefined
-  )
-    return undefined;
-  return claimSandboxOf({
-    transport: options.transport,
-    actionId: action.actionId,
-    claimId: options.claimId,
-    generation: options.generation,
-  });
-}
 
 /** Executes code only after a host-issued claim. No engine dependency. */
 export async function executeAction(
   action: Action,
   root: ExecutableDefinition,
   signal: AbortSignal,
-  options?: ExecuteActionOptions,
+  options: ExecuteActionOptions = {},
 ): Promise<ActionOutcome> {
-  const sandbox = sandboxFor(action, options);
+  const sandbox = options.sandbox;
   if (action.kind === "fn" || action.kind === "verify") {
     if (!isBuiltWorkflow(root))
       throw new Error(`Action ${action.kind} requires a workflow definition`);

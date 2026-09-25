@@ -76,7 +76,6 @@ export type {
 export { connectAgents } from "./executor.js";
 export type { ConnectOptions, AgentConnection } from "./executor.js";
 export type {
-  ActionSandbox,
   ExecuteActionOptions,
   ExecutableDefinition,
 } from "./execute-action.js";
@@ -112,4 +111,12 @@ export type {
   SandboxCapability,
   SandboxCapabilityOptions,
   SandboxOptions,
+  ActionSandbox,
+  ActionSandboxToolResult,
+  CreateActionSandboxOptions,
+} from "./sandbox/index.js";
+export {
+  createActionSandbox,
+  definitionDeclaresSandbox,
+  isActionSandboxTool,
 } from "./sandbox/index.js";
