@@ -4,9 +4,10 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+# The merge itself uses DEPENDABOT_AUTOMERGE_TOKEN; fetch-metadata only reads.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 jobs:
   queue:

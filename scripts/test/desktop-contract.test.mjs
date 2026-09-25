@@ -24,7 +24,9 @@ test("J1–J4: desktop contract smoke (installed Runtime, up, tenant, agents, fa
     await access(join(root, "runtime/dist/host/main.js"));
     await access(join(root, "admin/dist/index.js"));
     await access(join(root, "agents/dist/index.js"));
-  } catch {
+  } catch (error) {
+    // In CI a missing build is a broken job, not a reason to pass silently.
+    if (process.env.CI) throw error;
     t.skip("workspace dist missing; run npm run build first");
     return;
   }

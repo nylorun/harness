@@ -15,17 +15,33 @@ jobs:
   validate:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      checks: read
     env:
       RELEASE_SHA: ${{ inputs.commit }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Validate commit input
         shell: bash
         run: '[[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]'
-      - uses: actions/checkout@v6
+      # The merge queue requires `ci` on the exact commit it lands, so every
+      # main commit already passed the full suite. Require that instead of
+      # re-running it; no check-run means no publication.
+      - name: Require merge-queue CI on this commit
+        shell: bash
+        run: |
+          conclusion=$(gh api \
+            "repos/$GITHUB_REPOSITORY/commits/$RELEASE_SHA/check-runs?check_name=ci&filter=latest" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions") | .conclusion] | first')
+          echo "ci on $RELEASE_SHA: $conclusion"
+          [[ "$conclusion" == success ]]
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -35,18 +51,19 @@ jobs:
       - run: npm install --global npm@11.15.0
       - run: npm run setup
       # Studio build (via setup) runs pack-ui → dist/bundle.tar + dist/ui-digest.json
-      # before check-package / npm pack (Wave 2; deploy-studio is Wave 3 after H1/H2).
-      - run: npm run check -- --built
+      # before npm pack (Wave 2; deploy-studio is Wave 3 after H1/H2).
+      # check-example-assets (in release:check) needs the examples build.
+      - run: npm run build --prefix examples
       - run: npx playwright-core install --with-deps chromium
       - run: npm run release:check -- --built
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-packages
           path: .tmp/release-artifacts/
           include-hidden-files: true
           if-no-files-found: error
       - name: Upload Studio UI hosting artifacts
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: studio-ui-bundle
           path: |
@@ -56,6 +73,7 @@ jobs:
   publish:
     needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: npm
     permissions:
       contents: write
@@ -64,18 +82,18 @@ jobs:
       RELEASE_SHA: ${{ inputs.commit }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .node-version
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - run: npm install --global npm@11.15.0
       - run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-packages
           path: .tmp/release-artifacts/
@@ -90,6 +108,7 @@ jobs:
     needs: [publish]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: studio
     permissions:
       contents: read
@@ -99,18 +118,18 @@ jobs:
       FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'nylorun-oss-studio' }}
       STUDIO_HOSTING_ORIGIN: https://local.nylorun.studio
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm install --global npm@11.15.0
       - run: npm ci
-      - uses: actions/download-artifact@v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: studio-ui-bundle
           path: .
@@ -129,7 +148,7 @@ jobs:
       - name: Authenticate to Google Cloud (service account)
         id: auth
         continue-on-error: true
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       - name: Deploy Studio UI to Firebase Hosting
