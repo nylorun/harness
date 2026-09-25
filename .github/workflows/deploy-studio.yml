@@ -4,6 +4,9 @@
 # Triggers:
 # - workflow_dispatch (once this file is on the default branch)
 # - pull_request labeled `deploy-studio` (works from a PR head before merge)
+#
+# Do not reference secrets.* in job/step `if` — GitHub rejects it. Soft-check
+# inside steps; deploy-studio.mjs exits 78 when credentials are missing.
 name: Deploy Studio hosting
 on:
   workflow_dispatch:
@@ -54,15 +57,18 @@ jobs:
           test -f studio/dist/bundle.tar
           test -f studio/dist/ui-digest.json
       - name: Authenticate to Google Cloud (service account)
+        id: auth
+        continue-on-error: true
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       - name: Deploy Studio UI to Firebase Hosting
         id: deploy
+        continue-on-error: true
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: node studio/scripts/deploy-studio.mjs
-      - name: Summarize
+      - name: Report deploy outcome
         if: always()
         run: |
           REF_LABEL="${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.pull_request.head.sha }}"
@@ -71,4 +77,16 @@ jobs:
           echo "- Project: \`${{ env.FIREBASE_PROJECT_ID }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Custom origin: https://local.nylorun.studio (DNS may still be pending)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Fallback: https://${{ env.FIREBASE_PROJECT_ID }}.web.app" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Outcome: ${{ steps.deploy.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Auth: ${{ steps.auth.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Deploy: ${{ steps.deploy.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.deploy.outcome }}" == "success" ]]; then
+            echo "Studio hosting deploy succeeded."
+            exit 0
+          fi
+          if [[ "${{ steps.auth.outcome }}" != "success" ]]; then
+            echo "::warning::Firebase auth unavailable (Environment 'studio' secret missing or invalid)."
+            echo "No npm publish was attempted. Fix secrets and re-run."
+            exit 0
+          fi
+          echo "deploy-studio failed while auth succeeded" >&2
+          exit 1
