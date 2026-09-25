@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0-beta
+
+### Minor Changes
+
+- c49efed: **Breaking (pre-1.0 minor):** Generated starter matches Runtime Clients layout.
+
+  - Adds `src/main.ts` with `connectAgents({ agents })`.
+  - `start` → `node dist/src/main.js`; `studio` → `nylorun-studio`.
+  - `@nylorun/cli` and `@nylorun/studio` move to `devDependencies`; production depends on `@nylorun/agents` (and `zod`) only.
+  - `--no-studio` removes Studio without rewriting `dev`.
+
+### Patch Changes
+
+- Update the tested Harness, SDK, Runtime, and Studio compatibility combination.
+
 ## 0.8.1-beta
 
 ### Patch Changes
