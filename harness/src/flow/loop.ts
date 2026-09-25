@@ -1,10 +1,5 @@
 import { HarnessError, isVariantOf } from "@nylorun/core/define";
-import type {
-  AgentManifest,
-  JsonValue,
-  Verdict,
-  WorkflowManifest,
-} from "@nylorun/core/define";
+import type { AgentManifest, JsonValue, Verdict, WorkflowManifest } from "@nylorun/core/define";
 import type { DurableHost, HostEffect } from "../run/durable.js";
 import { HostSuspension } from "../loop/host-suspension.js";
 import type { FlowCheckpoint } from "./checkpoint.js";
@@ -38,8 +33,7 @@ type LoopHistoryEntry = {
 };
 
 type Decision =
-  | { readonly input: JsonValue; readonly agent?: AgentManifest }
-  | { readonly output: JsonValue };
+  { readonly input: JsonValue; readonly agent?: AgentManifest } | { readonly output: JsonValue };
 
 /** Host may wrap agent-effect outcomes so the Loop learns the turn's manifest. */
 export const AGENT_TURN_MARKER = "__nylorunAgentTurn" as const;
@@ -50,10 +44,7 @@ export type AgentTurnValue = {
   readonly agent: AgentManifest;
 };
 
-export function agentTurnValue(
-  output: JsonValue,
-  agent: AgentManifest,
-): AgentTurnValue {
+export function agentTurnValue(output: JsonValue, agent: AgentManifest): AgentTurnValue {
   return { [AGENT_TURN_MARKER]: 1, output, agent };
 }
 
@@ -230,7 +221,12 @@ export async function runLoop(options: {
           "Decide returned neither input nor output",
         );
 
-      if (decision.agent !== undefined) {
+      const next = decision as {
+        readonly input: JsonValue;
+        readonly agent?: AgentManifest;
+      };
+
+      if (next.agent !== undefined) {
         if (!runIsAgent) {
           return invalidAgent(
             checkpoint,
@@ -238,18 +234,18 @@ export async function runLoop(options: {
             "Decide returned agent but Loop.run is not an agent",
           );
         }
-        if (pinnedAgent && !isVariantOf(decision.agent, pinnedAgent)) {
+        if (pinnedAgent && !isVariantOf(next.agent, pinnedAgent)) {
           return invalidAgent(
             checkpoint,
             loopPath,
             "Decide returned a manifest that is not a variant of the pinned agent",
           );
         }
-        currentAgent = decision.agent;
+        currentAgent = next.agent;
       }
 
       history.push({ iteration, output: agentOutput, verdict });
-      currentInput = decision.input as JsonValue;
+      currentInput = next.input;
       iteration += 1;
     }
   } catch (error) {

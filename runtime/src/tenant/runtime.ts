@@ -696,14 +696,10 @@ export class TenantRuntime implements TenantHandle {
       };
       if (!isWorkflowManifest(current.manifest) && current.checkpoint) {
         rebaseSessionState(current, current.checkpoint.manifestHash);
-        if (current.checkpoint && "state" in current.checkpoint) {
-          (current.checkpoint as DurableCheckpoint).state = current.state;
-        }
+        const cp = current.checkpoint as DurableCheckpoint;
+        current.checkpoint = { ...cp, state: current.state };
         this.store.tx(() => this.store.put("sessions", id, current));
       }
-      const turnManifest = isWorkflowManifest(current.manifest)
-        ? current.manifest
-        : turnManifestOf(current);
       const result = isWorkflowManifest(current.manifest)
         ? await runFlowDurable({
             manifest: current.manifest,
@@ -712,7 +708,7 @@ export class TenantRuntime implements TenantHandle {
             host,
           })
         : await runDurable({
-            manifest: turnManifest,
+            manifest: turnManifestOf(current),
             checkpoint: current.checkpoint as DurableCheckpoint,
             signal: controller.signal,
             sessionTools: sessionToolsOf(current.mcpSnapshot),
@@ -1486,21 +1482,24 @@ export class TenantRuntime implements TenantHandle {
               messageManifest: command.manifest,
               store: variantStore(s),
             });
-            if (!resolved.ok) fail(400, resolved.message);
-            rebaseSessionState(s, resolved.hash);
-            s.checkpoint = createDurableCheckpoint({
-              manifest: resolved.manifest,
-              sessionId: id,
-              turnId: s.activeTurnId,
-              input:
-                "content" in command
-                  ? command.content
-                  : typeof command.data === "string"
-                  ? command.data
-                  : JSON.stringify(command.data),
-              state: s.state,
-              info: s.info,
-            });
+            if (!resolved.ok) {
+              fail(400, resolved.message);
+            } else {
+              rebaseSessionState(s, resolved.hash);
+              s.checkpoint = createDurableCheckpoint({
+                manifest: resolved.manifest,
+                sessionId: id,
+                turnId: s.activeTurnId,
+                input:
+                  "content" in command
+                    ? command.content
+                    : typeof command.data === "string"
+                    ? command.data
+                    : JSON.stringify(command.data),
+                state: s.state,
+                info: s.info,
+              });
+            }
           }
         } else {
           if (s.status !== "paused" || !s.state || !s.activeTurnId)

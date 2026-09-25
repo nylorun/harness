@@ -189,10 +189,7 @@ describe("flow Loop (tracer)", () => {
           resolution = {
             status: "completed",
             outcome: {
-              value: agentTurnValue(
-                Number(effect.iterations) === 1 ? "v1" : "v2",
-                turn,
-              ),
+              value: agentTurnValue(Number(effect.iterations) === 1 ? "v1" : "v2", turn),
             },
           };
         } else if (effect.kind === "verify") {
@@ -201,9 +198,7 @@ describe("flow Loop (tracer)", () => {
             status: "completed",
             outcome: {
               value:
-                input.iteration === 1
-                  ? { pass: false, feedback: "deploy broke" }
-                  : { pass: true },
+                input.iteration === 1 ? { pass: false, feedback: "deploy broke" } : { pass: true },
             },
           };
         } else {
@@ -330,9 +325,7 @@ describe("flow Loop (tracer)", () => {
         if (effect.kind === "agent") {
           resolution = { status: "completed", outcome: { value: "draft" } };
         } else if (effect.kind === "verify") {
-          const value = await workflow.getBinding().nodes.polish!.fn(
-            effect.input as never,
-          );
+          const value = await workflow.getBinding().nodes.polish!.fn(effect.input as never);
           resolution = { status: "completed", outcome: { value } };
         } else {
           resolution = {
