@@ -1,12 +1,20 @@
 import type { AgentTool, BuiltAgent } from "../../types/agent.js";
 import type { JsonValue } from "../../types/shared.js";
-import type {
-  Verdict,
-  WorkflowBinding,
-  WorkflowManifest,
-  WorkflowNodeImplementation,
-} from "../../types/workflow.js";
-import { bindingFromAgent } from "../binding.js";
+import type { Verdict, WorkflowAgentNode, WorkflowFnRef, WorkflowSlotNode } from "../../types/workflow.js";
+import type { ToolSchemaSource } from "../../types/tool.js";
+import { normalizeSchema } from "../schema.js";
+import {
+  assertValidPathPart,
+  diagnostic,
+  fail,
+} from "./diagnostics.js";
+import { emptyAccumulator, finishWorkflow, mergeChild } from "./build.js";
+import {
+  remapNodeKeys,
+  resolveChild,
+  type WorkflowRunnable,
+} from "./runnable.js";
+import { isSlot, type ChildRef, type Slot } from "./slot.js";
 import type { BuiltWorkflow } from "./types.js";
 
 /** Arguments passed to a Loop verify function. */
@@ -41,75 +49,137 @@ export type LoopVerifyFn = (
 
 export type LoopDecideFn = (args: LoopDecideArgs) => LoopDecision;
 
-export type LoopRunnable = BuiltAgent | AgentTool | { build(): BuiltAgent };
+/** @deprecated Prefer WorkflowRunnable — tracer alias. */
+export type LoopRunnable = WorkflowRunnable;
 
-export interface LoopOptions {
+export type LoopVerify =
+  | LoopVerifyFn
+  | BuiltAgent
+  | AgentTool
+  | { build(): BuiltAgent }
+  | Slot<BuiltAgent | AgentTool | { build(): BuiltAgent }>;
+
+export interface LoopOptions<In = JsonValue, Out = JsonValue> {
   readonly id: string;
-  readonly run: LoopRunnable;
-  readonly verify: LoopVerifyFn;
+  readonly run: ChildRef;
+  readonly verify: LoopVerify;
   readonly decide: LoopDecideFn;
+  readonly inputSchema?: ToolSchemaSource;
+  readonly outputSchema?: ToolSchemaSource;
 }
 
-function builtAgentOf(run: LoopRunnable): BuiltAgent {
-  if (
-    run &&
-    typeof run === "object" &&
-    "getBinding" in run &&
-    typeof run.getBinding === "function" &&
-    "manifest" in run
-  )
-    return run as BuiltAgent;
-  if (run && typeof run === "object" && "build" in run && typeof run.build === "function")
-    return run.build();
-  throw new Error("Loop.run must be a built agent or Agent builder");
+function isVerifyFn(value: unknown): value is LoopVerifyFn {
+  return typeof value === "function";
 }
 
 /**
- * Build a root Loop workflow: run → verify → decide, repeating until decide returns output.
- * Tracer-minimal: `run` is an agent; verify and decide are local functions.
+ * Build-time check: a verifier agent's outputSchema must accept Verdict (loops.md §5).
  */
-export function Loop(options: LoopOptions): BuiltWorkflow {
+function assertVerifierAgent(
+  agent: Pick<BuiltAgent, "id" | "getBinding">,
+): void {
+  const schema = agent.getBinding().outputSchema;
+  if (!schema) {
+    fail([
+      diagnostic(
+        "loop.verify-schema",
+        `Verifier agent '${agent.id}' must declare an outputSchema that extends Verdict`,
+      ),
+    ]);
+  }
+  const normalized = normalizeSchema(schema, "output");
+  const pass = normalized.validate({ pass: true });
+  const failVerdict = normalized.validate({ pass: false, feedback: "x" });
+  if (!pass.ok || !failVerdict.ok) {
+    fail([
+      diagnostic(
+        "loop.verify-schema",
+        `Verifier agent '${agent.id}' outputSchema must accept Verdict ({ pass: true } | { pass: false, feedback })`,
+      ),
+    ]);
+  }
+}
+
+/**
+ * Build a Loop workflow: run → verify → decide, repeating until decide returns output.
+ * `run` accepts any runnable or slot; `verify` is a function or verifier agent (loops.md).
+ */
+export function Loop<In = JsonValue, Out = JsonValue>(
+  options: LoopOptions<In, Out>,
+): BuiltWorkflow<In, Out> {
   const { id, verify, decide } = options;
-  if (!id) throw new Error("Loop requires id");
-  if (!options.run) throw new Error("Loop requires run");
-  if (!verify) throw new Error("Loop requires verify");
-  if (!decide) throw new Error("Loop requires decide");
+  if (!id) fail([diagnostic("loop.missing-id", "Loop requires id")]);
+  assertValidPathPart(id, "Loop id");
+  if (!options.run) fail([diagnostic("loop.missing-run", "Loop requires run")]);
+  if (!verify) fail([diagnostic("loop.missing-verify", "Loop requires verify")]);
+  if (!decide || typeof decide !== "function")
+    fail([diagnostic("loop.missing-decide", "Loop requires decide")]);
 
-  const agent = builtAgentOf(options.run);
-  const agentBinding = bindingFromAgent(agent);
-  const agentId = agent.id;
+  const acc = emptyAccumulator();
+  const runResolved = resolveChild(options.run);
+  const runPath = `${id}/${runResolved.id}`;
+  mergeChild(acc, {
+    agents: runResolved.agents,
+    nodes: remapNodeKeys(runResolved.nodes, runResolved.id, runPath),
+    sandboxSpecs: runResolved.sandboxSpecs,
+  });
 
-  const manifest: WorkflowManifest = {
-    kind: "workflow",
-    workflowSchemaVersion: 1,
+  let verifyField: WorkflowFnRef | WorkflowAgentNode | WorkflowSlotNode;
+  if (isVerifyFn(verify)) {
+    verifyField = { fn: true };
+    acc.nodes[id] = { kind: "verify", fn: verify as (...args: never[]) => unknown };
+  } else {
+    const verifyChild = isSlot(verify)
+      ? resolveChild(verify as ChildRef)
+      : resolveChild(verify as WorkflowRunnable);
+    const agentEntry = Object.values(verifyChild.agents)[0];
+    if (!agentEntry) {
+      fail([
+        diagnostic(
+          "loop.invalid-verify",
+          "Loop.verify must be a verify function or a verifier agent",
+        ),
+      ]);
+    }
+    assertVerifierAgent({
+      id: agentEntry.manifest.id,
+      getBinding: () => agentEntry,
+    });
+    // Verifier agent sessions are derived separately; local fn keys (slot input) sit under verify.
+    mergeChild(acc, {
+      agents: verifyChild.agents,
+      nodes: remapNodeKeys(verifyChild.nodes, verifyChild.id, `${id}/verify`),
+      sandboxSpecs: verifyChild.sandboxSpecs,
+    });
+    const node = verifyChild.node;
+    if (!("agent" in node) && !("slot" in node)) {
+      fail([
+        diagnostic(
+          "loop.invalid-verify",
+          "Loop.verify must be a verify function or a verifier agent",
+        ),
+      ]);
+    }
+    verifyField = node as WorkflowAgentNode | WorkflowSlotNode;
+  }
+
+  acc.nodes[`${id}/decide`] = {
+    kind: "fn",
+    fn: decide as (...args: never[]) => unknown,
+  };
+
+  return finishWorkflow<In, Out>({
     id,
     root: {
       loop: {
         id,
-        run: { agent: agentId },
-        verify: { fn: true },
+        run: runResolved.node,
+        verify: verifyField,
         decide: { fn: true },
       },
     },
-  };
-
-  // Verify and decide share the loop path; keys distinguish them for the executor.
-  const nodes: Record<string, WorkflowNodeImplementation> = {
-    [id]: { kind: "verify", fn: verify as (...args: never[]) => unknown },
-    [`${id}/decide`]: { kind: "fn", fn: decide as (...args: never[]) => unknown },
-  };
-
-  const binding: WorkflowBinding = {
-    manifest,
-    nodes,
-    agents: { [agentId]: agentBinding },
-  };
-
-  const built: BuiltWorkflow = {
-    id,
-    manifest,
-    toJSON: () => manifest,
-    getBinding: () => binding,
-  };
-  return built;
+    acc,
+    inputSchema: options.inputSchema,
+    outputSchema: options.outputSchema,
+  });
 }
