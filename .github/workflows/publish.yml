@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RELEASE_SHA: ${{ inputs.commit }}
+      # ubuntu-latest ships Google Chrome for the release starter smoke.
+      NYLORUN_CHROME_PATH: /usr/bin/google-chrome
     steps:
       - name: Validate commit input
         shell: bash
@@ -37,7 +39,6 @@ jobs:
       # Studio build (via setup) runs pack-ui → dist/bundle.tar + dist/ui-digest.json
       # before check-package / npm pack (Wave 2; deploy-studio is Wave 3 after H1/H2).
       - run: npm run check -- --built
-      - run: npx playwright-core install --with-deps chromium
       - run: npm run release:check -- --built
       - uses: actions/upload-artifact@v7.0.1
         with:

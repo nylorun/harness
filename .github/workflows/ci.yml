@@ -9,14 +9,13 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  # Full suite on the pinned toolchain. Includes test:tooling, i.e. the Linux
+  # leg of the desktop-contract and supervisor tests (see `desktop`).
   check:
     runs-on: ubuntu-latest
-    # Bound the job so a wedged runner cannot block the PR matrix indefinitely.
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
@@ -28,8 +27,28 @@ jobs:
       - run: npm run setup
       - run: npm run check -- --built
       - run: npm run check:stack -- --built
-      # Worker deployment belongs to the deferred hosting profile.
-      - run: npx playwright-core install --with-deps chromium
+  # End-to-end, in parallel with `check`: packed starter in a real browser,
+  # dev supervisor, clean-checkout setup, and the release combination.
+  smoke:
+    runs-on: ubuntu-latest
+    # Bound the job so a wedged runner cannot block the PR matrix indefinitely.
+    timeout-minutes: 45
+    env:
+      # ubuntu-latest ships Google Chrome; no Playwright browser download needed.
+      NYLORUN_CHROME_PATH: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # release-plan diff against the PR base
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/package-lock.json
+      - run: npm install --global npm@11.15.0
+      - run: npm run setup
       - name: Smoke starter
         # Healthy smoke is ~2–4 min; in-process deadline is 15m. Keep Actions
         # above that so the script can report its own abort reason.
@@ -42,20 +61,17 @@ jobs:
         timeout-minutes: 10
         run: npm run test:setup
       - name: Validate a proposed release
-        if: github.event_name != 'merge_group'
+        if: github.event_name == 'pull_request'
         # release:check is ~2–10 min when healthy; afdaee7 Validate wedged >50 min
         # with no log progress on a frozen runner (cancel was 403 for the bot).
         timeout-minutes: 20
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         shell: bash
         run: |
-          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
-            BASE_SHA=$(git rev-parse HEAD~1)
-          fi
-          git rev-parse --verify --quiet "$BASE_SHA^{commit}" > /dev/null
-          changed=$(git diff --name-only "$BASE_SHA" HEAD -- .release/plan.json)
-          if [[ -n "$changed" ]]; then
+          if ! git diff --quiet "$BASE_SHA" HEAD -- .release/plan.json; then
+            # check-example-assets needs the examples build that `check` makes.
+            npm run build --prefix examples
             npm run release:check -- --built
           fi
   # WS-H packed-package acceptance (H1–H9) under a temporary Host root.
@@ -94,13 +110,10 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             examples/package-lock.json
-      - run: npm install --global npm@11.15.0
+      # Bundled npm is enough: these tests only run npm ci and npm install.
       - run: npm ci
-      - run: npm run build --workspace @nylorun/core
-      - run: npm run build --workspace @nylorun/harness
-      - run: npm run build --workspace @nylorun/agents
-      - run: npm run build --workspace @nylorun/admin
-      - run: npm run build --workspace @nylorun/runtime
+      # Workspaces run in flag order: keep dependency order.
+      - run: npm run build --workspace @nylorun/core --workspace @nylorun/harness --workspace @nylorun/agents --workspace @nylorun/admin --workspace @nylorun/runtime
       - name: Desktop contract
         run: node --test scripts/test/desktop-contract.test.mjs
       - name: Launcher unit tests
@@ -132,7 +145,7 @@ jobs:
       - run: npm run check --workspaces
   ci:
     if: always()
-    needs: [check, acceptance, desktop, consumers]
+    needs: [check, smoke, acceptance, desktop, consumers]
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI job to pass
