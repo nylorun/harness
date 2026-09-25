@@ -2,17 +2,24 @@ import {
   delegateOf,
   implementationsFor,
   isBuiltWorkflow,
+  isSandboxToolName,
   isToolError,
   normalizeToolDefinition,
   normalizedSchemasFor,
   runHookPoint,
+  SANDBOX_TOOL_NAMES,
+  type BoundToolDefinition,
   type BuiltAgent,
   type BuiltWorkflow,
   type JsonValue,
+  type SandboxToolName,
   type ToolExecutionContext,
   type WorkflowBinding,
 } from "@nylorun/core/define";
 import type { Action, ActionOutcome } from "@nylorun/core/contracts";
+import type { Transport } from "./http.js";
+import { segment } from "./http.js";
+
 class Suspend {
   constructor(readonly outcome: unknown) {}
 }
@@ -23,19 +30,90 @@ const object = (value: unknown): Record<string, any> =>
 
 export type ExecutableDefinition = BuiltAgent | BuiltWorkflow;
 
+/** Claim-scoped sandbox built-ins for executor actions (workflows.md §8 / SD §6.3). */
+export type ActionSandbox = {
+  readonly [K in SandboxToolName]: (
+    args: Record<string, unknown>,
+  ) => Promise<unknown>;
+};
+
+export type ExecuteActionOptions = {
+  readonly transport?: Transport;
+  readonly claimId?: string;
+  readonly generation?: number;
+  /**
+   * When false, omit `ctx.sandbox`. Defaults to true when claim credentials are
+   * present; L4 Runtime refuses tools when the session has no sandbox.
+   */
+  readonly sandbox?: boolean;
+};
+
+function claimSandboxOf(options: {
+  transport: Transport;
+  actionId: string;
+  claimId: string;
+  generation: number;
+}): ActionSandbox {
+  const call = (tool: SandboxToolName, args: Record<string, unknown>) =>
+    options.transport.json(
+      `/v1/actions/${segment(options.actionId)}/sandbox/${segment(tool)}`,
+      "POST",
+      {
+        claimId: options.claimId,
+        generation: options.generation,
+        ...args,
+      },
+    );
+  const sandbox = {} as Record<SandboxToolName, ActionSandbox[SandboxToolName]>;
+  for (const tool of SANDBOX_TOOL_NAMES) {
+    if (!isSandboxToolName(tool)) continue;
+    sandbox[tool] = (args) => call(tool, args);
+  }
+  return sandbox as ActionSandbox;
+}
+
+function sandboxFor(
+  action: Action,
+  options?: ExecuteActionOptions,
+): ActionSandbox | undefined {
+  if (options?.sandbox === false) return undefined;
+  if (
+    !options?.transport ||
+    !options.claimId ||
+    options.generation === undefined
+  )
+    return undefined;
+  return claimSandboxOf({
+    transport: options.transport,
+    actionId: action.actionId,
+    claimId: options.claimId,
+    generation: options.generation,
+  });
+}
+
 /** Executes code only after a host-issued claim. No engine dependency. */
 export async function executeAction(
   action: Action,
   root: ExecutableDefinition,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options?: ExecuteActionOptions,
 ): Promise<ActionOutcome> {
+  const sandbox = sandboxFor(action, options);
   if (action.kind === "fn" || action.kind === "verify") {
     if (!isBuiltWorkflow(root))
       throw new Error(`Action ${action.kind} requires a workflow definition`);
-    return executeWorkflowFn(action, root.getBinding(), signal);
+    return executeWorkflowFn(action, root.getBinding(), signal, sandbox);
   }
-  if (isBuiltWorkflow(root))
+  if (isBuiltWorkflow(root)) {
+    if (action.kind === "tool" && "key" in action && typeof action.key === "string")
+      return executeWorkflowTool(
+        action as Extract<Action, { kind: "tool" }> & { key: string },
+        root.getBinding(),
+        signal,
+        sandbox,
+      );
     throw new Error(`Unsupported action kind ${action.kind} on workflow`);
+  }
   // Work for an agent used as a tool runs that agent's code, served from the root's binding.
   const agent = action.agent ? delegatedAgent(root, action.agent.id) : root;
   const ref = action.agent ?? { id: root.id, path: root.id };
@@ -57,7 +135,48 @@ export async function executeAction(
   const raw = impl.tools?.[action.toolName];
   if (!raw) throw new Error("Missing tool implementation");
   const tool = normalizeToolDefinition(raw);
-  const schemas = normalizedSchemasFor(tool);
+  return runTool(action, tool, ref, signal, sandbox);
+}
+
+async function executeWorkflowTool(
+  action: Extract<Action, { kind: "tool" }> & { key: string },
+  binding: WorkflowBinding,
+  signal: AbortSignal,
+  sandbox: ActionSandbox | undefined,
+): Promise<ActionOutcome> {
+  const impl = binding.nodes[action.key];
+  if (!impl || impl.kind !== "tool")
+    throw new Error(`No tool implementation for key ${action.key}`);
+  const path =
+    "path" in action && typeof action.path === "string" ? action.path : action.key;
+  return runTool(
+    action,
+    impl.tool,
+    { id: action.agentId, path },
+    signal,
+    sandbox,
+  );
+}
+
+async function runTool(
+  action: Extract<Action, { kind: "tool" }>,
+  raw: BoundToolDefinition | Parameters<typeof normalizeToolDefinition>[0],
+  ref: { id: string; path: string; delegationId?: string },
+  signal: AbortSignal,
+  sandbox: ActionSandbox | undefined,
+): Promise<ActionOutcome> {
+  const tool =
+    "execute" in raw && typeof raw.execute === "function" && "inputSchema" in raw
+      ? (raw as BoundToolDefinition)
+      : normalizeToolDefinition(raw as Parameters<typeof normalizeToolDefinition>[0]);
+  const schemas =
+    "inputSchema" in tool && tool.inputSchema && "validate" in tool.inputSchema
+      ? {
+          inputSchema: tool.inputSchema,
+          outputSchema:
+            "outputSchema" in tool ? tool.outputSchema : undefined,
+        }
+      : normalizedSchemasFor(tool as Parameters<typeof normalizedSchemasFor>[0]);
   const input = schemas.inputSchema.validate(action.input);
   if (!input.ok)
     return {
@@ -107,7 +226,7 @@ export async function executeAction(
       },
     });
   };
-  const context: ToolExecutionContext = {
+  const context: ToolExecutionContext & { sandbox?: ActionSandbox } = {
     executionId: String(ctx.executionId ?? action.sessionId),
     turnId: String(ctx.turnId ?? action.turnId),
     stepId: String(ctx.stepId ?? ""),
@@ -119,6 +238,7 @@ export async function executeAction(
     session: { id: action.sessionId },
     agent: ref,
     ...(ctx.resume ? { resume: ctx.resume as any } : {}),
+    ...(sandbox ? { sandbox } : {}),
     state: {
       get: (key) => state[key],
       set: (key, value) => {
@@ -156,15 +276,19 @@ export async function executeAction(
   };
   try {
     signal.throwIfAborted();
-    if (tool.approval && !gateApproved) {
-      const approval = await tool.approval(input.value);
-      if (approval)
+    const approval =
+      "approval" in tool ? (tool as BoundToolDefinition).approval : undefined;
+    if (approval && !gateApproved) {
+      const result = await approval(input.value);
+      if (result)
         throw new Suspend({
           kind: "interaction-required",
           interaction: {
             kind: "approval",
             prompt:
-              typeof approval === "string" ? approval : `Approve ${tool.name}?`,
+              typeof result === "string"
+                ? result
+                : `Approve ${"name" in tool ? tool.name : "tool"}?`,
           },
           token: durableToken({ approvalGate: true }),
         });
@@ -172,7 +296,12 @@ export async function executeAction(
     }
     if (resume.kind === "approval" && resume.approved === false)
       return { value: { kind: "denied", reason: "Approval denied" } };
-    const value = await tool.execute!(input.value, context);
+    const execute =
+      "execute" in tool && typeof tool.execute === "function"
+        ? tool.execute
+        : undefined;
+    if (!execute) throw new Error("Missing tool implementation");
+    const value = await execute(input.value, context);
     const tagged = object(value);
     let outcome: any;
     if (
@@ -217,6 +346,7 @@ async function executeWorkflowFn(
   action: Extract<Action, { kind: "fn" | "verify" }>,
   binding: WorkflowBinding,
   signal: AbortSignal,
+  sandbox: ActionSandbox | undefined,
 ): Promise<ActionOutcome> {
   const impl = binding.nodes[action.key];
   if (!impl || impl.kind !== action.kind)
@@ -232,6 +362,7 @@ async function executeWorkflowFn(
               signal,
               info: action.context.info,
               session: { id: action.sessionId },
+              ...(sandbox ? { sandbox } : {}),
               step: async <T>(_name: string, fn: () => Promise<T> | T) => fn(),
               approve: async () => {
                 throw new Error("Approvals in verify are not available in the tracer");

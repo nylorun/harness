@@ -3,21 +3,61 @@ import type {
   BuiltAgent,
   BuiltWorkflow,
   JsonValue,
+  SandboxToolName,
   WorkflowManifest,
 } from "@nylorun/core/define";
-import { delegateOf, isBuiltWorkflow } from "@nylorun/core/define";
+import {
+  SANDBOX_TOOL_NAMES,
+  delegateOf,
+  isBuiltWorkflow,
+  isSandboxToolName,
+} from "@nylorun/core/define";
 import {
   LiveEventSchema,
   SessionItemsResponseSchema,
   type AcceptedResponse,
   type CredentialInfo,
   type CredentialSelection,
+  type LiveEvent,
   type SessionCommand,
   type VaultInfo,
 } from "@nylorun/core/contracts";
 import { resolveConnection } from "./connection.js";
 import { Transport, id, segment, type Destination } from "./http.js";
 import { observeSSE } from "./sse.js";
+
+/** Application-principal access to a session's sandbox built-ins (workflows.md §8). */
+export type SessionSandbox = {
+  readonly [K in SandboxToolName]: (
+    args: Record<string, unknown>,
+  ) => Promise<unknown>;
+};
+
+function sessionSandboxOf(transport: Transport, sessionId: string): SessionSandbox {
+  const call = (tool: SandboxToolName, args: Record<string, unknown>) =>
+    transport.json(
+      `/v1/sessions/${segment(sessionId)}/sandbox/${segment(tool)}`,
+      "POST",
+      args,
+    );
+  const sandbox = {} as Record<SandboxToolName, SessionSandbox[SandboxToolName]>;
+  for (const tool of SANDBOX_TOOL_NAMES) {
+    if (!isSandboxToolName(tool)) continue;
+    sandbox[tool] = (args) => call(tool, args);
+  }
+  return sandbox as SessionSandbox;
+}
+
+function linkedSessionId(event: LiveEvent): string | undefined {
+  if (event.type !== "node.agent") return undefined;
+  const payload = event.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return undefined;
+  const sessionId = (payload as { sessionId?: unknown }).sessionId;
+  return typeof sessionId === "string" && sessionId.length > 0
+    ? sessionId
+    : undefined;
+}
 export interface AgentSource {
   readonly id: string;
   readonly manifest: AgentManifest | WorkflowManifest;
@@ -63,6 +103,7 @@ export interface SessionView {
   ownerUserId: string;
   status: string;
   activeTurnId: string | null;
+  waits?: unknown;
   [key: string]: unknown;
 }
 export class AgentsClient {
@@ -126,6 +167,8 @@ export class AgentsClient {
     requestId?: string;
     vaultIds?: readonly string[];
     credentialSelections?: readonly CredentialSelection[];
+    /** Share another session's sandbox (public PutSession.sandbox). */
+    sandbox?: { session: string };
   }): Promise<SessionClient> {
     const sessionId = options.id ?? id();
     await this.transport.json(`/v1/sessions/${segment(sessionId)}`, "PUT", {
@@ -137,6 +180,7 @@ export class AgentsClient {
       ...(options.credentialSelections
         ? { credentialSelections: options.credentialSelections }
         : {}),
+      ...(options.sandbox ? { sandbox: options.sandbox } : {}),
     });
     return this.session(sessionId);
   }
@@ -270,7 +314,10 @@ export type CommandOptions = {
   signal?: AbortSignal;
 };
 export class SessionClient {
-  constructor(private readonly transport: Transport, readonly id: string) {}
+  readonly sandbox: SessionSandbox;
+  constructor(private readonly transport: Transport, readonly id: string) {
+    this.sandbox = sessionSandboxOf(transport, id);
+  }
   private get path() {
     return `/v1/sessions/${segment(this.id)}`;
   }
@@ -282,6 +329,11 @@ export class SessionClient {
       signal
     );
   }
+  /** Pending waits / interactions from the session inspect view. */
+  async pending(signal?: AbortSignal) {
+    const view = await this.inspect(signal);
+    return view.waits ?? [];
+  }
   command(command: SessionCommand, signal?: AbortSignal) {
     return this.transport.json<AcceptedResponse>(
       `${this.path}/commands`,
@@ -290,14 +342,20 @@ export class SessionClient {
       signal
     );
   }
-  input(content: string, options: CommandOptions) {
+  /**
+   * Start a turn. Strings become `message.content`; any other JSON value becomes
+   * `message.data` (workflows.md §5).
+   */
+  input(value: string | JsonValue, options: CommandOptions) {
+    const base = {
+      type: "message" as const,
+      requestId: options.requestId ?? id(),
+      idempotencyKey: options.idempotencyKey,
+    };
     return this.command(
-      {
-        type: "message",
-        content,
-        requestId: options.requestId ?? id(),
-        idempotencyKey: options.idempotencyKey,
-      },
+      typeof value === "string"
+        ? { ...base, content: value }
+        : { ...base, data: value },
       options.signal
     );
   }
@@ -353,14 +411,94 @@ export class SessionClient {
       )
     );
   }
-  async *observe(options: { cursor?: string; signal?: AbortSignal } = {}) {
+  async *observe(
+    options: { cursor?: string; signal?: AbortSignal; follow?: boolean } = {},
+  ) {
+    if (!options.follow) {
+      yield* this.observeOne(this.id, options);
+      return;
+    }
+    yield* this.observeFollowing(options);
+  }
+
+  private async *observeOne(
+    sessionId: string,
+    options: { cursor?: string; signal?: AbortSignal },
+  ) {
     for await (const frame of observeSSE(
       this.transport,
-      `${this.path}/events`,
-      options
+      `/v1/sessions/${segment(sessionId)}/events`,
+      options,
     )) {
       if (frame.event === "heartbeat" || frame.event === "ready") continue;
       yield LiveEventSchema.parse(JSON.parse(frame.data));
+    }
+  }
+
+  /**
+   * Own session stream plus linked agent sessions announced in `node.agent`
+   * events, merged by `createdAt` then arrival order (workflows.md §11).
+   */
+  private async *observeFollowing(options: {
+    cursor?: string;
+    signal?: AbortSignal;
+  }) {
+    const signal = options.signal;
+    const linked = new Set<string>();
+    const queue: LiveEvent[] = [];
+    let wait: (() => void) | undefined;
+    let open = 1;
+    let failed: unknown;
+
+    const wake = () => {
+      wait?.();
+      wait = undefined;
+    };
+    const push = (event: LiveEvent) => {
+      queue.push(event);
+      queue.sort((a, b) => {
+        const byTime = a.createdAt.localeCompare(b.createdAt);
+        return byTime !== 0 ? byTime : a.cursor.localeCompare(b.cursor);
+      });
+      wake();
+    };
+    const pump = async (
+      sessionId: string,
+      cursor?: string,
+    ): Promise<void> => {
+      try {
+        for await (const event of this.observeOne(sessionId, { cursor, signal })) {
+          push(event);
+          const link = linkedSessionId(event);
+          if (link && link !== this.id && !linked.has(link)) {
+            linked.add(link);
+            open += 1;
+            void pump(link).finally(() => {
+              open -= 1;
+              wake();
+            });
+          }
+        }
+      } catch (error) {
+        if (!signal?.aborted) failed = error;
+      }
+    };
+
+    void pump(this.id, options.cursor).finally(() => {
+      open -= 1;
+      wake();
+    });
+
+    while (!signal?.aborted) {
+      if (failed) throw failed;
+      if (queue.length) {
+        yield queue.shift()!;
+        continue;
+      }
+      if (open <= 0) return;
+      await new Promise<void>((resolve) => {
+        wait = resolve;
+      });
     }
   }
 }
