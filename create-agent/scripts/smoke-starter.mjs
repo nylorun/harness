@@ -73,7 +73,8 @@ function tokenFromLaunchUrl(launchUrl) {
 }
 
 function proxyOriginFromLaunchUrl(launchUrl) {
-  // Local: http://localhost:<port>/#…  Hosted: https://local.nylorun.studio/#…&port=
+  // Local: http://localhost:<port>/v/<version>/#…
+  // Hosted: https://local.nylorun.studio/#…&port=
   if (launchUrl.startsWith("https://local.nylorun.studio")) {
     const hashIndex = launchUrl.indexOf("#");
     const params = new URLSearchParams(launchUrl.slice(hashIndex + 1));

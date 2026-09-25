@@ -116,7 +116,12 @@ test("AC1: startStudio returns launchUrl; open uses it; default ui is hosted (I2
         ui: "local",
       });
       try {
-        assert.ok(local.launchUrl.startsWith(`${local.address}/#`));
+        assert.match(
+          local.launchUrl,
+          new RegExp(
+            `^${local.address.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/v/[^/#]+/#`,
+          ),
+        );
         const pairing = parsePairingFragment(
           local.launchUrl.slice(local.launchUrl.indexOf("#")),
         );
@@ -482,10 +487,18 @@ test("AC9: local mode serves dist/web and allows own origin", async () => {
           ui: "local",
         });
         try {
-          assert.ok(studio.launchUrl.startsWith(`${studio.address}/#`));
-          const page = await fetch(studio.address);
+          assert.match(studio.launchUrl, /\/v\/[^/#]+\/#/);
+          const uiPath = studio.launchUrl.slice(
+            0,
+            studio.launchUrl.indexOf("#"),
+          );
+          const page = await fetch(uiPath);
           assert.equal(page.status, 200);
           assert.match(await page.text(), /local-ui/);
+
+          const root = await fetch(studio.address, { redirect: "manual" });
+          assert.equal(root.status, 302);
+          assert.match(root.headers.get("location") ?? "", /\/v\/[^/]+\/$/);
 
           const token = tokenFromLaunch(studio.launchUrl);
           const origin = studio.address;

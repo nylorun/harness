@@ -452,10 +452,27 @@ export async function startStudio(
         reject(response, 405, "Studio only serves static assets.");
         return;
       }
+      // Vite builds with base `/v/<version>/` — serve cache under that prefix so
+      // index.html asset URLs and React Router basename resolve in local mode.
+      const uiPrefix = `/v/${PROXY_VERSION}`;
+      let assetPath = url.pathname;
+      if (assetPath === uiPrefix || assetPath.startsWith(`${uiPrefix}/`)) {
+        assetPath = assetPath.slice(uiPrefix.length) || "/";
+      } else if (assetPath === "/" || assetPath === "") {
+        response.writeHead(302, {
+          location: `${uiPrefix}/`,
+          "cache-control": "no-store",
+        });
+        response.end();
+        return;
+      } else {
+        reject(response, 404, "Studio asset not found.");
+        return;
+      }
       await serveLocalUi(
         response,
         request.method,
-        url.pathname,
+        assetPath,
         webRoot!,
         (status, message) => reject(response, status, message),
       );
@@ -474,8 +491,11 @@ export async function startStudio(
     port: bound.port,
     token,
   });
+  // Local launch must include `/v/<version>/` so the SPA + hashed assets load.
   const launchUrl =
-    ui === "hosted" ? `${HOSTED_ORIGIN}/${fragment}` : `${address}/${fragment}`;
+    ui === "hosted"
+      ? `${HOSTED_ORIGIN}/${fragment}`
+      : `${address}/v/${PROXY_VERSION}/${fragment}`;
   const host = Object.freeze({
     address,
     launchUrl,
