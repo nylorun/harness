@@ -14,12 +14,10 @@ import { prepareHostingSite } from "../scripts/prepare-hosting-site.mjs";
 
 const studioRoot = fileURLToPath(new URL("..", import.meta.url));
 
-test("prepareHostingSite builds /v/<version>/ and refuses overwrite (I12)", async () => {
+test("prepareHostingSite builds /v/<version>/, welcome root, and keeps I12 immutable", async () => {
   const web = join(studioRoot, "dist/web");
   const bundle = join(studioRoot, "dist/bundle.tar");
   const digestPath = join(studioRoot, "dist/ui-digest.json");
-  // Build artifacts must exist (npm test runs after build:server; check runs full build).
-  // For isolated test runs, skip if web is missing.
   try {
     readFileSync(join(web, "index.html"));
     readFileSync(bundle);
@@ -41,23 +39,36 @@ test("prepareHostingSite builds /v/<version>/ and refuses overwrite (I12)", asyn
     assert.equal(first.version, version);
     assert.ok(readFileSync(join(outDir, "v", version, "index.html")));
     assert.ok(readFileSync(join(outDir, "v", version, "bundle.tar")));
-    assert.ok(readFileSync(join(outDir, "index.html")));
+    const root = readFileSync(join(outDir, "index.html"), "utf8");
+    assert.match(root, /Nylorun Studio/);
+    assert.match(root, /welcome\.css/);
+    assert.match(root, /local network access/i);
+    assert.match(root, /target="_blank"/);
+    assert.doesNotMatch(root, /Hey\s*[—-]|welcome to/i);
+    assert.ok(readFileSync(join(outDir, "welcome.css")));
+    assert.ok(readFileSync(join(outDir, "welcome.js")));
     const manifest = JSON.parse(readFileSync(join(outDir, "versions.json"), "utf8"));
     assert.equal(manifest.latest, version);
     assert.equal(manifest.protocols["1"], version);
 
-    await assert.rejects(
-      () =>
-        prepareHostingSite({
-          version,
-          web,
-          bundle,
-          origin: "http://127.0.0.1:9",
-          outDir: join(outDir, "again"),
-          mirror: outDir,
-        }),
-      /Refusing to overwrite/,
+    // Second prepare with mirror: I12 keeps /v/<version>/, still refreshes root.
+    const againDir = join(outDir, "again");
+    const priorRoot = "do-not-clobber-version-html";
+    mkdirSync(join(outDir, "v", version), { recursive: true });
+    // Mirror already has version from first; prepare into againDir with mirror=outDir.
+    await prepareHostingSite({
+      version,
+      web,
+      bundle,
+      origin: "http://127.0.0.1:9",
+      outDir: againDir,
+      mirror: outDir,
+    });
+    assert.match(
+      readFileSync(join(againDir, "index.html"), "utf8"),
+      /Nylorun Studio/,
     );
+    assert.ok(readFileSync(join(againDir, "v", version, "index.html")));
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }
