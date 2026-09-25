@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 import "./runtime/baseline.js";
-import { ConfigurationCancelled, configureProvider, fetchModelCatalog } from "./model/configure.js";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import {
+  ConfigurationCancelled,
+  configureProvider,
+  fetchModelCatalog,
+} from "./model/configure.js";
 import { putHostModel } from "./model/host-model.js";
-import { develop, developmentPreflight } from "./dev.js";
+import { develop, developmentPreflight, startStudio } from "./dev.js";
 import { CliError } from "./errors.js";
 import { runtimeCommand, runtimeUsage } from "./runtime/commands.js";
 import { findProjectRoot, requireProjectRoot } from "./project/root.js";
@@ -10,12 +16,14 @@ import { printLinkedEnvExports } from "./project/attach.js";
 import { readLink as readProjectLink } from "./project/link.js";
 import { readCredentials as readProjectCredentials } from "./project/credentials.js";
 import { tenantCommand } from "./tenant/commands.js";
+import { resolveHome } from "./runtime/launcher.js";
 
-const usage = `nylorun <runtime|up|down|logs|dev|configure|doctor|tenant>
+const usage = `nylorun <runtime|up|down|logs|dev|studio|configure|doctor|tenant>
 
 ${runtimeUsage}
 
-  dev [entry] [--ephemeral]
+  dev [entry] [--ephemeral] [--local-ui] [--no-studio] [--no-open]
+  studio [--local-ui] [--port <n>] [--no-open]
   configure
   doctor sandbox [--json]  show which sandbox backend this Tenant's Host offers
   tenant current|list [--json]|use <name-or-id>|status [--json]|reset|delete`;
@@ -65,6 +73,15 @@ function parseFlags(
 }
 
 const usageError = (message: string) => new CliError(message, 2);
+
+function parsePort(value: string | undefined): number {
+  if (value === undefined || !/^\d+$/u.test(value))
+    throw usageError(`Invalid --port: ${value ?? "(missing)"}`);
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535)
+    throw usageError(`Invalid --port: ${value}`);
+  return port;
+}
 
 async function resolveLinkedAuth(projectRoot: string): Promise<{
   url: string;
@@ -130,9 +147,11 @@ async function main() {
 
   if (command === "dev") {
     const flags = parseFlags(args, {
-      booleans: ["--ephemeral"],
+      booleans: ["--ephemeral", "--local-ui", "--no-studio", "--no-open"],
     });
     if (flags.rest.length > 1) throw usageError(usage);
+    if (flags.booleans.has("--local-ui") && flags.booleans.has("--no-studio"))
+      throw usageError("--local-ui cannot be combined with --no-studio.");
     requireProjectRoot();
     developmentPreflight([
       ...flags.rest,
@@ -145,12 +164,53 @@ async function main() {
     return;
   }
 
-  if (command === "serve" || command === "studio") {
+  if (command === "serve") {
     throw usageError(
-      command === "serve"
-        ? "nylorun serve was removed. Use nylorun dev [entry] in development, or node dist/src/main.js with NYLORUN_RUNTIME_URL, NYLORUN_TENANT and NYLORUN_SERVER_KEY."
-        : "nylorun studio was removed. Run nylorun-studio (npm run studio) instead.",
+      "nylorun serve was removed. Use nylorun dev [entry] in development, or node dist/src/main.js with NYLORUN_RUNTIME_URL, NYLORUN_TENANT and NYLORUN_SERVER_KEY.",
     );
+  }
+
+  if (command === "studio") {
+    const flags = parseFlags(args, {
+      booleans: ["--local-ui", "--no-open"],
+      values: ["--port"],
+    });
+    if (flags.rest.length) throw usageError(usage);
+    const projectRoot = findProjectRoot() ?? process.cwd();
+    // Surface missing Studio early with the same Install message as preflight.
+    try {
+      createRequire(join(projectRoot, "package.json")).resolve("@nylorun/studio");
+    } catch {
+      throw new Error("Install @nylorun/studio to use the Studio dashboard.");
+    }
+    const auth = await resolveLinkedAuth(projectRoot);
+    const localUi = flags.booleans.has("--local-ui");
+    // Until I2 the startStudio default is still "local". After I2, omit ui for
+    // hosted default; `--local-ui` always forces local + cacheDir.
+    const dashboard = await startStudio({
+      runtimeUrl: auth.url,
+      serverKey: auth.key,
+      tenant: { id: auth.tenantId, name: auth.tenantName },
+      open: !flags.booleans.has("--no-open"),
+      localUi,
+      cacheDir: resolveHome(),
+      projectRoot,
+      ...(flags.values.has("--port")
+        ? { port: parsePort(flags.values.get("--port")) }
+        : {}),
+    });
+    console.log(`Studio        ${dashboard.launchUrl}`);
+    // Hosted tip: when explicitly not local-ui and startStudio default flips (I2),
+    // or when the returned URL is the hosted origin.
+    if (!localUi && dashboard.launchUrl.startsWith("https://local.nylorun.studio")) {
+      console.log(`Safari or offline: nylorun studio --local-ui`);
+    }
+    await new Promise<void>((resolve, reject) => {
+      const close = () => void dashboard.close().then(resolve, reject);
+      process.once("SIGINT", close);
+      process.once("SIGTERM", close);
+    });
+    return;
   }
 
   if (command === "configure") {
