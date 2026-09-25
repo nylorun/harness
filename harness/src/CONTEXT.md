@@ -11,8 +11,9 @@ Its canonical hash identifies the definition used by an execution.
 **Binding**: The local pairing of a manifest with ordered declarations, executable
 tool snapshots, hooks and live schema validators. Functions in a binding stay local.
 
-**Loop**: The progression from model calls through tool outcomes to a final result
-or a durable wait. A supplied checkpoint is not mutated by a new invocation.
+**Turn loop**: The progression from model calls through tool outcomes to a final
+result or a durable wait. A supplied checkpoint is not mutated by a new invocation.
+(The workflow primitive named **Loop** is separate; see below.)
 
 **Step**: One model call together with its middleware, hooks and tool plan.
 
@@ -29,3 +30,44 @@ _Avoid_: Runtime, when referring to customer code execution.
 
 **SDK client**: The shared application interface for communicating with a host.
 Authoring and executor capabilities accompany it in the agents SDK.
+
+## Flow (workflows)
+
+**Flow engine**: Interprets a workflow manifest (`harness/src/flow/`). It returns
+effects only — no model, provider, sandbox, or storage calls. The Runtime journals
+and dispatches them the same way as the turn loop's effects.
+
+**Workflow**: A registered runnable (`kind: "workflow"`) built by nesting primitives.
+It uses the same session API as an agent (`createSession`, `input`, `observe`,
+`approve`, `cancel`).
+
+**Chain**: Steps in order. Each step's output is the next step's input unless a
+slot reshapes it.
+
+**Switch**: Runs the one case whose key a pure `on` function computes from the input.
+
+**Parallel**: Runs a fixed set of named branches at the same time on the same input.
+Output is an object keyed by branch name.
+
+**Map**: Runs one child per item of a list from pure `over(input)`. Output is an
+array in item order.
+
+**Loop**: Workflow primitive: run → verify → decide, repeating until decide returns
+an output. Distinct from the **Turn loop** above.
+
+**Slot**: `{ run, id?, input? }` — the only way to rename a child or reshape data
+between nodes.
+
+**Path**: Address of a node in the tree (`parent/child`; Map items append `[index]`).
+
+**Key**: The path without Map indices. The executor routes `tool`, `fn`, and
+`verify` actions by `(workflowId, key)`.
+
+**Iteration vector**: Enclosing Loop iteration numbers, outermost first. Not part
+of the path.
+
+**Verdict**: Loop verify outcome: `{ pass: true }` or `{ pass: false, feedback }`,
+each with optional `data`.
+
+**Turn manifest**: Optional `message.manifest` for one agent turn. Must be a
+validated variant of the session's pinned manifest; it does not latch.

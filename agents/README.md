@@ -187,6 +187,89 @@ The tool is named after the agent's `id` and takes `{ task: string }`; the agent
 
 Delegate when the parent should keep the answer. When a specialist should own the rest of the conversation, switch capabilities with a `before("step")` patch instead. This version is one level deep and non-interactive: a delegated agent cannot use agents as tools, its tools cannot declare `approval` (keep those on the parent), and `ctx.ask`, `ctx.approve`, `ctx.sleep` or `ctx.waitFor` inside it fail with `delegation.interaction-unsupported`. Delegation is not an approval boundary; approvals live on tools.
 
+## Workflows
+
+Nest `Chain`, `Switch`, `Parallel`, `Map`, and `Loop` around agents and `tool()` to
+build durable flows. A workflow is a definition with `kind: "workflow"`: register
+it in `export const agents` (or `saveAgent(workflow)` — referenced agents are
+saved first), then `createSession({ agentId })` and `session.input(value)` like
+any agent. `input` sends string values as `content` and other JSON as `data`.
+`connectAgents({ agents: [workflow] })` saves the tree and connects executors for
+the workflow id and every referenced agent. Tool nodes, pure functions (slot
+`input`, Switch `on`, Map `over`, Loop `decide`), and Loop `verify` run as Actions
+routed by `(workflowId, key)`.
+
+```ts
+import { Agent, Chain, Loop, Map, tool } from "@nylorun/agents";
+import { z } from "zod";
+
+const planner = Agent({
+  id: "planner",
+  instructions: "Return { tasks: string[] }.",
+  outputSchema: z.object({ tasks: z.array(z.string()) }),
+}).build();
+
+const coder = Agent({
+  id: "coder",
+  instructions: "Implement one task. Return { summary }.",
+  outputSchema: z.object({ summary: z.string() }),
+}).build();
+
+const openPr = tool({
+  name: "open-pr",
+  input: z.object({ summaries: z.array(z.string()) }),
+  async run({ summaries }, ctx) {
+    if (!(await ctx.approve("Open the PR?"))) throw new Error("Rejected");
+    return { opened: true, count: summaries.length };
+  },
+});
+
+export const shipFeature = Chain({
+  id: "ship-feature",
+  steps: [
+    planner,
+    Map({
+      id: "implement",
+      over: (plan) => plan.tasks,
+      each: Loop({
+        id: "code",
+        run: coder,
+        verify: () => ({ pass: true }),
+        decide: ({ output }) => ({ output }),
+      }),
+    }),
+    {
+      run: openPr,
+      input: ({ value }) => ({
+        summaries: value.map((item: { summary: string }) => item.summary),
+      }),
+    },
+  ],
+});
+
+export const agents = [shipFeature];
+```
+
+| Primitive | Role |
+| --- | --- |
+| **Chain** | Steps in order; slots reshape with `{ run, id?, input? }` |
+| **Switch** | Pure `on(input) → key`, then the matching case (or `default`) |
+| **Parallel** | Fixed named branches at once; output is an object |
+| **Map** | Pure `over(input) → items`, one child per item; output is an array |
+| **Loop** | `run` → `verify` → `decide` until `{ output }` |
+
+Agents inside a workflow keep their own sessions (linked from the workflow
+session) and share one sandbox: declare identical specs on every agent that
+uses one, attach with `createSession({ …, sandbox: { session } })`, call
+built-ins via `session.sandbox` (application) or `ctx.sandbox` (executor).
+Observe with `session.observe({ follow: true })` to merge linked agent streams;
+`pending()` lists waits across the tree. Studio renders the manifest tree and
+live node status. Source examples:
+`examples/agents/{chain,switch,parallel,map,loop,ship-feature}/` (outside the
+default release registry). Host contract:
+[HOST_CONTRACT.md](../harness/HOST_CONTRACT.md). Vocabulary (turn loop vs
+workflow Loop): [harness/src/CONTEXT.md](../harness/src/CONTEXT.md).
+
 Use `session.observe({ cursor, signal })` for resumable canonical events, `session.inspect()` for waiting/uncertain state, and `approve`, `respond`, or `cancel` with an explicit stable idempotency key. Retry the same semantic command with the same key. `ownerUserId` must come from trusted server authentication. Application credentials are not browser credentials; browser applications need an authorized backend. Definition authoring is browser-bundleable.
 
 Connection defaults follow `resolveConnection` (options → environment → Project
