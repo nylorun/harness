@@ -217,7 +217,11 @@ function connectExecutorMode(
           report(error);
         }
       });
-      const outcome = await executeAction(claim.action, agent, work.signal);
+      const outcome = await executeAction(claim.action, agent, work.signal, {
+        transport,
+        claimId: claim.claimId,
+        generation: claim.generation,
+      });
       work.signal.throwIfAborted();
       const command = {
         type: "action_result",
