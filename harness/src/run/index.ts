@@ -76,5 +76,5 @@ export type {
   DurableResult,
 } from "./durable.js";
 export type { FlowCheckpoint } from "../flow/checkpoint.js";
-export type { FlowDurableResult, FlowRunResult } from "../flow/loop.js";
+export type { FlowDurableResult, FlowRunResult } from "../flow/types.js";
 export type { ModelAdapter, ModelCandidate, ModelCall, ModelRequest } from "@nylorun/core/define";
