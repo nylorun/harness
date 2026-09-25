@@ -28,6 +28,10 @@ import {
 } from "./http.js";
 import { readSSE } from "./sse.js";
 import { executeAction, type ExecutableDefinition } from "./execute-action.js";
+import {
+  createActionSandbox,
+  definitionDeclaresSandbox,
+} from "./sandbox/client.js";
 
 export interface ConnectOptions {
   agents: readonly (AgentSource | BuiltWorkflow)[];
@@ -217,7 +221,17 @@ function connectExecutorMode(
           report(error);
         }
       });
-      const outcome = await executeAction(claim.action, agent, work.signal);
+      const outcome = await executeAction(claim.action, agent, work.signal, {
+        sandbox: definitionDeclaresSandbox(agent.manifest)
+          ? createActionSandbox({
+              transport,
+              actionId: action.actionId,
+              claimId: claim.claimId,
+              generation: claim.generation,
+              signal: work.signal,
+            })
+          : undefined,
+      });
       work.signal.throwIfAborted();
       const command = {
         type: "action_result",

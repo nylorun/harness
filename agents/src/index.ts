@@ -100,4 +100,12 @@ export type {
   SandboxCapability,
   SandboxCapabilityOptions,
   SandboxOptions,
+  ActionSandbox,
+  ActionSandboxToolResult,
+  CreateActionSandboxOptions,
+} from "./sandbox/index.js";
+export {
+  createActionSandbox,
+  definitionDeclaresSandbox,
+  isActionSandboxTool,
 } from "./sandbox/index.js";

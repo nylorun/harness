@@ -90,6 +90,16 @@ import { McpPool, serversOf } from "../mcp/pool.js";
 import { SandboxManager, sandboxCapabilityOf } from "../sandbox/manager.js";
 import { defaultSandboxBackends } from "../sandbox/select.js";
 import type { SandboxBackend } from "../sandbox/types.js";
+import {
+  owningSandboxSessionId,
+  sandboxSpecOf,
+} from "../sandbox/share.js";
+import {
+  SandboxRouteError,
+  handleActionSandboxTool,
+  handleSessionSandboxTool,
+  validateSandboxAttach,
+} from "../core/sandbox-routes.js";
 import type {
   McpDiagnostic,
   McpSnapshot,
@@ -138,6 +148,8 @@ interface Session {
   pluginRoots?: Readonly<Record<string, string>>;
   mcpSnapshot?: McpSnapshot;
   mcpDiagnostics?: readonly McpDiagnostic[];
+  /** Session id that keys the shared sandbox; absent means this session owns it. */
+  sandboxOwnerId?: string;
 }
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -147,6 +159,14 @@ class HttpError extends Error {
 const fail = (status: number, message: string): never => {
   throw new HttpError(status, message);
 };
+/** AbortSignal tied to the HTTP request being closed by the client. */
+function requestAborted(request: IncomingMessage): AbortSignal {
+  const controller = new AbortController();
+  request.on("close", () => {
+    if (!request.complete) controller.abort();
+  });
+  return controller.signal;
+}
 class OpaqueAuthError extends Error {
   readonly status = 404;
   readonly body = OPAQUE_NOT_FOUND;
@@ -1118,6 +1138,12 @@ export class TenantRuntime implements TenantHandle {
       const definition =
         this.store.get("definitions", body.agentId) ??
         fail(404, "Definition not found");
+      const sandboxOwnerId =
+        sandboxSpecOf(workflow.manifest) || workflow.sandboxOwnerId
+          ? owningSandboxSessionId(workflow, (sid) =>
+              this.store.get<Session>("sessions", sid)
+            )
+          : undefined;
       const created: Session = {
         id: agentSessionId,
         agentId: body.agentId,
@@ -1131,10 +1157,14 @@ export class TenantRuntime implements TenantHandle {
           requestId: `flow-put-${request.effectId}`,
           agentId: body.agentId,
           ownerUserId: workflow.ownerUserId,
+          ...(sandboxOwnerId
+            ? { sandbox: { session: sandboxOwnerId } }
+            : {}),
         },
         vaultIds: workflow.vaultIds,
         credentialSelections: workflow.credentialSelections,
         pluginRoots: definition.pluginRoots ?? {},
+        ...(sandboxOwnerId ? { sandboxOwnerId } : {}),
       };
       this.store.tx(() => this.store.put("sessions", agentSessionId, created));
     }
@@ -1227,6 +1257,14 @@ export class TenantRuntime implements TenantHandle {
   private requireApplication(scope: AuthScope): string {
     if (scope.kind === "application") return scope.principalId;
     return fail(403, "Application credential required");
+  }
+  private sandboxRouteDeps() {
+    return {
+      sandbox: this.sandbox,
+      session: (id: string) => this.session(id),
+      lookup: (id: string) => this.store.get<Session>("sessions", id),
+      getAction: (id: string) => this.store.get<Action>("actions", id),
+    };
   }
   private async body(request: IncomingMessage): Promise<unknown> {
     let data = "";
@@ -1569,6 +1607,31 @@ export class TenantRuntime implements TenantHandle {
           });
         const actionId = path[2];
         if (!actionId) fail(404, "Action not found");
+        if (
+          method === "POST" &&
+          path[3] === "sandbox" &&
+          path[4] &&
+          path.length === 5
+        ) {
+          const action =
+            this.store.get<Action>("actions", actionId) ??
+            fail(404, "Action not found");
+          this.scoped(scope, action);
+          try {
+            const outcome = await handleActionSandboxTool(
+              this.sandboxRouteDeps(),
+              actionId,
+              path[4],
+              await this.body(request),
+              requestAborted(request)
+            );
+            return json(outcome);
+          } catch (error) {
+            if (error instanceof SandboxRouteError)
+              fail(error.status, error.message);
+            throw error;
+          }
+        }
         const body = await this.body(request);
         let event: LiveEvent | undefined;
         const result = this.store.tx(() => {
@@ -1823,47 +1886,65 @@ export class TenantRuntime implements TenantHandle {
           const body = PutSessionRequestSchema.parse(await this.body(request));
           const vaultIds = body.vaultIds ?? [];
           const credentialSelections = body.credentialSelections ?? [];
+          const prior = this.store.get<Session>("sessions", id);
+          const definition =
+            prior === undefined || body.sandbox
+              ? this.store.get<{
+                  manifest: unknown;
+                  manifestHash: string;
+                  implementationVersion: string;
+                  pluginRoots?: Record<string, string>;
+                }>("definitions", body.agentId) ??
+                fail(404, "Definition not found")
+              : undefined;
+          const sandboxOwnerId = body.sandbox
+            ? validateSandboxAttach(
+                body,
+                (definition ?? prior)!.manifest as never,
+                (sid) => this.store.get<Session>("sessions", sid)
+              )
+            : undefined;
           const result = this.store.tx(() => {
             this.vault.assertAttachment(
               body.ownerUserId,
               vaultIds,
               credentialSelections
             );
-            const prior = this.store.get<Session>("sessions", id);
-            if (prior) {
-              if (sessionIdentity(prior.creation) !== sessionIdentity(body))
+            const existing = this.store.get<Session>("sessions", id);
+            if (existing) {
+              if (sessionIdentity(existing.creation) !== sessionIdentity(body))
                 fail(
                   409,
                   "Session already exists with different creation parameters"
                 );
-              prior.vaultIds = vaultIds;
-              prior.credentialSelections = credentialSelections;
-              prior.creation = body;
-              this.store.put("sessions", id, prior);
+              existing.vaultIds = vaultIds;
+              existing.credentialSelections = credentialSelections;
+              existing.creation = body;
+              if (sandboxOwnerId !== undefined)
+                existing.sandboxOwnerId = sandboxOwnerId;
+              this.store.put("sessions", id, existing);
               this.vault.recordAttachment(id, vaultIds);
-              return prior;
+              return existing;
             }
-            const definition =
-              this.store.get("definitions", body.agentId) ??
-              fail(404, "Definition not found");
-            const s: Session = {
+            const created: Session = {
               id,
               agentId: body.agentId,
               ownerUserId: body.ownerUserId,
-              manifest: definition.manifest,
-              manifestHash: definition.manifestHash,
-              implementationVersion: definition.implementationVersion,
+              manifest: definition!.manifest,
+              manifestHash: definition!.manifestHash,
+              implementationVersion: definition!.implementationVersion,
               info: body.info,
               status: "idle",
               activeTurnId: null,
               creation: body,
               vaultIds,
               credentialSelections,
-              pluginRoots: definition.pluginRoots ?? {},
+              pluginRoots: definition!.pluginRoots ?? {},
+              ...(sandboxOwnerId !== undefined ? { sandboxOwnerId } : {}),
             };
-            this.store.put("sessions", id, s);
+            this.store.put("sessions", id, created);
             this.vault.recordAttachment(id, vaultIds);
-            return s;
+            return created;
           });
           return json(this.view(result));
         }
@@ -1896,6 +1977,28 @@ export class TenantRuntime implements TenantHandle {
             );
           return;
         }
+        if (
+          method === "POST" &&
+          path[3] === "sandbox" &&
+          path[4] &&
+          path.length === 5
+        ) {
+          this.requireApplication(scope);
+          try {
+            const outcome = await handleSessionSandboxTool(
+              this.sandboxRouteDeps(),
+              id,
+              path[4],
+              await this.body(request),
+              requestAborted(request)
+            );
+            return json(outcome);
+          } catch (error) {
+            if (error instanceof SandboxRouteError)
+              fail(error.status, error.message);
+            throw error;
+          }
+        }
       }
       fail(404, "Route not found");
     } catch (error) {
@@ -1908,7 +2011,9 @@ export class TenantRuntime implements TenantHandle {
         return;
       }
       const status =
-        error instanceof HttpError || error instanceof VaultError
+        error instanceof HttpError ||
+        error instanceof VaultError ||
+        error instanceof SandboxRouteError
           ? error.status
           : (error as any)?.name === "ZodError" ||
             (error as Error)?.message === "Invalid cursor"
@@ -1938,6 +2043,7 @@ export class TenantRuntime implements TenantHandle {
       activeTurnId: s.activeTurnId,
       vaultIds: s.vaultIds ?? [],
       credentialSelections: s.credentialSelections ?? [],
+      sandboxOwnerId: s.sandboxOwnerId ?? null,
       mcpSnapshot: s.mcpSnapshot ?? null,
       mcpDiagnostics: s.mcpDiagnostics ?? [],
       waits: Array.isArray(s.waits)
@@ -2042,8 +2148,11 @@ export class TenantRuntime implements TenantHandle {
     );
     if (!capability)
       throw new Error(`'${request.toolName ?? ""}' is not a sandbox tool`);
+    const ownerId = owningSandboxSessionId(s, (id) =>
+      this.store.get<Session>("sessions", id)
+    );
     return this.sandbox.run(
-      { id: s.id, activeTurnId: s.activeTurnId, manifest: s.manifest },
+      { id: ownerId, activeTurnId: s.activeTurnId, manifest: s.manifest },
       capability,
       request.toolName as never,
       request.input,

@@ -13,6 +13,7 @@ import {
   type WorkflowBinding,
 } from "@nylorun/core/define";
 import type { Action, ActionOutcome } from "@nylorun/core/contracts";
+import type { ActionSandbox } from "./sandbox/client.js";
 class Suspend {
   constructor(readonly outcome: unknown) {}
 }
@@ -23,16 +24,27 @@ const object = (value: unknown): Record<string, any> =>
 
 export type ExecutableDefinition = BuiltAgent | BuiltWorkflow;
 
+export type ExecuteActionOptions = {
+  /** Claim-scoped sandbox client; omitted when the session has no sandbox. */
+  readonly sandbox?: ActionSandbox;
+};
+
 /** Executes code only after a host-issued claim. No engine dependency. */
 export async function executeAction(
   action: Action,
   root: ExecutableDefinition,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options: ExecuteActionOptions = {}
 ): Promise<ActionOutcome> {
   if (action.kind === "fn" || action.kind === "verify") {
     if (!isBuiltWorkflow(root))
       throw new Error(`Action ${action.kind} requires a workflow definition`);
-    return executeWorkflowFn(action, root.getBinding(), signal);
+    return executeWorkflowFn(
+      action,
+      root.getBinding(),
+      signal,
+      options.sandbox
+    );
   }
   if (isBuiltWorkflow(root))
     throw new Error(`Unsupported action kind ${action.kind} on workflow`);
@@ -107,7 +119,7 @@ export async function executeAction(
       },
     });
   };
-  const context: ToolExecutionContext = {
+  const context: ToolExecutionContext & { sandbox?: ActionSandbox } = {
     executionId: String(ctx.executionId ?? action.sessionId),
     turnId: String(ctx.turnId ?? action.turnId),
     stepId: String(ctx.stepId ?? ""),
@@ -119,6 +131,7 @@ export async function executeAction(
     session: { id: action.sessionId },
     agent: ref,
     ...(ctx.resume ? { resume: ctx.resume as any } : {}),
+    ...(options.sandbox ? { sandbox: options.sandbox } : {}),
     state: {
       get: (key) => state[key],
       set: (key, value) => {
@@ -217,32 +230,31 @@ async function executeWorkflowFn(
   action: Extract<Action, { kind: "fn" | "verify" }>,
   binding: WorkflowBinding,
   signal: AbortSignal,
+  sandbox: ActionSandbox | undefined
 ): Promise<ActionOutcome> {
   const impl = binding.nodes[action.key];
   if (!impl || impl.kind !== action.kind)
     throw new Error(`No ${action.kind} implementation for key ${action.key}`);
   signal.throwIfAborted();
   try {
-    // Verify may receive a tool-like context later (L3/L4); tracer passes input only.
-    const value =
-      action.kind === "verify"
-        ? await (impl.fn as (args: unknown, ctx?: unknown) => unknown)(
-            action.input,
-            {
-              signal,
-              info: action.context.info,
-              session: { id: action.sessionId },
-              step: async <T>(_name: string, fn: () => Promise<T> | T) => fn(),
-              approve: async () => {
-                throw new Error("Approvals in verify are not available in the tracer");
-              },
-              ask: async () => {
-                throw new Error("ask in verify is not available in the tracer");
-              },
-              progress() {},
-            },
-          )
-        : await (impl.fn as (args: unknown) => unknown)(action.input);
+    const ctx = {
+      signal,
+      info: action.context.info,
+      session: { id: action.sessionId },
+      ...(sandbox ? { sandbox } : {}),
+      step: async <T>(_name: string, fn: () => Promise<T> | T) => fn(),
+      approve: async () => {
+        throw new Error("Approvals in verify are not available in the tracer");
+      },
+      ask: async () => {
+        throw new Error("ask in verify is not available in the tracer");
+      },
+      progress() {},
+    };
+    const value = await (impl.fn as (args: unknown, ctx?: unknown) => unknown)(
+      action.input,
+      ctx
+    );
     return { value };
   } catch (error) {
     if (signal.aborted) throw signal.reason;
