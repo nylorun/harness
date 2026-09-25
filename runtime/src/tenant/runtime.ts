@@ -37,6 +37,7 @@ import {
   createFlowCheckpoint,
   runDurable,
   runFlowDurable,
+  agentTurnValue,
   type DurableCheckpoint,
   type DurableSessionTool,
   type FlowCheckpoint,
@@ -50,6 +51,12 @@ import {
   reconcilePendingAgentEffects,
   wakeLinkedWorkflow,
 } from "../core/flow-host.js";
+import {
+  allowedManifestHashes,
+  rebaseTurnState,
+  resolveMessageManifest,
+  type TurnManifestStore,
+} from "../core/turn-manifest.js";
 import { hashManifest } from "@nylorun/core/compatibility";
 import {
   delegateManifest,
@@ -119,8 +126,11 @@ interface Session {
   id: string;
   agentId: string;
   ownerUserId: string;
+  /** Session pin — the manifest the session was created with. */
   manifest: any;
   manifestHash: string;
+  /** Validated turn-manifest variants, keyed by hash (loops.md §4.2). */
+  variants?: Record<string, AgentManifest>;
   implementationVersion: string;
   info?: any;
   status: string;
@@ -174,6 +184,50 @@ function sessionToolsOf(
       ? {}
       : { outputSchema: tool.outputSchema }),
   }));
+}
+
+/** Turn-manifest store backed by the session's `variants` map (no schema change). */
+function variantStore(session: Session): TurnManifestStore {
+  return {
+    get(hash) {
+      return session.variants?.[hash];
+    },
+    put(hash, manifest) {
+      session.variants = { ...(session.variants ?? {}), [hash]: manifest };
+    },
+  };
+}
+
+/** Manifest this turn's checkpoint is pinned to (session pin or a stored variant). */
+function turnManifestOf(session: Session): AgentManifest {
+  const hash = session.checkpoint?.manifestHash;
+  if (!hash || hash === session.manifestHash) return session.manifest;
+  return session.variants?.[hash] ?? session.manifest;
+}
+
+/** Wrap a linked agent turn so the Loop learns the turn's manifest (SD-I4 pin stays on session). */
+function linkedAgentOutput(
+  session: Session,
+  output: JsonValue | undefined
+): JsonValue {
+  if (isWorkflowManifest(session.manifest)) return output ?? null;
+  return agentTurnValue(
+    output ?? null,
+    turnManifestOf(session)
+  ) as unknown as JsonValue;
+}
+
+function rebaseSessionState(session: Session, turnHash: string): void {
+  const allowed = allowedManifestHashes({
+    pinnedHash: session.manifestHash,
+    variantHashes: Object.keys(session.variants ?? {}),
+  });
+  const next = rebaseTurnState({
+    state: session.state,
+    turnManifestHash: turnHash,
+    isAllowedHash: (hash) => allowed.has(hash),
+  });
+  if (next !== session.state) session.state = next;
 }
 function mcpToolOf(
   session: Session,
@@ -640,6 +694,16 @@ export class TenantRuntime implements TenantHandle {
         resolveEffect: (e: HostEffect) =>
           this.resolveEffect(e, controller.signal),
       };
+      if (!isWorkflowManifest(current.manifest) && current.checkpoint) {
+        rebaseSessionState(current, current.checkpoint.manifestHash);
+        if (current.checkpoint && "state" in current.checkpoint) {
+          (current.checkpoint as DurableCheckpoint).state = current.state;
+        }
+        this.store.tx(() => this.store.put("sessions", id, current));
+      }
+      const turnManifest = isWorkflowManifest(current.manifest)
+        ? current.manifest
+        : turnManifestOf(current);
       const result = isWorkflowManifest(current.manifest)
         ? await runFlowDurable({
             manifest: current.manifest,
@@ -648,7 +712,7 @@ export class TenantRuntime implements TenantHandle {
             host,
           })
         : await runDurable({
-            manifest: current.manifest,
+            manifest: turnManifest,
             checkpoint: current.checkpoint as DurableCheckpoint,
             signal: controller.signal,
             sessionTools: sessionToolsOf(current.mcpSnapshot),
@@ -734,7 +798,10 @@ export class TenantRuntime implements TenantHandle {
               store: this.store,
               output:
                 event!.type === "turn.completed"
-                  ? (event!.payload as { output?: JsonValue }).output
+                  ? linkedAgentOutput(
+                      this.session(id),
+                      (event!.payload as { output?: JsonValue }).output
+                    )
                   : undefined,
               failed: event!.type === "turn.failed",
               error:
@@ -839,7 +906,9 @@ export class TenantRuntime implements TenantHandle {
           if (agentSessionId) {
             const agent = this.store.get<Session>("sessions", agentSessionId);
             if (agent?.status === "completed") {
-              const outcome = { value: agent.lastOutput ?? null };
+              const outcome = {
+                value: linkedAgentOutput(agent, agent.lastOutput ?? null),
+              };
               existing.status = "completed";
               existing.outcome = outcome;
               this.store.put("effects", request.effectId, existing);
@@ -1035,7 +1104,9 @@ export class TenantRuntime implements TenantHandle {
         if (agentSessionId) {
           const agent = this.store.get<Session>("sessions", agentSessionId);
           if (agent?.status === "completed") {
-            const outcome = { value: agent.lastOutput ?? null };
+            const outcome = {
+              value: linkedAgentOutput(agent, agent.lastOutput ?? null),
+            };
             this.store.tx(() => {
               existing.status = "completed";
               existing.outcome = outcome;
@@ -1093,6 +1164,7 @@ export class TenantRuntime implements TenantHandle {
       agentId: string;
       input: JsonValue;
       path: string;
+      manifest?: AgentManifest;
     };
     const path = body.path ?? request.path!;
     const workflow = this.session(request.sessionId);
@@ -1148,12 +1220,14 @@ export class TenantRuntime implements TenantHandle {
             content: messageInput,
             requestId: `flow-${request.effectId}`,
             idempotencyKey,
+            ...(body.manifest ? { manifest: body.manifest } : {}),
           }
         : {
             type: "message",
             data: messageInput,
             requestId: `flow-${request.effectId}`,
             idempotencyKey,
+            ...(body.manifest ? { manifest: body.manifest } : {}),
           };
     const accepted = this.command(agentSessionId, messageCommand, {
       kind: "application",
@@ -1163,12 +1237,14 @@ export class TenantRuntime implements TenantHandle {
     const events: LiveEvent[] = [];
     this.store.tx(() => {
       const s = this.session(request.sessionId);
+      const agentSession = this.session(agentSessionId);
       events.push(
         this.store.event(s.id, s.activeTurnId, "loop.iteration", {
           path: String(request.context.loopPath ?? path.split("/")[0]),
           n,
           sessionId: agentSessionId,
           turnId: accepted.turnId ?? undefined,
+          manifestHash: agentSession.checkpoint?.manifestHash,
         })
       );
       events.push(
@@ -1185,7 +1261,9 @@ export class TenantRuntime implements TenantHandle {
     // May already be settled if the agent was fast / replayed.
     const agent = this.session(agentSessionId);
     if (agent.status === "completed") {
-      const outcome = { value: agent.lastOutput ?? null };
+      const outcome = {
+        value: linkedAgentOutput(agent, agent.lastOutput ?? null),
+      };
       this.store.tx(() => {
         this.store.put("effects", request.effectId, {
           request,
@@ -1401,8 +1479,17 @@ export class TenantRuntime implements TenantHandle {
               input,
             });
           } else {
+            // Optional message.manifest: validate as variant, pin by hash, apply this turn only.
+            const resolved = resolveMessageManifest({
+              pinned: s.manifest,
+              pinnedHash: s.manifestHash,
+              messageManifest: command.manifest,
+              store: variantStore(s),
+            });
+            if (!resolved.ok) fail(400, resolved.message);
+            rebaseSessionState(s, resolved.hash);
             s.checkpoint = createDurableCheckpoint({
-              manifest: s.manifest,
+              manifest: resolved.manifest,
               sessionId: id,
               turnId: s.activeTurnId,
               input:
@@ -1447,7 +1534,7 @@ export class TenantRuntime implements TenantHandle {
               "Workflow sessions do not accept approve/respond on the root (tracer)"
             );
           s.checkpoint = createDurableCheckpoint({
-            manifest: s.manifest,
+            manifest: turnManifestOf(s),
             sessionId: id,
             turnId: s.activeTurnId!,
             input: input as any,

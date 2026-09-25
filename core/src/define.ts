@@ -186,6 +186,7 @@ export type {
   LoopDecideArgs,
   LoopDecision,
 } from "./definition/workflow/index.js";
+export { isVariantOf } from "./definition/variant.js";
 export type { Verdict, WorkflowBinding, WorkflowManifest } from "./types/workflow.js";
 export type {
   BoundMiddleware,
